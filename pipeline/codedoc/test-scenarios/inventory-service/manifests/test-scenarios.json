@@ -1,0 +1,256 @@
+{
+  "version": "1.0",
+  "repo_name": "inventory-service",
+  "generated_at": "2025-01-24T00:00:00Z",
+  "total_flows": 10,
+  "notes": {
+    "language": "Java 17",
+    "framework": "Spring Boot",
+    "messaging": "Apache Kafka",
+    "cache": "Redis",
+    "persistence": "Spring Data JPA",
+    "test_framework_recommendation": "JUnit 5 + Spring Boot Test (@SpringBootTest) + MockMvc + Testcontainers"
+  },
+  "scenarios": [
+    {
+      "file": "e2e-scenarios/00-overview.md",
+      "flow": "overview",
+      "entry_point": null,
+      "evidence": "Observed",
+      "description": "System under test overview, domain model, selected flows, cross-cutting concerns"
+    },
+    {
+      "file": "e2e-scenarios/01-record-movement.md",
+      "flow": "Record Inventory Movement",
+      "entry_point": "com.inventory.inventoryservice.controller.InventoryController.recordMovement(MovementRequest)",
+      "http_method": "POST",
+      "path": "/inventory/movements (inferred)",
+      "evidence": "Observed",
+      "services_involved": [
+        "MovementService.recordMovement",
+        "KafkaProducerService.sendMovementRecordedEvent"
+      ],
+      "repos_involved": [
+        "InventoryStateRepository.findBySkuAndLocationId",
+        "MovementLedgerRepository.save"
+      ],
+      "kafka_topics": ["MOVEMENT_RECORDED_TOPIC"],
+      "redis": false,
+      "transactional": true
+    },
+    {
+      "file": "e2e-scenarios/02-transfer-inventory.md",
+      "flow": "Transfer Inventory Between Locations",
+      "entry_point": "com.inventory.inventoryservice.controller.InventoryController.transferInventory(TransferRequest)",
+      "http_method": "POST",
+      "path": "/inventory/transfer (inferred)",
+      "evidence": "Observed",
+      "services_involved": [
+        "MovementService.executeTransfer",
+        "MovementService.recordMovement (×2)",
+        "KafkaProducerService.sendMovementRecordedEvent (×2)"
+      ],
+      "repos_involved": [
+        "InventoryStateRepository.findBySkuAndLocationId (×2)",
+        "MovementLedgerRepository.save (×2)"
+      ],
+      "kafka_topics": ["MOVEMENT_RECORDED_TOPIC"],
+      "redis": false,
+      "transactional": true
+    },
+    {
+      "file": "e2e-scenarios/03-create-reservation.md",
+      "flow": "Create Reservation (Soft Hold)",
+      "entry_point": "com.inventory.inventoryservice.controller.InventoryController.createReservation(ReservationCreateRequest)",
+      "http_method": "POST",
+      "path": "/inventory/reservations (inferred)",
+      "evidence": "Observed",
+      "services_involved": [
+        "ReservationService.createReservation",
+        "ReservationService.getStockComponentsFromDB",
+        "KafkaProducerService.sendReservationSoftHeldEvent"
+      ],
+      "repos_involved": [
+        "ReservationRepository.findByOrderId",
+        "InventoryStateRepository.findBySkuAndLocationId",
+        "ReservedAggRepository.findBySkuAndLocationId",
+        "SafetyStockPolicyRepository.findActivePolicy",
+        "ReservationRepository.save",
+        "ReservedAggRepository.save"
+      ],
+      "kafka_topics": ["RESERVATION_SOFT_HELD_TOPIC"],
+      "redis": true,
+      "redis_operation": "write TTL key (TEMP_RESERVATION_PREFIX + orderId)",
+      "transactional": true
+    },
+    {
+      "file": "e2e-scenarios/04-confirm-reservation.md",
+      "flow": "Confirm Reservation",
+      "entry_point": "com.inventory.inventoryservice.controller.InventoryController.confirmReservation(ReservationConfirmRequest)",
+      "http_method": "POST",
+      "path": "/inventory/reservations/confirm (inferred)",
+      "evidence": "Observed",
+      "services_involved": [
+        "ReservationService.confirmReservation",
+        "ReservationService.getStockComponentsFromDB",
+        "KafkaProducerService.sendReservationConfirmedEvent"
+      ],
+      "repos_involved": [
+        "ReservationRepository.findByOrderId",
+        "ReservedAggRepository.findBySkuAndLocationId",
+        "InventoryStateRepository.findBySkuAndLocationId",
+        "SafetyStockPolicyRepository.findActivePolicy",
+        "ReservationRepository.save",
+        "ReservedAggRepository.save"
+      ],
+      "kafka_topics": ["RESERVATION_CONFIRMED_TOPIC"],
+      "redis": false,
+      "transactional": true
+    },
+    {
+      "file": "e2e-scenarios/05-release-cancel-reservation.md",
+      "flow": "Release and Cancel Reservation",
+      "entry_point": "com.inventory.inventoryservice.controller.InventoryController.releaseReservation(ReservationReleaseRequest) | cancelReservation(ReservationCancelRequest)",
+      "http_method": "POST",
+      "path": "/inventory/reservations/release | /inventory/reservations/cancel (inferred)",
+      "evidence": "Observed",
+      "services_involved": [
+        "ReservationService.releaseReservation",
+        "ReservationService.cancelReservation",
+        "KafkaProducerService.sendReservationReleasedEvent",
+        "KafkaProducerService.sendReservationCancelledEvent"
+      ],
+      "repos_involved": [
+        "ReservationRepository.findByOrderId",
+        "ReservedAggRepository.findBySkuAndLocationId",
+        "ReservationRepository.save",
+        "ReservedAggRepository.save"
+      ],
+      "kafka_topics": [
+        "RESERVATION_RELEASED_TOPIC",
+        "RESERVATION_CANCELLED_TOPIC"
+      ],
+      "redis": false,
+      "transactional": true
+    },
+    {
+      "file": "e2e-scenarios/06-ship-order.md",
+      "flow": "Ship Order",
+      "entry_point": "com.inventory.inventoryservice.controller.InventoryController.ship(ShipmentRequest)",
+      "http_method": "POST",
+      "path": "/inventory/ship (inferred)",
+      "evidence": "Observed",
+      "services_involved": [
+        "InventoryService.ship",
+        "MovementService.recordMovement",
+        "KafkaProducerService.sendMovementRecordedEvent"
+      ],
+      "repos_involved": [
+        "ReservationRepository.findByOrderId",
+        "ReservedAggRepository.findBySkuAndLocationId",
+        "InventoryStateRepository.findBySkuAndLocationId",
+        "MovementLedgerRepository.save",
+        "ReservationRepository.save",
+        "ReservedAggRepository.save"
+      ],
+      "kafka_topics": ["MOVEMENT_RECORDED_TOPIC"],
+      "redis": false,
+      "transactional": true
+    },
+    {
+      "file": "e2e-scenarios/07-availability.md",
+      "flow": "Check Inventory Availability",
+      "entry_point": "com.inventory.inventoryservice.controller.AvailabilityController.getAvailability(String,Integer) | getBulkAvailability(BulkAvailabilityRequest)",
+      "http_method": "GET / POST",
+      "path": "/availability | /availability/bulk (inferred)",
+      "evidence": "Observed",
+      "services_involved": [
+        "AvailabilityService.getAvailability",
+        "AvailabilityService.getBulkAvailability",
+        "AvailabilityService.getOnHand",
+        "AvailabilityService.getReserved",
+        "AvailabilityService.getSafetyStock"
+      ],
+      "repos_involved": [
+        "InventoryStateRepository.findBySkuAndLocationId",
+        "ReservedAggRepository.findBySkuAndLocationId",
+        "SafetyStockPolicyRepository.findActivePolicy"
+      ],
+      "kafka_topics": [],
+      "redis": false,
+      "transactional": false
+    },
+    {
+      "file": "e2e-scenarios/08-safety-stock-policy.md",
+      "flow": "Manage Safety Stock Policy",
+      "entry_point": "com.inventory.inventoryservice.controller.SafetyStockController.createSafetyStockPolicy | updateSafetyStockPolicy | getSafetyStockPolicy",
+      "http_method": "POST / PUT / GET",
+      "path": "/safety-stock (inferred)",
+      "evidence": "Observed",
+      "services_involved": [
+        "SafetyStockService.createSafetyStockPolicy",
+        "SafetyStockService.updateSafetyStockPolicy",
+        "SafetyStockService.getSafetyStockPolicy",
+        "KafkaProducerService.sendSafetyStockPolicyUpdatedEvent"
+      ],
+      "repos_involved": [
+        "SafetyStockPolicyRepository.save",
+        "SafetyStockPolicyRepository.findById",
+        "SafetyStockPolicyRepository.findBySkuAndLocationIdAndEffectiveFromLessThanEqualAndEffectiveToGreaterThanEqual"
+      ],
+      "kafka_topics": ["SAFETY_STOCK_POLICY_UPDATED_TOPIC"],
+      "redis": false,
+      "transactional": false
+    },
+    {
+      "file": "e2e-scenarios/09-location-management.md",
+      "flow": "Location Management",
+      "entry_point": "com.inventory.inventoryservice.controller.LocationController.createLocation | updateLocation | getAllLocations",
+      "http_method": "POST / PUT / GET",
+      "path": "/locations (inferred)",
+      "evidence": "Observed",
+      "services_involved": [
+        "LocationService.createLocation",
+        "LocationService.updateLocation",
+        "LocationService.getAllLocations"
+      ],
+      "repos_involved": [
+        "LocationRepository.save",
+        "LocationRepository.findById",
+        "LocationRepository.findAll"
+      ],
+      "kafka_topics": [],
+      "redis": false,
+      "transactional": false
+    },
+    {
+      "file": "e2e-scenarios/10-inventory-queries.md",
+      "flow": "Inventory State Queries and Reconciliation",
+      "entry_point": "com.inventory.inventoryservice.controller.InventoryController (getInventoryState, getReconciliationSnapshot, getMovements, getDistinctSkus, getReservationStatus, getReservations)",
+      "http_method": "GET",
+      "path": "/inventory/* (inferred)",
+      "evidence": "Observed",
+      "services_involved": [
+        "InventoryService.getInventoryState",
+        "InventoryService.getReconciliationSnapshot",
+        "InventoryService.getDistinctSkus",
+        "MovementService.getMovements",
+        "ReservationService.getReservationStatus",
+        "ReservationService.getReservations"
+      ],
+      "repos_involved": [
+        "InventoryStateRepository.findBySkuAndLocationId",
+        "SafetyStockPolicyRepository.findActivePolicy",
+        "ReservedAggRepository.findBySkuAndLocationId",
+        "MovementLedgerRepository.findAllBySkuAndLocationIdAndCreatedAtBetween",
+        "MovementLedgerRepository.findAllBySkuAndLocationId",
+        "ReservationRepository.findByOrderId",
+        "ReservationRepository.findAllBySkuAndLocationIdAndCreatedAtBetween",
+        "ReservationRepository.findAllBySkuAndLocationId"
+      ],
+      "kafka_topics": [],
+      "redis": false,
+      "transactional": false
+    }
+  ]
+}

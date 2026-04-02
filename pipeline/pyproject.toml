@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codedoc"
+version = "0.1.0"
+description = "CLI pipeline: index repo → agent analysis → docs site"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "kuzu>=0.7",
+    "anthropic>=0.39",
+    "openai>=1.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+codedoc = "codedoc.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["codedoc*", "tools*"]

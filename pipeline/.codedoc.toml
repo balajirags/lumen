@@ -1,0 +1,17 @@
+# codedoc pipeline configuration
+# Values here are overridden by CLI flags.
+
+[pipeline]
+output_dir    = "./codedoc-output"
+model         = "claude-sonnet-4-6"
+# provider: "auto" detects from model name. Options: anthropic, ollama, openai
+provider      = "auto"
+# base_url: override API endpoint (e.g. "http://localhost:11434/v1" for Ollama)
+base_url      = ""
+max_turns     = 40
+timeout       = 300
+
+[paths]
+indexer_bin_dir  = "../indexer/bin"
+agent_prompt     = "./codedoc/prompts/re-prompt.md"
+build_script     = "./scripts/build-docs-site.sh"

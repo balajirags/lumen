@@ -1,0 +1,13 @@
+# code-mem-graph configuration
+# Place this file as ./application.yaml or pass --config <path>
+
+backend: kuzu
+
+neo4j:
+  uri: bolt://localhost:7687
+  username: neo4j
+  password: test123456789
+  database: neo4j
+
+kuzu:
+  db-path: ./kuzu_db

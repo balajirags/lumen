@@ -1,0 +1,34 @@
+# Python (pipeline/)
+pipeline/__pycache__/
+pipeline/**/__pycache__/
+pipeline/*.egg-info/
+pipeline/**/*.egg-info/
+pipeline/.venv/
+pipeline/venv/
+pipeline/codedoc-output/
+pipeline/output/
+pipeline/output_old/
+pipeline/.pytest_cache/
+pipeline/.tmp/
+
+# Gradle / Java (indexer/)
+indexer/.gradle/
+indexer/build/
+indexer/app/build/
+indexer/bin/
+indexer/kuzu_db/
+indexer/**/*.class
+
+# Node (ui/ and indexer/parsers/javascript/)
+ui/node_modules/
+ui/dist/
+indexer/parsers/javascript/node_modules/
+indexer/parsers/javascript/package-lock.json
+
+# Common
+.DS_Store
+.env
+*.log
+.idea/
+*.iml
+.vscode/

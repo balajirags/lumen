@@ -1,0 +1,25 @@
+# https://docs.gradle.org/current/userguide/platforms.html#sub::toml-dependencies-format
+
+[versions]
+guava = "33.4.6-jre"
+junit-jupiter = "5.12.1"
+javaparser = "3.26.4"
+picocli = "4.7.6"
+neo4j-driver = "5.28.4"
+kuzu = "0.11.3"
+slf4j = "2.0.16"
+snakeyaml = "2.4"
+gson = "2.11.0"
+kotlin = "2.0.21"
+
+[libraries]
+guava = { module = "com.google.guava:guava", version.ref = "guava" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit-jupiter" }
+javaparser-core = { module = "com.github.javaparser:javaparser-symbol-solver-core", version.ref = "javaparser" }
+picocli = { module = "info.picocli:picocli", version.ref = "picocli" }
+neo4j-driver = { module = "org.neo4j.driver:neo4j-java-driver", version.ref = "neo4j-driver" }
+kuzu = { module = "com.kuzudb:kuzu", version.ref = "kuzu" }
+slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
+snakeyaml = { module = "org.yaml:snakeyaml", version.ref = "snakeyaml" }
+gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
+kotlin-compiler = { module = "org.jetbrains.kotlin:kotlin-compiler-embeddable", version.ref = "kotlin" }
