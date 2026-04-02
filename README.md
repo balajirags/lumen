@@ -39,6 +39,47 @@ make docker-build
 make docker-run REPO=/path/to/repo
 ```
 
+### Using a local Ollama model
+
+Inside Docker, `localhost` refers to the container — not your machine. Use
+`host.docker.internal` to reach your host:
+
+```bash
+# Mac / Windows (Docker Desktop): host.docker.internal is automatic
+# Linux: docker-compose.yml already adds extra_hosts for you
+
+make compose-pipeline REPO=/path/to/repo \
+  ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
+```
+
+---
+
+## Viewing results
+
+### Doc-site (generated Docusaurus documentation)
+
+After a pipeline run, serve the docs at `http://localhost:8080`:
+
+```bash
+make compose-docs
+```
+
+The site is served from `./output/` on your host — no rebuild needed.
+
+### Graph UI (visual KuzuDB explorer)
+
+Start the graph visualization UI at `http://localhost:3001`:
+
+```bash
+make compose-ui
+```
+
+Then connect it to a database from a previous run:
+- DB type: **KuzuDB**
+- DB path: `/data/<repo-name>-<timestamp>/index.kuzu/db`
+
+The `/data` path inside the container maps to `./output/` on your host.
+
 ---
 
 ## Native install (optional — requires Java 21, Node 18, Python 3.11+)

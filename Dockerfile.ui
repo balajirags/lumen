@@ -1,0 +1,45 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# lumen graph UI — multi-stage Docker build
+#
+# Stage 1 (ui-builder) : npm install + vite build → dist/
+# Stage 2 (final)      : node:20-slim + dist/ + Express server
+#
+# The Express server serves:
+#   /api/*   → KuzuDB / Neo4j query API
+#   *        → built React app (dist/index.html) when NODE_ENV=production
+#
+# Build:  docker build -f Dockerfile.ui -t lumen-ui .
+# Run:    docker run -p 3001:3001 -v ./output:/data -e NODE_ENV=production lumen-ui
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Stage 1: Build React app ──────────────────────────────────────────────────
+FROM node:20-slim AS ui-builder
+
+WORKDIR /app
+COPY ui/package*.json .
+RUN npm install
+
+COPY ui/ .
+RUN npm run build
+
+
+# ── Stage 2: Production runtime ───────────────────────────────────────────────
+FROM node:20-slim
+
+WORKDIR /app
+
+# Built React static files
+COPY --from=ui-builder /app/dist         ./dist
+
+# Runtime deps (includes tsx, kuzu, express, etc.)
+COPY --from=ui-builder /app/node_modules ./node_modules
+COPY --from=ui-builder /app/package.json .
+
+# TypeScript server source + tsconfig (tsx compiles at runtime)
+COPY ui/server/      ./server/
+COPY ui/tsconfig*.json .
+
+ENV NODE_ENV=production
+EXPOSE 3001
+
+CMD ["npx", "tsx", "server/index.ts"]

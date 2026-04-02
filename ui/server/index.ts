@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import * as neo4jService from './neo4j-service.js';
 import * as kuzuService from './kuzu-service.js';
 import type { DbType } from './types.js';
@@ -122,6 +124,15 @@ app.post('/api/query', async (req, res) => {
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : 'Query failed' });
   }
 });
+
+// In production (Docker), serve the built React app for all non-API routes
+if (process.env.NODE_ENV === 'production') {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  app.use(express.static(path.join(__dirname, '../dist')));
+  app.get('*', (_req, res) => {
+    res.sendFile(path.join(__dirname, '../dist/index.html'));
+  });
+}
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 app.listen(PORT, () => {

@@ -1,0 +1,66 @@
+# lumen — docker-compose services
+#
+# Each service is behind a profile so nothing starts unless explicitly requested.
+#
+# Usage:
+#
+#   Run pipeline (Anthropic):
+#     REPO_PATH=/path/to/repo docker compose --profile pipeline run --rm pipeline \
+#       run /repo --output-dir /workspace/output
+#
+#   Run pipeline (Ollama, local):
+#     REPO_PATH=/path/to/repo docker compose --profile pipeline run --rm pipeline \
+#       run /repo --provider ollama --model qwen2.5:32b \
+#       --base-url http://host.docker.internal:11434/v1
+#
+#   Serve generated doc-site:
+#     docker compose --profile docs up docs
+#     → http://localhost:8080
+#
+#   Start graph UI:
+#     docker compose --profile ui up ui
+#     → http://localhost:3001  (connect to /data/<run>/index.kuzu/db)
+#
+# Environment variables:
+#   ANTHROPIC_API_KEY   Required for Anthropic provider
+#   REPO_PATH           Path to the source repo to analyse (pipeline only)
+#   OUTPUT_PATH         Where output is written/read (default: ./output)
+
+services:
+
+  pipeline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ${REPO_PATH:-/tmp}:/repo
+      - ${OUTPUT_PATH:-./output}:/workspace/output
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    # host.docker.internal lets the container reach the host machine.
+    # On Mac/Windows (Docker Desktop) this is automatic; on Linux it needs
+    # the extra_hosts entry below.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    profiles: [pipeline]
+
+  docs:
+    image: node:20-slim
+    command: npx --yes serve /site -l 8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${OUTPUT_PATH:-./output}:/site
+    profiles: [docs]
+
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    ports:
+      - "3001:3001"
+    volumes:
+      - ${OUTPUT_PATH:-./output}:/data
+    environment:
+      - NODE_ENV=production
+    profiles: [ui]

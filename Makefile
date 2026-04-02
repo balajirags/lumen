@@ -1,4 +1,6 @@
-.PHONY: install install-indexer install-pipeline dev-ui test docker-build docker-run
+.PHONY: install install-indexer install-pipeline dev-ui test \
+        docker-build docker-run \
+        compose-pipeline compose-docs compose-ui
 
 # ── Native install (requires Java 21, Node 18, Python 3.11) ──
 install: install-indexer install-pipeline
@@ -28,3 +30,16 @@ docker-run:
 	  -v "$(PWD)/output":/workspace/output \
 	  -e ANTHROPIC_API_KEY="$(ANTHROPIC_API_KEY)" \
 	  $(DOCKER_IMAGE) run /repo --output-dir /workspace/output
+
+# ── Docker Compose ──
+compose-pipeline:
+	@if [ -z "$(REPO)" ]; then echo "Usage: make compose-pipeline REPO=/path/to/repo [ARGS='--provider ollama ...']"; exit 1; fi
+	REPO_PATH="$(REPO)" OUTPUT_PATH="$(PWD)/output" \
+	  docker compose --profile pipeline run --rm pipeline \
+	  run /repo --output-dir /workspace/output $(ARGS)
+
+compose-docs:
+	OUTPUT_PATH="$(PWD)/output" docker compose --profile docs up docs
+
+compose-ui:
+	OUTPUT_PATH="$(PWD)/output" docker compose --profile ui up ui
