@@ -21,7 +21,7 @@ test:
 DOCKER_IMAGE ?= lumen
 
 docker-build:
-	docker build -t $(DOCKER_IMAGE) .
+	docker buildx build --load -t $(DOCKER_IMAGE) .
 
 docker-run:
 	@if [ -z "$(REPO)" ]; then echo "Usage: make docker-run REPO=/path/to/repo"; exit 1; fi
