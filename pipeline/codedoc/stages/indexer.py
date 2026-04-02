@@ -173,7 +173,9 @@ def run_indexer(state: PipelineState) -> PipelineState:
             f"Indexer exited with code {proc.returncode}.\n{stderr_excerpt}"
         )
 
-    # --- Validate output ---
+    # --- Resolve actual database path ---
+    # All indexer binaries (Java, JS, Python) treat --db-path as a parent
+    # directory and create {repoName}-db/ inside it. Scan for what was created.
     kuzu = Path(kuzu_path)
     if not kuzu.exists():
         state.log(stage, f"stdout:\n{proc.stdout[-1000:]}" if proc.stdout else "No stdout")
@@ -181,11 +183,15 @@ def run_indexer(state: PipelineState) -> PipelineState:
             f"Indexer completed but KuzuDB output not found at {kuzu_path}. "
             "Check the repo contents and indexer output."
         )
-    # KuzuDB creates a directory, check it has content
     if kuzu.is_dir():
-        total_size = sum(f.stat().st_size for f in kuzu.rglob("*") if f.is_file())
-    else:
-        total_size = kuzu.stat().st_size
+        subdirs = [d for d in kuzu.iterdir() if d.is_dir()]
+        if len(subdirs) == 1:
+            # Binary created a single subdirectory — that IS the database
+            kuzu_path = str(subdirs[0])
+            kuzu = subdirs[0]
+            state.log(stage, f"Resolved KuzuDB to {kuzu_path}")
+
+    total_size = sum(f.stat().st_size for f in kuzu.rglob("*") if f.is_file())
     if total_size < 1024:
         raise ValueError(
             f"KuzuDB output at {kuzu_path} is only {total_size} bytes — "
