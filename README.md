@@ -111,17 +111,25 @@ make compose-pipeline REPO=/path/to/repo \
 
 Output lands in `./output/` after every run.
 
-### Doc-site — http://localhost:8080
+| Service | URL | Command |
+|---|---|---|
+| MkDocs doc-site | http://localhost:8081 | `make compose-docs` |
+| Graph UI (Docker) | http://localhost:3002 | `make compose-ui` |
+| Graph UI (dev) | http://localhost:5174 | `make dev-ui` |
+
+### Doc-site
 
 ```bash
 make compose-docs
+# → http://localhost:8081
 ```
 
-### Graph UI — http://localhost:3001
+### Graph UI
 
 ```bash
 make compose-ui
-# Connect → DB type: KuzuDB, DB path: /data/<repo>-<timestamp>/index.kuzu/db
+# → http://localhost:3002
+# Connect → DB type: KuzuDB, DB path: /data/<repo>-<timestamp>/index.kuzu
 ```
 
 (`/data` inside the container maps to `./output/` on your host.)
@@ -150,7 +158,7 @@ lumen run /path/to/repo \
 Graph UI in dev mode:
 
 ```bash
-make dev-ui    # Vite → http://localhost:5173  |  Express → http://localhost:3001
+make dev-ui    # Vite → http://localhost:5174  |  Express → http://localhost:3002
 ```
 
 ---
