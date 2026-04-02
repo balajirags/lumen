@@ -21,11 +21,11 @@ test:
 DOCKER_IMAGE ?= lumen
 
 docker-build:
-	docker buildx build --load -t $(DOCKER_IMAGE) .
+	docker build -t $(DOCKER_IMAGE) .
 	docker image prune -f
 
 docker-rebuild:
-	DOCKER_BUILDKIT=1 docker build --no-cache -t $(DOCKER_IMAGE) .
+	docker build --no-cache -t $(DOCKER_IMAGE) .
 	docker image prune -f
 
 docker-run:
