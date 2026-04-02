@@ -15,11 +15,11 @@
 #
 #   Serve generated doc-site:
 #     docker compose --profile docs up docs
-#     → http://localhost:8080
+#     → http://localhost:8081
 #
 #   Start graph UI:
 #     docker compose --profile ui up ui
-#     → http://localhost:3001  (connect to /data/<run>/index.kuzu/db)
+#     → http://localhost:3002  (connect to /data/<run>/index.kuzu/db)
 #
 # Environment variables:
 #   ANTHROPIC_API_KEY   Required for Anthropic provider
@@ -48,7 +48,7 @@ services:
     image: python:3.11-slim
     command: python -m http.server 8080 --directory /site
     ports:
-      - "8080:8080"
+      - "8081:8080"
     volumes:
       - ${OUTPUT_PATH:-./output}/doc-site:/site
     profiles: [docs]
@@ -58,7 +58,7 @@ services:
       context: .
       dockerfile: Dockerfile.ui
     ports:
-      - "3001:3001"
+      - "3002:3002"
     volumes:
       - ${OUTPUT_PATH:-./output}:/data
     environment:

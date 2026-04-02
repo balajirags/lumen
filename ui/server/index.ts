@@ -134,7 +134,7 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-const PORT = parseInt(process.env.PORT || '3001', 10);
+const PORT = parseInt(process.env.PORT || '3002', 10);
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });

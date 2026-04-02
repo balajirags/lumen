@@ -9,7 +9,7 @@
 #   *        → built React app (dist/index.html) when NODE_ENV=production
 #
 # Build:  docker build -f Dockerfile.ui -t lumen-ui .
-# Run:    docker run -p 3001:3001 -v ./output:/data -e NODE_ENV=production lumen-ui
+# Run:    docker run -p 3002:3002 -v ./output:/data -e NODE_ENV=production lumen-ui
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Stage 1: Build React app ──────────────────────────────────────────────────
@@ -40,6 +40,6 @@ COPY ui/server/      ./server/
 COPY ui/tsconfig*.json .
 
 ENV NODE_ENV=production
-EXPOSE 3001
+EXPOSE 3002
 
 CMD ["npx", "tsx", "server/index.ts"]
