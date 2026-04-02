@@ -29,6 +29,7 @@
 services:
 
   pipeline:
+    image: lumen
     build:
       context: .
       dockerfile: Dockerfile
