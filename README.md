@@ -221,3 +221,9 @@ for graph queries plus up to 90,000 tokens for targeted source reads.
 At Claude Sonnet pricing: approximately **$0.10–$0.25 per run**.
 
 Token usage is recorded in `pipeline.json` after every run.
+
+---
+
+## License
+
+Apache 2.0 — see [LICENSE](LICENSE).
