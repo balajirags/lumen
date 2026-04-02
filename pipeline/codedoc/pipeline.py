@@ -19,8 +19,7 @@ from codedoc.stages.builder import run_builder
 
 def run_pipeline(
     repo_path: str,
-    repo_name: str | None = None,
-    output_dir: str = "",
+    output_dir: str,
     model: str,
     provider: str,
     base_url: str,
@@ -31,6 +30,7 @@ def run_pipeline(
     indexer_bin_dir: str = "",
     agent_prompt: str = "",
     build_script: str = "",
+    repo_name: str | None = None,
 ) -> PipelineState:
     """Execute the full pipeline and return final state.
 
