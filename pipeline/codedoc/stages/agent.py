@@ -428,11 +428,13 @@ def run_supervisor_agent(
     max_context_tokens: int = 120_000,
     max_source_reads: int = 15,
 ) -> dict[str, Any]:
-    """Run the 3-phase parallel supervisor pattern.
+    """Run the multi-phase parallel supervisor pattern.
 
-    Phase 1: direct toolkit query (no LLM tokens).
-    Phase 2 + Phase 3: parallel subagents, each with its own KuzuDB connection.
-    Phase 4: migration agent seeded with orientation + prior artifact content.
+    Phase 1:     direct toolkit query (no LLM tokens).
+    Phase 2 + 3: parallel — api-analyst, architect.
+    Phase 4–7:   parallel — migration-planner, c4-context, sequence-diagrams, er-diagram.
+                 All seeded with Phase 2+3 artifacts. Phase 4 failure is fatal;
+                 Phases 5–7 (diagram subagents) are non-fatal.
 
     Returns the same dict shape as run_loop().
     """
@@ -559,7 +561,7 @@ def run_supervisor_agent(
 
     base_with_context = base_prompt + prior_context
 
-    log("[supervisor] spawning subagent/migration-planner + subagent/c4-context in parallel…")
+    log("[supervisor] spawning subagent/migration-planner + subagent/c4-context + subagent/sequence-diagrams + subagent/er-diagram in parallel…")
 
     phase4_req = (
         "Analyse hotspots and migration risk. Write migration/roadmap.md, "
@@ -571,13 +573,27 @@ def run_supervisor_agent(
         "Write architecture/c4-context.md with a Mermaid C4Context diagram. "
         "Stop after writing that artifact."
     )
+    phase6_req = (
+        "Trace the top 3–5 user-facing flows. "
+        "Write architecture/sequence-diagrams.md with Mermaid sequenceDiagram blocks. "
+        "Stop after writing that artifact."
+    )
+    phase7_req = (
+        "Map the data model and entity relationships. "
+        "Write domain/er-diagram.md with a Mermaid erDiagram and bounded context ownership table. "
+        "Stop after writing that artifact."
+    )
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {
             pool.submit(_run_phase, "subagent/migration-planner", "phase4-migration.md",
                         phase4_req, base_with_context): "subagent/migration-planner",
             pool.submit(_run_phase, "subagent/c4-context", "phase5-c4-context.md",
                         phase5_req, base_with_context): "subagent/c4-context",
+            pool.submit(_run_phase, "subagent/sequence-diagrams", "phase6-sequence-diagrams.md",
+                        phase6_req, base_with_context): "subagent/sequence-diagrams",
+            pool.submit(_run_phase, "subagent/er-diagram", "phase7-er-diagram.md",
+                        phase7_req, base_with_context): "subagent/er-diagram",
         }
         for future in as_completed(futures):
             phase_name, result = future.result()
@@ -599,7 +615,7 @@ def run_supervisor_agent(
                         "output_tokens": total_output_tokens,
                     }
                 else:
-                    # Phase 5 (C4 diagram) is non-fatal — log and continue
+                    # Diagram subagents (Phase 5/6/7) are non-fatal — log and continue
                     log(f"[supervisor] WARNING: {phase_name} failed: {result['error']} — continuing")
 
     log(
