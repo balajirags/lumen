@@ -25,7 +25,7 @@ docker-build:
 	docker image prune -f
 
 docker-rebuild:
-	docker buildx build --no-cache --load -t $(DOCKER_IMAGE) .
+	DOCKER_BUILDKIT=1 docker build --no-cache -t $(DOCKER_IMAGE) .
 	docker image prune -f
 
 docker-run:
