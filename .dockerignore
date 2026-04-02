@@ -1,0 +1,33 @@
+# Generated / build output
+indexer/bin/
+indexer/.gradle/
+indexer/app/build/
+indexer/kuzu_db/
+indexer/parsers/javascript/node_modules/
+pipeline/codedoc-output/
+pipeline/output/
+pipeline/output_old/
+pipeline/.tmp/
+pipeline/.venv/
+pipeline/venv/
+pipeline/dist/
+pipeline/build/
+pipeline/*.egg-info/
+ui/node_modules/
+ui/dist/
+
+# Git / IDE
+.git/
+.gitignore
+.idea/
+.vscode/
+
+# Secrets
+.env
+
+# Misc
+**/__pycache__/
+**/*.pyc
+**/*.log
+.DS_Store
+*.zip

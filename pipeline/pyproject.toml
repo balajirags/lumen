@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "codedoc"
+name = "lumen"
 version = "0.1.0"
 description = "CLI pipeline: index repo → agent analysis → docs site"
 requires-python = ">=3.11"
@@ -19,7 +19,7 @@ dependencies = [
 dev = ["pytest", "ruff"]
 
 [project.scripts]
-codedoc = "codedoc.cli:main"
+lumen = "codedoc.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["codedoc*", "tools*"]
