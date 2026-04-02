@@ -11,10 +11,8 @@ Usage (standalone CLI):
 from __future__ import annotations
 
 import argparse
-import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 from codedoc.state import PipelineState
 
@@ -48,36 +46,18 @@ def run_builder(state: PipelineState) -> PipelineState:
         _generate_fallback_html(artifacts, site_dir, state)
         return state
 
-    # --- Stage artifacts into a temp dir for build-docs-site.sh ---
-    # The script expects <output-dir>/<repo-name>/<section>/ structure.
-    # Use a temp dir so we don't pollute the source artifacts directory.
-    staging_dir = Path(tempfile.mkdtemp(prefix="codedoc-build-"))
-    staging_repo = staging_dir / repo_name / "artifacts"
-    staging_repo.mkdir(parents=True)
-
-    for src_file in artifacts.rglob("*"):
-        if src_file.is_file():
-            rel = src_file.relative_to(artifacts)
-            dest = staging_repo / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            if src_file.suffix == ".md":
-                dest.write_text(src_file.read_text())
-            else:
-                dest.write_bytes(src_file.read_bytes())
-
-    state.log(stage, f"Staged artifacts to {staging_repo}")
-
-    # --- Run build script ---
-    site_exists = (site_dir / "index.html").exists()
-    if site_exists:
-        state.log(stage, f"Site already exists at {site_dir}, reusing.")
+    # --- Run build script against the whole output root ---
+    # Pass the parent of the run dir so the script sees all repos under output/.
+    # The script iterates <output-dir>/*/artifacts/*/ — multiple pipeline runs
+    # accumulate naturally; each new run refreshes its own repo in the site.
+    output_root = Path(state.output_dir).parent
 
     cmd = [
         "bash",
         str(build_script),
-        "--output-dir", str(staging_dir),
+        "--output-dir", str(output_root),
         "--site-dir", str(site_dir),
-        "--title", f"{repo_name} — Forward Engineering Docs",
+        "--title", "Forward Engineering Docs",
     ]
 
     state.log(stage, f"Running build script: {' '.join(cmd)}")
@@ -93,8 +73,6 @@ def run_builder(state: PipelineState) -> PipelineState:
         state.log(stage, f"Build script timed out after {state.timeout}s, using fallback.")
         _generate_fallback_html(artifacts, site_dir, state)
         return state
-    finally:
-        shutil.rmtree(staging_dir, ignore_errors=True)
 
     if state.verbose:
         if proc.stdout:
