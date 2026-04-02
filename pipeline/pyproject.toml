@@ -24,3 +24,6 @@ lumen = "codedoc.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["codedoc*", "tools*"]
+
+[tool.uv]
+python = "3.11"

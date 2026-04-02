@@ -67,6 +67,9 @@ RUN npm install --omit=dev --silent \
 # ── Stage 3: Python dependencies (compile wheels incl. pygraphviz) ───────────
 FROM python:3.11-slim AS python-deps-builder
 
+# uv — fast Python package installer (replaces pip)
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
 # Build tools needed to compile pygraphviz (python-graphs dependency)
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential graphviz libgraphviz-dev pkg-config \
@@ -76,8 +79,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pipeline/ /opt/lumen-pipeline/
 COPY indexer/parsers/python/requirements.txt /tmp/py-parser-requirements.txt
 
-RUN pip install --no-cache-dir --prefix=/deps /opt/lumen-pipeline/ \
-    && pip install --no-cache-dir --prefix=/deps -r /tmp/py-parser-requirements.txt \
+RUN uv pip install --no-cache-dir --prefix=/deps /opt/lumen-pipeline/ \
+    && uv pip install --no-cache-dir --prefix=/deps -r /tmp/py-parser-requirements.txt \
     # Strip native libraries (kuzu ~150MB→80MB, tokenizers ~80MB→40MB, etc.)
     && find /deps -name "*.so" -o -name "*.so.*" \
        | xargs -r strip --strip-unneeded 2>/dev/null || true \
