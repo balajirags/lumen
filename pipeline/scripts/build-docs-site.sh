@@ -140,9 +140,15 @@ theme:
 markdown_extensions:
   - tables
   - attr_list
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: true
+extra_javascript:
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
 YAML
 
 if $SKIP_BUILD; then

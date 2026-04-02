@@ -544,7 +544,7 @@ def run_supervisor_agent(
                 }
 
     # ------------------------------------------------------------------
-    # Phase 4: migration — inject prior artifact content as context
+    # Phase 4 + Phase 5: parallel — both seeded with Phase 2+3 artifacts
     # ------------------------------------------------------------------
     def _read_artifact(rel_path: str) -> str:
         p = Path(artifacts_dir) / rel_path
@@ -557,46 +557,50 @@ def run_supervisor_agent(
         f"### domain/domain-analysis.md\n\n{_read_artifact('domain/domain-analysis.md')[:2_000]}\n"
     )
 
-    # Inject prior context into the base before building the phase 4 prompt
     base_with_context = base_prompt + prior_context
-    p4_system_prompt = _build_phase_system_prompt(
-        base_with_context, "phase4-migration.md", orientation_summary, kuzu_path, repo_name, artifacts_dir
-    )
 
-    log("[supervisor] spawning subagent/migration-planner…")
+    log("[supervisor] spawning subagent/migration-planner + subagent/c4-context in parallel…")
 
     phase4_req = (
         "Analyse hotspots and migration risk. Write migration/roadmap.md, "
         "target-state/blueprint.md, and manifests/artifacts.json. "
         "Write target-state/openapi/*.yaml only if the graph has sufficient endpoint detail."
     )
-
-    # Phase 4 runs sequentially (after 2+3) using the enriched base that includes prior artifacts
-    _, p4_result = _run_phase(
-        "subagent/migration-planner",
-        "phase4-migration.md",
-        phase4_req,
-        base=base_with_context,
+    phase5_req = (
+        "Identify external integration points. "
+        "Write architecture/c4-context.md with a Mermaid C4Context diagram. "
+        "Stop after writing that artifact."
     )
 
-    all_events.extend(p4_result["events"])
-    all_artifacts.extend(p4_result["artifacts"])
-    total_input_tokens += p4_result["input_tokens"]
-    total_output_tokens += p4_result["output_tokens"]
-    total_tool_uses += p4_result["tool_uses"]
-
-    log(f"[supervisor] subagent/migration-planner done — {len(p4_result['artifacts'])} artifact(s)")
-
-    if p4_result["status"] == "failed":
-        return {
-            "status": "failed",
-            "error": f"Phase 4 failed: {p4_result['error']}",
-            "artifacts": all_artifacts,
-            "events": all_events,
-            "tool_uses": total_tool_uses,
-            "input_tokens": total_input_tokens,
-            "output_tokens": total_output_tokens,
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = {
+            pool.submit(_run_phase, "subagent/migration-planner", "phase4-migration.md",
+                        phase4_req, base_with_context): "subagent/migration-planner",
+            pool.submit(_run_phase, "subagent/c4-context", "phase5-c4-context.md",
+                        phase5_req, base_with_context): "subagent/c4-context",
         }
+        for future in as_completed(futures):
+            phase_name, result = future.result()
+            all_events.extend(result["events"])
+            all_artifacts.extend(result["artifacts"])
+            total_input_tokens += result["input_tokens"]
+            total_output_tokens += result["output_tokens"]
+            total_tool_uses += result["tool_uses"]
+            log(f"[supervisor] {phase_name} done — {len(result['artifacts'])} artifact(s)")
+            if result["status"] == "failed":
+                if phase_name == "subagent/migration-planner":
+                    return {
+                        "status": "failed",
+                        "error": f"Phase 4 failed: {result['error']}",
+                        "artifacts": all_artifacts,
+                        "events": all_events,
+                        "tool_uses": total_tool_uses,
+                        "input_tokens": total_input_tokens,
+                        "output_tokens": total_output_tokens,
+                    }
+                else:
+                    # Phase 5 (C4 diagram) is non-fatal — log and continue
+                    log(f"[supervisor] WARNING: {phase_name} failed: {result['error']} — continuing")
 
     log(
         f"[supervisor] all phases complete — "
