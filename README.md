@@ -30,7 +30,7 @@ Source repo
     └─ Subagent 3: Migration risk + target state     } seeded by 1 + 2
     │
     ▼
-[Builder] → Docusaurus documentation site
+[Builder] → MkDocs Material documentation site
          → KuzuDB graph (explorable in the UI)
 ```
 
@@ -183,7 +183,7 @@ codedoc-output/<repo-name>-<timestamp>/
 │   ├── migration/roadmap.md
 │   ├── target-state/blueprint.md
 │   └── manifests/artifacts.json
-└── doc-site/              ← built Docusaurus site
+└── doc-site/              ← built MkDocs Material site
 ```
 
 ---

@@ -34,12 +34,12 @@ docker-run:
 # ── Docker Compose ──
 compose-pipeline:
 	@if [ -z "$(REPO)" ]; then echo "Usage: make compose-pipeline REPO=/path/to/repo [ARGS='--provider ollama ...']"; exit 1; fi
-	REPO_PATH="$(REPO)" OUTPUT_PATH="$(PWD)/output" \
-	  docker compose --profile pipeline run --rm pipeline \
+	REPO_PATH="$(REPO)" OUTPUT_PATH="$(PWD)/output" COMPOSE_PROFILES=pipeline \
+	  docker-compose run pipeline -- \
 	  run /repo --output-dir /workspace/output $(ARGS)
 
 compose-docs:
-	OUTPUT_PATH="$(PWD)/output" docker compose --profile docs up docs
+	OUTPUT_PATH="$(PWD)/output" COMPOSE_PROFILES=docs docker-compose up docs
 
 compose-ui:
-	OUTPUT_PATH="$(PWD)/output" docker compose --profile ui up ui
+	OUTPUT_PATH="$(PWD)/output" COMPOSE_PROFILES=ui docker-compose up ui

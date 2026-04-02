@@ -131,10 +131,9 @@ def run_indexer(state: PipelineState) -> PipelineState:
             f"Run the install script or check your indexer_bin_dir setting."
         )
 
-    # Create index.kuzu directory and place DB file inside it
+    # KuzuDB database directory — let KuzuDB create it
     kuzu_dir = Path(state.output_dir).resolve() / "index.kuzu"
-    kuzu_dir.mkdir(parents=True, exist_ok=True)
-    kuzu_path = str(kuzu_dir / "db")
+    kuzu_path = str(kuzu_dir)
     state.log(stage, f"Running {binary_name} → {kuzu_path}")
 
     # --- Execute indexer subprocess ---

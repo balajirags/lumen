@@ -39,9 +39,8 @@ def run_pipeline(
     repo = Path(repo_path).resolve()
     repo_name = repo.name
 
-    # Timestamped output dir
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    run_dir = Path(output_dir) / f"{repo_name}-{ts}"
+    run_dir = Path(output_dir) / f"{repo_name[:20]}-{ts}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize state
@@ -58,6 +57,7 @@ def run_pipeline(
         indexer_bin_dir=indexer_bin_dir,
         agent_prompt=agent_prompt,
         build_script=build_script,
+        site_dir=str(Path(output_dir) / "doc-site"),
         status="running",
         started_at=datetime.now(timezone.utc).isoformat(),
     )
@@ -76,15 +76,6 @@ def run_pipeline(
 
         if state.status == "failed":
             return state
-
-        # Resolve KuzuDB directory → file if needed
-        kuzu_path = Path(state.kuzu_path)
-        if kuzu_path.is_dir():
-            db_files = [f for f in kuzu_path.iterdir() if f.is_file()]
-            if not db_files:
-                raise FileNotFoundError(f"No KuzuDB file found in directory: {kuzu_path}")
-            state.kuzu_path = str(db_files[0])
-            state.log("pipeline", f"Resolved KuzuDB file: {state.kuzu_path}")
 
         # Stage 2: Agent
         state.log("pipeline", "=== Stage 2: Agent ===")

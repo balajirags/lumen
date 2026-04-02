@@ -85,15 +85,13 @@ baked into the image — `load_config()` reads `.codedoc.toml` from CWD at start
 | Stage | Base | Output |
 |---|---|---|
 | `java-builder` | `eclipse-temurin:21-jdk-jammy` | Gradle shadowJar + jlink minimal JRE (~70 MB) |
-| `python-builder` | `python:3.11-slim` | PyInstaller: `lumen` binary + `cmg-python` binary |
 | `node-builder` | `node:20-slim` | `npm install --omit=dev` for JS parser |
-| final | `node:20-slim` | All artifacts assembled; `/workspace/.codedoc.toml` wires paths |
+| `python-deps-builder` | `python:3.11-slim` | `pip install --prefix=/deps` for lumen + cmg-python deps |
+| final | `python:3.11-slim` | All artifacts assembled; Node binary copied from `node:20-slim` |
 
-KuzuDB uses native libraries (JNI / .node / .so) that must exist on the real filesystem at
-runtime. GraalVM native-image and `pkg` are **not** used for this reason.
-- Java: jlink creates a minimal JRE that runs the fat JAR
-- Python: PyInstaller `--collect-all kuzu` bundles the native `.so`
-- Node: `.node` addon shipped alongside `parse.js` in `/opt/cmg-js/`
+Using `python:3.11-slim` as the final base (instead of `node:20-slim`) avoids GLIBC mismatches
+on aarch64 where `python:3.11-slim` requires GLIBC_2.38 but `node:20-slim` only has 2.36.
+`lumen` runs as a pip-installed entry point — no PyInstaller needed.
 
 ### Dockerfile.ui — 2 stages
 
@@ -132,7 +130,7 @@ Key files:
 - `pipeline/codedoc/kg_tools/backends.py` — `KuzuBackend`, `Neo4jBackend`
 - `pipeline/codedoc/prompts/re-prompt.md` — base agent system prompt
 - `pipeline/codedoc/prompts/phase{2,3,4}-*.md` — phase-specific task overrides
-- `pipeline/scripts/build-docs-site.sh` — scaffolds + builds Docusaurus site
+- `pipeline/scripts/build-docs-site.sh` — builds MkDocs Material site from artifacts
 - `pipeline/.codedoc.toml` — runtime config (`indexer_bin_dir = ../indexer/bin`)
 - `pipeline/pyproject.toml` — package name: `lumen`, entry point: `lumen = "codedoc.cli:main"`
 
@@ -211,7 +209,8 @@ Docker: `make compose-ui` → Express serves everything on port 3001
 | `indexer/install.sh` unchanged | Already uses `$SCRIPT_DIR`; relocatable as-is |
 | `indexer_bin_dir = ../indexer/bin` | Wires pipeline to indexer binaries across monorepo boundary |
 | jlink instead of GraalVM native-image | KuzuDB extracts JNI `.so` from JAR at runtime; native-image can't handle this |
-| PyInstaller for Python binaries | `--collect-all kuzu` bundles the native `.so`; works reliably |
+| No PyInstaller; pip install directly | PyInstaller bundles cause GLIBC mismatch on aarch64 between python:3.11-slim and node:20-slim |
+| `python:3.11-slim` as final Docker base | Same glibc as python-deps-builder; Node binary copied from node:20-slim (backwards-compatible) |
 | No `pkg`/Node SEA for JS parser | KuzuDB uses `process.dlopen()` on real `.node` file paths; can't virtualise |
 | Docker runtime `.codedoc.toml` at `/workspace/` | Overrides `indexer_bin_dir` + `build_script` without code changes |
 | `ui/server/index.ts` production static serving | Single port (3001) for both API and React app in Docker |
@@ -221,3 +220,4 @@ Docker: `make compose-ui` → Express serves everything on port 3001
 | Each subagent gets its own KuzuBackend | KuzuDB connections are not thread-safe |
 | `get_method_source` capped at 15 calls | Graph queries ~100–300 tokens; source reads ~1,000–6,000 |
 | No calendar dates in roadmap | Fabricated timelines damage credibility |
+| MkDocs Material instead of Docusaurus | Python-based (~10 MB vs ~200 MB), no npm in pipeline; `mkdocs-material` in pyproject.toml |

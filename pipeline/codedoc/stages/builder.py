@@ -11,14 +11,11 @@ Usage (standalone CLI):
 from __future__ import annotations
 
 import argparse
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
-
 from codedoc.state import PipelineState
 
 
@@ -55,8 +52,8 @@ def run_builder(state: PipelineState) -> PipelineState:
     # The script expects <output-dir>/<repo-name>/<section>/ structure.
     # Use a temp dir so we don't pollute the source artifacts directory.
     staging_dir = Path(tempfile.mkdtemp(prefix="codedoc-build-"))
-    staging_repo = staging_dir / repo_name
-    staging_repo.mkdir()
+    staging_repo = staging_dir / repo_name / "artifacts"
+    staging_repo.mkdir(parents=True)
 
     for src_file in artifacts.rglob("*"):
         if src_file.is_file():
@@ -64,14 +61,14 @@ def run_builder(state: PipelineState) -> PipelineState:
             dest = staging_repo / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             if src_file.suffix == ".md":
-                dest.write_text(_sanitize_md_for_mdx(src_file.read_text()))
+                dest.write_text(src_file.read_text())
             else:
                 dest.write_bytes(src_file.read_bytes())
 
     state.log(stage, f"Staged artifacts to {staging_repo}")
 
     # --- Run build script ---
-    site_exists = (site_dir / "node_modules").exists()
+    site_exists = (site_dir / "index.html").exists()
     if site_exists:
         state.log(stage, f"Site already exists at {site_dir}, reusing.")
 
@@ -112,7 +109,7 @@ def run_builder(state: PipelineState) -> PipelineState:
         return state
 
     # Check for index.html
-    expected_index = site_dir / "build" / "index.html"
+    expected_index = site_dir / "index.html"
     if expected_index.exists():
         state.site_path = str(expected_index.parent)
         state.log(stage, f"Site built successfully at {state.site_path}")
@@ -121,21 +118,6 @@ def run_builder(state: PipelineState) -> PipelineState:
         _generate_fallback_html(artifacts, site_dir, state)
 
     return state
-
-
-_ANGLE_OUTSIDE_CODE = re.compile(
-    r"(?P<fence>^```.*?^```)|(?P<inline>`[^`]+`)|(?P<bare><)"  ,
-    re.MULTILINE | re.DOTALL,
-)
-
-
-def _sanitize_md_for_mdx(text: str) -> str:
-    """Escape bare angle brackets outside code blocks/spans so MDX doesn't treat them as JSX."""
-    def _replace(m: re.Match) -> str:
-        if m.group("fence") or m.group("inline"):
-            return m.group(0)  # keep code untouched
-        return "&lt;"
-    return _ANGLE_OUTSIDE_CODE.sub(_replace, text)
 
 
 def _generate_fallback_html(artifacts_dir: Path, site_dir: Path, state: PipelineState) -> None:

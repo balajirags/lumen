@@ -13,6 +13,7 @@ dependencies = [
     "anthropic>=0.39",
     "openai>=1.0",
     "python-dotenv>=1.0",
+    "mkdocs-material>=9.0",
 ]
 
 [project.optional-dependencies]

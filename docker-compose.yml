@@ -36,7 +36,7 @@ services:
       - ${REPO_PATH:-/tmp}:/repo
       - ${OUTPUT_PATH:-./output}:/workspace/output
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     # host.docker.internal lets the container reach the host machine.
     # On Mac/Windows (Docker Desktop) this is automatic; on Linux it needs
     # the extra_hosts entry below.
@@ -45,12 +45,12 @@ services:
     profiles: [pipeline]
 
   docs:
-    image: node:20-slim
-    command: npx --yes serve /site -l 8080
+    image: python:3.11-slim
+    command: python -m http.server 8080 --directory /site
     ports:
       - "8080:8080"
     volumes:
-      - ${OUTPUT_PATH:-./output}:/site
+      - ${OUTPUT_PATH:-./output}/doc-site:/site
     profiles: [docs]
 
   ui:
