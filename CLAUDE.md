@@ -22,31 +22,33 @@ This is a monorepo containing three sub-projects:
 
 ## How to install and run
 
+### Docker (recommended — no local prerequisites)
+
 ```bash
-# 1. Build indexer runtimes (Java/JS/Python parsers)
-make install-indexer         # runs indexer/install.sh — requires Java 21, Node 18, Python 3
+make docker-build                        # builds lumen pipeline image
+make docker-run REPO=/path/to/repo       # Anthropic Claude
 
-# 2. Install Python pipeline
-make install-pipeline        # pip install -e pipeline/
+# Ollama (local model — host.docker.internal bridges container → host)
+make compose-pipeline REPO=/path/to/repo \
+  ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
 
-# 3. Run the full pipeline
+make compose-docs    # serve generated doc-site → http://localhost:8080
+make compose-ui      # graph visualization UI  → http://localhost:3001
+```
+
+### Native install
+
+```bash
+make install-indexer   # runs indexer/install.sh — requires Java 21, Node 18, Python 3
+make install-pipeline  # pip install -e pipeline/
+
 cd pipeline
-codedoc run /path/to/repo --verbose
+lumen run /path/to/repo --verbose
 
-# 4. Run the graph UI (optional)
-make dev-ui                  # starts Vite (port 5173) + Express (port 3001)
+make dev-ui            # Vite (port 5173) + Express (port 3001) dev server
 ```
 
-**Or both at once:**
-```bash
-make install
-```
-
-**Prerequisites:**
-- Python 3.11+ (for pipeline)
-- Java 21+ (for Java/Kotlin indexing)
-- Node 18+ (for JS/TS indexing and UI)
-- `ANTHROPIC_API_KEY` in `.env` (copy `.env.example`)
+Copy `.env.example` → `.env` and set `ANTHROPIC_API_KEY`.
 
 ---
 
@@ -61,25 +63,78 @@ Key defaults (`pipeline/codedoc/config.py`):
 | `model` | `claude-sonnet-4-6` |
 | `provider` | `auto` |
 | `max_turns` | 60 |
-| `indexer_bin_dir` | `../indexer/bin` (relative to `pipeline/`) |
+| `indexer_bin_dir` | `../indexer/bin` (monorepo); `/usr/local/bin` (Docker, via `.codedoc.toml`) |
 | `agent_prompt` | `./codedoc/prompts/re-prompt.md` |
+| `build_script` | `../scripts/build-docs-site.sh` (monorepo); `/opt/lumen/scripts/...` (Docker) |
+
+Docker runtime overrides `indexer_bin_dir` and `build_script` via `/workspace/.codedoc.toml`
+baked into the image — `load_config()` reads `.codedoc.toml` from CWD at startup.
+
+---
+
+## Docker files
+
+| File | Purpose |
+|---|---|
+| `Dockerfile` | Multi-stage pipeline image: jlink JRE + PyInstaller binaries + Node JS parser |
+| `Dockerfile.ui` | Multi-stage UI image: Vite build + tsx Express server |
+| `docker-compose.yml` | Three profiles: `pipeline`, `docs`, `ui` |
+
+### Dockerfile (pipeline) — 4 stages
+
+| Stage | Base | Output |
+|---|---|---|
+| `java-builder` | `eclipse-temurin:21-jdk-jammy` | Gradle shadowJar + jlink minimal JRE (~70 MB) |
+| `python-builder` | `python:3.11-slim` | PyInstaller: `lumen` binary + `cmg-python` binary |
+| `node-builder` | `node:20-slim` | `npm install --omit=dev` for JS parser |
+| final | `node:20-slim` | All artifacts assembled; `/workspace/.codedoc.toml` wires paths |
+
+KuzuDB uses native libraries (JNI / .node / .so) that must exist on the real filesystem at
+runtime. GraalVM native-image and `pkg` are **not** used for this reason.
+- Java: jlink creates a minimal JRE that runs the fat JAR
+- Python: PyInstaller `--collect-all kuzu` bundles the native `.so`
+- Node: `.node` addon shipped alongside `parse.js` in `/opt/cmg-js/`
+
+### Dockerfile.ui — 2 stages
+
+| Stage | Output |
+|---|---|
+| `ui-builder` | `npm run build` → `dist/` (React static files) |
+| final | `node:20-slim` + `dist/` + Express server (`npx tsx server/index.ts`) |
+
+`ui/server/index.ts` serves `dist/` as static files when `NODE_ENV=production`, so the
+single Express process on port 3001 handles both API routes and the React app.
+
+### docker-compose.yml profiles
+
+| Profile | Command | URL |
+|---|---|---|
+| `pipeline` | `make compose-pipeline REPO=...` | — (writes to `./output/`) |
+| `docs` | `make compose-docs` | http://localhost:8080 |
+| `ui` | `make compose-ui` | http://localhost:3001 |
+
+`pipeline` service has `extra_hosts: host.docker.internal:host-gateway` for Ollama on Linux.
+On Mac/Windows Docker Desktop, `host.docker.internal` is available automatically.
 
 ---
 
 ## Sub-project: pipeline/
 
-Python package named `codedoc`. Entry point: `codedoc run`.
+Python package named `codedoc` (internal). CLI entry point: `lumen` (via `pyproject.toml`).
 
 Key files:
-- `pipeline/codedoc/cli.py` — Click CLI
+- `pipeline/codedoc/cli.py` — Click CLI (`lumen run`)
+- `pipeline/codedoc/config.py` — config loader; defaults use `Path(__file__)` relative paths
 - `pipeline/codedoc/pipeline.py` — sequential orchestration: indexer → agent → builder
-- `pipeline/codedoc/stages/agent.py` — supervisor + parallel subagents (Phase 2/3 parallel, Phase 4 sequential)
+- `pipeline/codedoc/stages/agent.py` — supervisor + parallel subagents
 - `pipeline/codedoc/llm.py` — LLM abstraction: `ClaudeProvider`, `OllamaProvider`, `OpenAIProvider`
 - `pipeline/codedoc/kg_tools/toolkit.py` — `ReverseEngineerToolkit` (36 graph query tools)
 - `pipeline/codedoc/kg_tools/backends.py` — `KuzuBackend`, `Neo4jBackend`
 - `pipeline/codedoc/prompts/re-prompt.md` — base agent system prompt
 - `pipeline/codedoc/prompts/phase{2,3,4}-*.md` — phase-specific task overrides
 - `pipeline/scripts/build-docs-site.sh` — scaffolds + builds Docusaurus site
+- `pipeline/.codedoc.toml` — runtime config (`indexer_bin_dir = ../indexer/bin`)
+- `pipeline/pyproject.toml` — package name: `lumen`, entry point: `lumen = "codedoc.cli:main"`
 
 Agent architecture:
 ```
@@ -114,24 +169,26 @@ Key files:
 - `indexer/parsers/python/parse.py` — Python AST parser
 - `indexer/mcp/` — MCP server
 
-`indexer/install.sh` uses `$SCRIPT_DIR` to derive all paths — re-run it after cloning or moving the repo.
-The generated `indexer/bin/` wrappers contain absolute paths and are gitignored.
+`install.sh` uses `$SCRIPT_DIR` — re-run after cloning or moving the repo. Generated
+`indexer/bin/` wrappers contain absolute paths and are gitignored.
 
 ---
 
 ## Sub-project: ui/
 
 React 19 + TypeScript + Vite frontend with Sigma.js/Graphology graph visualization.
-Express 5 backend that connects to KuzuDB or Neo4j.
+Express 5 backend connects to KuzuDB or Neo4j.
 
 Key files:
 - `ui/src/App.tsx` — three-panel layout: QueryPanel | GraphCanvas | NodeDetailPanel
 - `ui/server/index.ts` — Express server (port 3001): `/api/connect`, `/api/query`, `/api/schema`
+  - In production (`NODE_ENV=production`): also serves built React `dist/` as static files
 - `ui/server/kuzu-service.ts` — KuzuDB adapter
 - `ui/server/neo4j-service.ts` — Neo4j adapter
-- `ui/vite.config.ts` — proxies `/api` to port 3001
+- `ui/vite.config.ts` — in dev mode proxies `/api` → port 3001
 
-Start: `cd ui && npm run dev` (concurrently runs Vite + Express)
+Dev: `cd ui && npm run dev` (Vite port 5173 + Express port 3001)
+Docker: `make compose-ui` → Express serves everything on port 3001
 
 ---
 
@@ -153,6 +210,12 @@ Start: `cd ui && npm run dev` (concurrently runs Vite + Express)
 | No pnpm workspaces | JS parser (`indexer/parsers/javascript`) is private and tiny |
 | `indexer/install.sh` unchanged | Already uses `$SCRIPT_DIR`; relocatable as-is |
 | `indexer_bin_dir = ../indexer/bin` | Wires pipeline to indexer binaries across monorepo boundary |
+| jlink instead of GraalVM native-image | KuzuDB extracts JNI `.so` from JAR at runtime; native-image can't handle this |
+| PyInstaller for Python binaries | `--collect-all kuzu` bundles the native `.so`; works reliably |
+| No `pkg`/Node SEA for JS parser | KuzuDB uses `process.dlopen()` on real `.node` file paths; can't virtualise |
+| Docker runtime `.codedoc.toml` at `/workspace/` | Overrides `indexer_bin_dir` + `build_script` without code changes |
+| `ui/server/index.ts` production static serving | Single port (3001) for both API and React app in Docker |
+| `extra_hosts: host.docker.internal:host-gateway` | Lets pipeline container reach host Ollama on Linux |
 | LangGraph removed from pipeline | 3 sequential nodes, no branching — 50 MB dep for zero benefit |
 | Parallel Phase 2+3 subagents | Cuts wall-clock time ~50%; phases use disjoint tool sets |
 | Each subagent gets its own KuzuBackend | KuzuDB connections are not thread-safe |

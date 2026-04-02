@@ -4,11 +4,10 @@
 
 ```
 Source repo → knowledge graph → LLM analysis → documentation site
+                            ↘ graph UI (visual explorer)
 ```
 
 ## What you get
-
-After a single command, lumen writes a Docusaurus site with:
 
 | Document | What it covers |
 |---|---|
@@ -23,30 +22,31 @@ After a single command, lumen writes a Docusaurus site with:
 ## Quickstart (Docker — no local prerequisites)
 
 ```bash
-docker pull ghcr.io/your-org/lumen   # or: docker build -t lumen .
-
-docker run --rm \
-  -v /path/to/repo:/repo \
-  -v $(pwd)/output:/workspace/output \
-  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
-  lumen run /repo --output-dir /workspace/output
+git clone <repo-url> lumen && cd lumen
+make docker-build
 ```
 
-Or with the Makefile:
+Set your API key:
 
 ```bash
-make docker-build
-make docker-run REPO=/path/to/repo
+cp .env.example .env
+# edit .env: ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Run:
+
+```bash
+make docker-run REPO=/path/to/your/repo
 ```
 
 ### Using a local Ollama model
 
 Inside Docker, `localhost` refers to the container — not your machine. Use
-`host.docker.internal` to reach your host:
+`host.docker.internal` to reach your host's Ollama:
 
 ```bash
 # Mac / Windows (Docker Desktop): host.docker.internal is automatic
-# Linux: docker-compose.yml already adds extra_hosts for you
+# Linux: docker-compose.yml already configures extra_hosts for you
 
 make compose-pipeline REPO=/path/to/repo \
   ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
@@ -56,81 +56,49 @@ make compose-pipeline REPO=/path/to/repo \
 
 ## Viewing results
 
-### Doc-site (generated Docusaurus documentation)
+After a pipeline run, output lands in `./output/`.
 
-After a pipeline run, serve the docs at `http://localhost:8080`:
+### Doc-site
+
+Browse the generated Docusaurus documentation at **http://localhost:8080**:
 
 ```bash
 make compose-docs
 ```
 
-The site is served from `./output/` on your host — no rebuild needed.
+### Graph UI
 
-### Graph UI (visual KuzuDB explorer)
-
-Start the graph visualization UI at `http://localhost:3001`:
+Explore the knowledge graph visually at **http://localhost:3001**:
 
 ```bash
 make compose-ui
 ```
 
-Then connect it to a database from a previous run:
+Connect it to a database from a previous run:
 - DB type: **KuzuDB**
 - DB path: `/data/<repo-name>-<timestamp>/index.kuzu/db`
 
-The `/data` path inside the container maps to `./output/` on your host.
+(`/data` inside the container maps to `./output/` on your host.)
 
 ---
 
-## Native install (optional — requires Java 21, Node 18, Python 3.11+)
+## Native install (optional)
 
-### Prerequisites
-
-| Requirement | Purpose |
-|---|---|
-| Python 3.11+ | Pipeline runtime |
-| Java 21+ | Indexing Java / Kotlin repos |
-| Node 18+ | Indexing JavaScript / TypeScript repos; graph UI |
-| An LLM API key | Analysis (Anthropic Claude by default) |
-
----
-
-## Installation
+Requires Java 21, Node 18, Python 3.11+.
 
 ```bash
-git clone <repo-url> lumen
-cd lumen
-
-# Build indexer runtimes + install CLI
-make install
+cp .env.example .env        # add ANTHROPIC_API_KEY
+make install                # builds indexer runtimes + installs Python CLI
 ```
 
-Copy the example env file and add your API key:
-
-```bash
-cp .env.example .env
-# edit .env and set ANTHROPIC_API_KEY
-```
-
----
-
-## Usage
+Run:
 
 ```bash
 cd pipeline
-lumen run /path/to/your/repo
+lumen run /path/to/repo --verbose
 ```
 
-With options:
-
-```bash
-lumen run /path/to/repo \
-  --verbose \
-  --model claude-sonnet-4-6 \
-  --output-dir ./my-output
-```
-
-Using a local model (Ollama):
+With a local Ollama model:
 
 ```bash
 lumen run /path/to/repo \
@@ -139,50 +107,51 @@ lumen run /path/to/repo \
   --base-url http://localhost:11434/v1
 ```
 
-### All options
+Open the graph UI in dev mode:
 
-```
-Options:
-  --model TEXT        LLM model to use (default: claude-sonnet-4-6)
-  --provider TEXT     LLM provider: auto, anthropic, ollama, openai (default: auto)
-  --base-url TEXT     Override API endpoint (for Ollama or custom OpenAI-compatible servers)
-  --output-dir TEXT   Where to write output (default: ./codedoc-output)
-  --max-turns INT     Max LLM turns per phase (default: 40)
-  --verbose           Stream logs as the pipeline runs
-  --help              Show this message and exit
+```bash
+make dev-ui    # Vite → http://localhost:5173  |  Express → http://localhost:3001
 ```
 
 ---
 
-## Output
+## All CLI options
 
-Each run produces an output directory:
+```
+lumen run REPO_PATH [OPTIONS]
+
+  --model TEXT        LLM model (default: claude-sonnet-4-6)
+  --provider TEXT     auto | anthropic | ollama | openai  (default: auto)
+  --base-url TEXT     Override API endpoint (e.g. http://localhost:11434/v1)
+  --output-dir TEXT   Output directory (default: ./codedoc-output)
+  --max-turns INT     Max LLM turns per phase (default: 40)
+  --verbose           Stream logs as the pipeline runs
+  --help
+```
+
+---
+
+## Output structure
 
 ```
 codedoc-output/<repo-name>-<timestamp>/
-├── pipeline.json          ← run metadata and token usage
-├── index.kuzu/            ← knowledge graph database
-├── artifacts/             ← the 7 markdown documents
+├── pipeline.json              ← run metadata and token usage
+├── index.kuzu/                ← knowledge graph database
+├── artifacts/                 ← 7 markdown documents
 │   ├── current-state/inventory.md
 │   ├── architecture/system-overview.md
 │   ├── domain/domain-analysis.md
 │   ├── migration/roadmap.md
 │   ├── target-state/blueprint.md
 │   └── manifests/artifacts.json
-└── doc-site/              ← built Docusaurus site
-```
-
-Open the docs site:
-
-```bash
-cd doc-site && npm start
+└── doc-site/                  ← built Docusaurus site
 ```
 
 ---
 
 ## Configuration file
 
-Create `pipeline/.codedoc.toml` to set persistent defaults:
+`pipeline/.codedoc.toml` sets persistent defaults (CLI flags always win):
 
 ```toml
 [pipeline]
@@ -192,20 +161,6 @@ max_turns = 40
 [paths]
 output_dir = "./my-output"
 ```
-
-CLI flags always override this file.
-
----
-
-## Graph UI (optional)
-
-lumen includes a visual graph explorer for browsing the knowledge graph produced by the indexer.
-
-```bash
-make dev-ui
-```
-
-Opens at `http://localhost:5173`. Connect it to any `.kuzu` database from a previous run.
 
 ---
 
