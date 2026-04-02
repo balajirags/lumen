@@ -9,7 +9,7 @@ install-indexer:
 	cd indexer && bash install.sh
 
 install-pipeline:
-	cd pipeline && uv pip install -e .
+	cd pipeline && uv sync
 
 dev-ui:
 	cd ui && npm install && npm run dev
