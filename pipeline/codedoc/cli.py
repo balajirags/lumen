@@ -22,6 +22,7 @@ def main() -> None:
 @main.command()
 @click.argument("repo_path", type=click.Path(exists=True, file_okay=False))
 @click.option("--output-dir", type=click.Path(), default=None, help="Output directory (default: ./codedoc-output)")
+@click.option("--repo-name", default=None, help="Override repository name used in output directory (useful when repo is mounted at a generic path like /repo)")
 @click.option("--model", default=None, help="Model name (default: claude-sonnet-4-6). For Ollama use tool-capable models: llama3.1, qwen2.5, mistral.")
 @click.option("--provider", default=None, type=click.Choice(["auto", "anthropic", "ollama", "openai"]), help="LLM provider (default: auto-detect from model name)")
 @click.option("--base-url", default=None, help="Custom API base URL (e.g. http://localhost:11434/v1 for Ollama)")
@@ -31,6 +32,7 @@ def main() -> None:
 def run(
     repo_path: str,
     output_dir: str | None,
+    repo_name: str | None,
     model: str | None,
     provider: str | None,
     base_url: str | None,
@@ -54,6 +56,7 @@ def run(
 
     state = run_pipeline(
         repo_path=repo_path,
+        repo_name=repo_name,
         output_dir=cfg.output_dir,
         model=cfg.model,
         provider=cfg.provider,

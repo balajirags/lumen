@@ -19,7 +19,8 @@ from codedoc.stages.builder import run_builder
 
 def run_pipeline(
     repo_path: str,
-    output_dir: str,
+    repo_name: str | None = None,
+    output_dir: str = "",
     model: str,
     provider: str,
     base_url: str,
@@ -37,7 +38,7 @@ def run_pipeline(
     writes pipeline.json, and returns the state.
     """
     repo = Path(repo_path).resolve()
-    repo_name = repo.name
+    repo_name = repo_name or repo.name
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     run_dir = Path(output_dir) / f"{repo_name[:20]}-{ts}"

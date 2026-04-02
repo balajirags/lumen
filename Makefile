@@ -29,14 +29,14 @@ docker-run:
 	  -v "$(REPO)":/repo \
 	  -v "$(PWD)/output":/workspace/output \
 	  -e ANTHROPIC_API_KEY="$(ANTHROPIC_API_KEY)" \
-	  $(DOCKER_IMAGE) run /repo --output-dir /workspace/output
+	  $(DOCKER_IMAGE) run /repo --repo-name "$(notdir $(REPO))" --output-dir /workspace/output
 
 # ── Docker Compose ──
 compose-pipeline:
 	@if [ -z "$(REPO)" ]; then echo "Usage: make compose-pipeline REPO=/path/to/repo [ARGS='--provider ollama ...']"; exit 1; fi
 	REPO_PATH="$(REPO)" OUTPUT_PATH="$(PWD)/output" COMPOSE_PROFILES=pipeline \
 	  docker-compose run pipeline -- \
-	  run /repo --output-dir /workspace/output $(ARGS)
+	  run /repo --repo-name "$(notdir $(REPO))" --output-dir /workspace/output $(ARGS)
 
 compose-docs:
 	OUTPUT_PATH="$(PWD)/output" COMPOSE_PROFILES=docs docker-compose up docs
