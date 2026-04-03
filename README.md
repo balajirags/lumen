@@ -22,19 +22,20 @@ Source repo
     │         AST + CFG + DFG    call graph, hierarchy, coupling
     │
     ▼
-[Multi-agent pipeline] — graph queries first, source reads second
+[Multi-agent pipeline] — Analyst + Architect pattern
     │
-    ├─ Supervisor coordinates 7 phases
     ├─ Phase 1: Orientation (direct graph call — no LLM)
-    ├─ Phase 2: API / component inventory   } run in parallel
-    ├─ Phase 3: Architecture + domain model } seeded by Phase 1
-    ├─ Phase 4: Migration risk + target state  }
-    ├─ Phase 5: C4 system context diagram      } run in parallel
-    ├─ Phase 6: Sequence diagrams              } seeded by Phase 2+3
-    └─ Phase 7: ER diagram / domain model      }
+    │
+    ├─ Phase 2: 3 parallel Analysts (graph queries + write artifacts)
+    │   ├─ Domain Analyst      → business capabilities + ER diagram
+    │   ├─ Flows Analyst       → user journeys + C4 context + API spec
+    │   └─ Tech Analyst        → coupling hotspots + decomposition signals
+    │
+    └─ Phase 3: Architect (reads Phase 2 artifacts → writes target state)
+               → bounded context decomposition + target C4 + strangler fig plan
     │
     ▼
-[Builder] → MkDocs Material documentation site
+[Builder] → MkDocs Material documentation site (PlantUML diagrams)
          → KuzuDB graph (explorable in the UI)
 ```
 
@@ -61,18 +62,18 @@ metadata to read only the exact method body (50–600 tokens), not the whole fil
 
 ### Multi-agent synthesis
 
-The pipeline runs specialised subagents under a supervisor across 7 phases:
+The pipeline uses an **Analyst + Architect** pattern:
 
-- **api-analyst** (Phase 2) — entry points, endpoints / components, module structure, entities
-- **architect** (Phase 3) — coupling matrix, design patterns, domain model, external systems
-- **migration-planner** (Phase 4) — hotspots, dead code, risk matrix, target state blueprint
-- **c4-context** (Phase 5) — integration points diagram (databases, queues, external APIs)
-- **sequence-diagrams** (Phase 6) — Mermaid sequence diagrams for key runtime flows
-- **er-diagram** (Phase 7) — entity relationships and bounded context ownership
+- **Domain Analyst** — queries domain model, capabilities, validation rules, entity relationships
+- **Flows Analyst** — traces user flows, integration points (upstream + downstream), API surface
+- **Tech Analyst** — coupling hotspots, dead code, circular dependencies, decomposition signals
 
-Phases 2+3 run **in parallel**. Phases 4–7 also run **in parallel**, seeded with Phase 2+3
-findings — no redundant queries. The pipeline auto-detects whether the repo is a **frontend**
-(React/Vue/Angular) or **backend** (Spring/Django/Express) and selects appropriate prompts.
+All three analysts run **in parallel**, each writing their own artifacts directly to disk.
+The **Architect** then reads those artifacts and designs the target state — bounded context
+decomposition, target C4 diagram, and strangler fig extraction plan.
+
+Diagrams are produced in **PlantUML** (C4Context + sequence diagrams) rendered to SVG in the
+built documentation site.
 
 ---
 
@@ -80,14 +81,15 @@ findings — no redundant queries. The pipeline auto-detects whether the repo is
 
 | Document | What it covers |
 |---|---|
-| API & Module Inventory | Endpoints / components, packages, domain entities, tech stack |
-| System Architecture | Layered architecture, coupling hotspots, data flow, design patterns |
-| C4 System Context Diagram | Integration points: databases, queues, external APIs (Mermaid) |
-| Domain Analysis | Business capabilities, bounded contexts, domain events |
-| ER Diagram | Entity relationships and bounded context ownership (Mermaid) |
-| Sequence Diagrams | Key runtime flows: request handling, auth, data writes (Mermaid) |
-| Migration Roadmap | Risk matrix, dead code candidates, modernization phases |
-| Target State Blueprint | Target microservice / component map and migration principles |
+| Business Capabilities | All capabilities in the system + business rules and validations per capability |
+| Business Journeys | Key user flows as "As a [role], I can [action]…" + PlantUML sequence diagrams |
+| C4 System Context | Integration map — upstream callers + downstream dependencies + protocols (PlantUML) |
+| Coupling Hotspots | Risk matrix, coupling pairs, dead code candidates, decomposition seam candidates |
+| ER Diagram | Entity relationships and bounded context ownership (PlantUML, backend only) |
+| API Spec | OpenAPI YAML (backend only, when endpoint signatures are available) |
+| Bounded Contexts | Bounded context decomposition grounded in coupling + domain evidence |
+| Target C4 Context | Future decomposed state as PlantUML C4Context diagram |
+| Strangler Fig Plan | Ordered extraction plan with seam identification and routing strategy |
 
 Plus a **visual graph explorer** (the UI) for ad-hoc Cypher queries on the CPG.
 
@@ -189,7 +191,7 @@ lumen run REPO_PATH [OPTIONS]
   --base-url TEXT     Override API endpoint (e.g. http://localhost:11434/v1)
   --repo-name TEXT    Override repo name in output dir (useful when mounted at /repo)
   --output-dir TEXT   Output directory (default: ./codedoc-output)
-  --max-turns INT     Max LLM turns per phase (default: 60)
+  --max-turns INT     Max LLM turns per phase (default: 120)
   --verbose           Stream logs as the pipeline runs
 ```
 
@@ -200,18 +202,22 @@ lumen run REPO_PATH [OPTIONS]
 ```
 output/<repo-name>-<timestamp>/
 ├── pipeline.json          ← run metadata and token usage
-├── index.kuzu             ← Code Property Graph database (single file, KuzuDB 0.11+)
+├── index.kuzu             ← Code Property Graph database (KuzuDB)
 └── artifacts/             ← documentation artifacts
-    ├── current-state/inventory.md
-    ├── architecture/
-    │   ├── system-overview.md
-    │   ├── c4-context.md         ← Mermaid C4Context diagram
-    │   └── sequence-diagrams.md  ← Mermaid sequence diagrams
     ├── domain/
-    │   ├── domain-analysis.md
-    │   └── er-diagram.md         ← Mermaid erDiagram
-    ├── migration/roadmap.md
-    ├── target-state/blueprint.md
+    │   ├── business-capabilities.md  ← capabilities + business rules per capability
+    │   └── er-diagram.md             ← PlantUML entity diagram (backend only)
+    ├── architecture/
+    │   ├── business-journeys.md      ← PlantUML sequence diagrams for key flows
+    │   └── c4-context.md             ← PlantUML C4Context (upstream + downstream)
+    ├── tech/
+    │   └── coupling-hotspots.md      ← hotspot table + dead code + seam candidates
+    ├── current-state/
+    │   └── api-spec.yaml             ← OpenAPI spec (backend only, conditional)
+    ├── target-state/
+    │   ├── bounded-contexts.md       ← BC decomposition + service table
+    │   ├── c4-target.md              ← PlantUML C4Context of future decomposed state
+    │   └── strangler-fig.md          ← ordered extraction plan
     └── manifests/artifacts.json
 
 output/doc-site/               ← shared MkDocs Material site (accumulates all runs)
@@ -227,7 +233,7 @@ output/doc-site/               ← shared MkDocs Material site (accumulates all 
 [pipeline]
 model     = "claude-sonnet-4-6"
 provider  = "auto"
-max_turns = 60
+max_turns = 120
 
 [paths]
 output_dir = "./my-output"
@@ -247,10 +253,10 @@ output_dir = "./my-output"
 
 ## Cost
 
-A typical run on a medium-sized repo (~50k lines) uses roughly 15,000–25,000 tokens
-for graph queries plus up to 90,000 tokens for targeted source reads.
+A typical run on a medium-sized repo (~50k lines) uses roughly 150,000–300,000 tokens
+across the three analysts and the architect (graph queries + artifact writing).
 
-At Claude Sonnet pricing: approximately **$0.10–$0.25 per run**.
+At Claude Sonnet pricing: approximately **$0.20–$0.50 per run**.
 
 Token usage is recorded in `pipeline.json` after every run.
 
