@@ -1,4 +1,4 @@
-.PHONY: install install-indexer install-pipeline run dev-ui test \
+.PHONY: install install-indexer install-pipeline run dev-docs dev-ui test \
         docker-build docker-run \
         compose-pipeline compose-docs compose-ui
 
@@ -24,6 +24,10 @@ run:
 	  echo "  Ollama:    ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'"; \
 	  exit 1; fi
 	cd pipeline && uv run lumen run "$(REPO)" --output-dir "$(PWD)/output" $(ARGS)
+
+dev-docs:
+	bash pipeline/scripts/build-docs-site.sh --output-dir output --site-dir output/doc-site
+	cd pipeline && uv run python -m http.server 8081 --directory ../output/doc-site
 
 dev-ui:
 	cd ui && npm install && npm run dev
