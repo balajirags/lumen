@@ -390,6 +390,30 @@ def run_loop(
 _PHASE_PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 
+def _detect_repo_type(orientation_summary: str) -> str:
+    """Detect whether the repo is a frontend, backend, or fullstack codebase.
+
+    Uses keyword matching on the orientation summary produced by Phase 1.
+    Returns one of: 'frontend', 'backend', 'fullstack'.
+    """
+    s = orientation_summary.lower()
+    frontend_signals = [
+        "react", "vue", "angular", "svelte", "component", "jsx", "tsx",
+        "next.js", "nuxt", "vite", "webpack", "hook", "redux", "zustand",
+        "jotai", "recoil", "mobx", "tailwind", "css module",
+    ]
+    backend_signals = [
+        "controller", "service", "repository", "entity", "spring", "django",
+        "flask", "fastapi", "express", "annotation", "middleware", "endpoint",
+        "rest api", "graphql server", "grpc", "database", "orm", "hibernate",
+    ]
+    has_frontend = any(w in s for w in frontend_signals)
+    has_backend = any(w in s for w in backend_signals)
+    if has_frontend and has_backend:
+        return "fullstack"
+    return "frontend" if has_frontend else "backend"
+
+
 def _build_phase_system_prompt(
     base_prompt: str,
     phase_file: str,
@@ -478,6 +502,45 @@ def run_supervisor_agent(
         }
 
     # ------------------------------------------------------------------
+    # Detect repo type and select appropriate prompts
+    # ------------------------------------------------------------------
+    repo_type = _detect_repo_type(orientation_summary)
+    log(f"[supervisor] Detected repo type: {repo_type}")
+
+    if repo_type == "frontend":
+        frontend_base_path = _PHASE_PROMPTS_DIR / "re-prompt-frontend.md"
+        if frontend_base_path.exists():
+            raw = frontend_base_path.read_text(encoding="utf-8")
+            if raw.startswith("---"):
+                raw = raw[raw.find("---", 3) + 3:].lstrip()
+            base_prompt = raw
+        phase2_file = "phase2-frontend-inventory.md"
+        phase3_file = "phase3-frontend-architecture.md"
+        phase4_file = "phase4-frontend-migration.md"
+        phase2_req = (
+            "Analyse the component structure, routing, and state management. "
+            "Write current-state/inventory.md. Stop after writing that artifact."
+        )
+        phase3_req = (
+            "Analyse component hierarchy, data flow patterns, and feature organisation. "
+            "Write architecture/system-overview.md and domain/domain-analysis.md. "
+            "Stop after writing both artifacts."
+        )
+    else:
+        phase2_file = "phase2-inventory.md"
+        phase3_file = "phase3-architecture.md"
+        phase4_file = "phase4-migration.md"
+        phase2_req = (
+            "Analyse the API surface and module structure. "
+            "Write current-state/inventory.md. Stop after writing that artifact."
+        )
+        phase3_req = (
+            "Analyse architecture patterns and domain model. "
+            "Write architecture/system-overview.md and domain/domain-analysis.md. "
+            "Stop after writing both artifacts."
+        )
+
+    # ------------------------------------------------------------------
     # Helper: run one phase in its own thread
     # ------------------------------------------------------------------
     def _run_phase(
@@ -512,20 +575,10 @@ def run_supervisor_agent(
     # ------------------------------------------------------------------
     log("[supervisor] spawning subagent/api-analyst + subagent/architect in parallel…")
 
-    phase2_req = (
-        "Analyse the API surface and module structure. "
-        "Write current-state/inventory.md. Stop after writing that artifact."
-    )
-    phase3_req = (
-        "Analyse architecture patterns and domain model. "
-        "Write architecture/system-overview.md and domain/domain-analysis.md. "
-        "Stop after writing both artifacts."
-    )
-
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = {
-            pool.submit(_run_phase, "subagent/api-analyst", "phase2-inventory.md", phase2_req): "subagent/api-analyst",
-            pool.submit(_run_phase, "subagent/architect", "phase3-architecture.md", phase3_req): "subagent/architect",
+            pool.submit(_run_phase, "subagent/api-analyst", phase2_file, phase2_req): "subagent/api-analyst",
+            pool.submit(_run_phase, "subagent/architect", phase3_file, phase3_req): "subagent/architect",
         }
         for future in as_completed(futures):
             phase_name, result = future.result()
@@ -587,7 +640,7 @@ def run_supervisor_agent(
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {
-            pool.submit(_run_phase, "subagent/migration-planner", "phase4-migration.md",
+            pool.submit(_run_phase, "subagent/migration-planner", phase4_file,
                         phase4_req, base_with_context): "subagent/migration-planner",
             pool.submit(_run_phase, "subagent/c4-context", "phase5-c4-context.md",
                         phase5_req, base_with_context): "subagent/c4-context",
