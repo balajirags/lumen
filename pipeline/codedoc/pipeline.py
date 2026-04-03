@@ -63,6 +63,8 @@ def run_pipeline(
         started_at=datetime.now(timezone.utc).isoformat(),
     )
 
+    from codedoc import log as _log
+    _log.print_pipeline_start(str(repo), str(run_dir))
     state.log("pipeline", f"Starting pipeline for {repo}")
     state.log("pipeline", f"Output directory: {run_dir}")
 
@@ -71,27 +73,36 @@ def run_pipeline(
     try:
         # Stage 1: Indexer
         state.log("pipeline", "=== Stage 1: Indexer ===")
+        _log.print_stage_header(1, "Indexer")
         t0 = time.time()
         state = run_indexer(state)
-        state.log("pipeline", f"Stage 1 (Indexer) completed in {time.time() - t0:.1f}s")
+        elapsed1 = time.time() - t0
+        state.log("pipeline", f"Stage 1 (Indexer) completed in {elapsed1:.1f}s")
+        _log.print_stage_done(1, "Indexer", elapsed1)
 
         if state.status == "failed":
             return state
 
         # Stage 2: Agent
         state.log("pipeline", "=== Stage 2: Agent ===")
+        _log.print_stage_header(2, "Agent")
         t0 = time.time()
         state = run_agent(state)
-        state.log("pipeline", f"Stage 2 (Agent) completed in {time.time() - t0:.1f}s")
+        elapsed2 = time.time() - t0
+        state.log("pipeline", f"Stage 2 (Agent) completed in {elapsed2:.1f}s")
+        _log.print_stage_done(2, "Agent", elapsed2)
 
         if state.status == "failed":
             return state
 
         # Stage 3: Builder
         state.log("pipeline", "=== Stage 3: Builder ===")
+        _log.print_stage_header(3, "Builder")
         t0 = time.time()
         state = run_builder(state)
-        state.log("pipeline", f"Stage 3 (Builder) completed in {time.time() - t0:.1f}s")
+        elapsed3 = time.time() - t0
+        state.log("pipeline", f"Stage 3 (Builder) completed in {elapsed3:.1f}s")
+        _log.print_stage_done(3, "Builder", elapsed3)
 
         state.status = "done"
         pipeline_elapsed = time.time() - pipeline_t0

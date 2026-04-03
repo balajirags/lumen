@@ -137,18 +137,22 @@ theme:
     - navigation.indexes
     - content.code.copy
     - toc.follow
+plugins:
+  - search
+  - build_plantuml:
+      render: "local"
+      bin_path: "plantuml"
+      output_format: "svg"
+      diagram_root: "docs"
+      output_folder: "assets/diagrams"
+      input_folder: "."
+      input_extensions: ""
 markdown_extensions:
   - tables
   - attr_list
-  - pymdownx.superfences:
-      custom_fences:
-        - name: mermaid
-          class: mermaid
-          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: true
-extra_javascript:
-  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
+  - pymdownx.superfences
 YAML
 
 if $SKIP_BUILD; then
