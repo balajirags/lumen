@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -70,27 +71,42 @@ def run(
         build_script=cfg.build_script,
     )
 
+    from codedoc import log as _log
+
+    def _elapsed() -> float:
+        try:
+            return (
+                datetime.fromisoformat(state.finished_at) - datetime.fromisoformat(state.started_at)
+            ).total_seconds()
+        except Exception:
+            return 0.0
+
     if state.status == "done":
-        click.echo(f"\n✓ Done in {state.output_dir}")
-        if state.site_path:
-            click.echo(f"  Doc-site : {state.site_path}")
-        if state.artifacts_dir:
-            artifacts = list(Path(state.artifacts_dir).rglob("*.md"))
-            click.echo(f"  Artifacts: {len(artifacts)} file(s) in {state.artifacts_dir}")
-        click.echo(f"  Details  : {state.output_dir}/pipeline.json")
+        artifacts = list(Path(state.artifacts_dir).rglob("*.md")) if state.artifacts_dir else []
+        _log.print_success_panel(
+            output_dir=state.output_dir,
+            site_path=state.site_path or None,
+            artifacts_dir=state.artifacts_dir or None,
+            artifact_count=len(artifacts),
+            input_tokens=state.input_tokens,
+            output_tokens=state.output_tokens,
+            tool_uses=state.tool_uses,
+            elapsed=_elapsed(),
+        )
         sys.exit(0)
     else:
-        click.echo(f"\n✗ Pipeline did not complete (status: {state.status})", err=True)
-        if state.error:
-            click.echo(f"  Error: {state.error}", err=True)
-        if state.output_dir:
-            click.echo(f"  Details: {state.output_dir}/pipeline.json", err=True)
-        if state.artifacts_dir and Path(state.artifacts_dir).exists():
-            artifacts = list(Path(state.artifacts_dir).rglob("*.md"))
-            if artifacts:
-                click.echo(f"  Partial artifacts ({len(artifacts)} file(s)):", err=True)
-                for a in artifacts:
-                    click.echo(f"    {a.relative_to(state.artifacts_dir)}", err=True)
+        artifacts = (
+            list(Path(state.artifacts_dir).rglob("*.md"))
+            if state.artifacts_dir and Path(state.artifacts_dir).exists()
+            else []
+        )
+        partial = [str(a.relative_to(state.artifacts_dir)) for a in artifacts] if artifacts else []
+        _log.print_failure_panel(
+            status=state.status,
+            error=state.error,
+            output_dir=state.output_dir or None,
+            partial_artifacts=partial,
+        )
         sys.exit(1)
 
 

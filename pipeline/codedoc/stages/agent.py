@@ -92,6 +92,7 @@ _WRITE_ARTIFACT_OPENAI = _WRITE_ARTIFACT_DEF.to_openai_dict()
 _WRITE_ARTIFACT_ANTHROPIC = _WRITE_ARTIFACT_DEF.to_anthropic_dict()
 
 
+
 # ---------------------------------------------------------------------------
 # System prompt loader
 # ---------------------------------------------------------------------------
@@ -248,6 +249,7 @@ def run_loop(
     extra_tool_defs: list[dict] | None = None,
     max_context_tokens: int = 120_000,
     max_source_reads: int = 15,
+    include_write_artifact: bool = True,
     phase_label: str = "agent",
 ) -> dict[str, Any]:
     """Run the agentic tool loop.
@@ -278,9 +280,13 @@ def run_loop(
 
     # Build tool definitions
     if use_anthropic_format:
-        tool_defs = toolkit.anthropic_tool_definitions() + [_WRITE_ARTIFACT_ANTHROPIC]
+        tool_defs = toolkit.anthropic_tool_definitions()
+        if include_write_artifact:
+            tool_defs = tool_defs + [_WRITE_ARTIFACT_ANTHROPIC]
     else:
-        tool_defs = toolkit.openai_tool_definitions() + [_WRITE_ARTIFACT_OPENAI]
+        tool_defs = toolkit.openai_tool_definitions()
+        if include_write_artifact:
+            tool_defs = tool_defs + [_WRITE_ARTIFACT_OPENAI]
     if extra_tool_defs:
         tool_defs = tool_defs + extra_tool_defs
 
@@ -310,9 +316,15 @@ def run_loop(
         try:
             response = chat_with_retry(provider, messages, tools=tool_defs, tool_choice="auto")
         except Exception as e:
+            notes = next(
+                (m.get("content") or "" for m in reversed(messages)
+                 if m.get("role") == "assistant" and not m.get("tool_calls")),
+                ""
+            )
             return {
                 "status": "failed",
                 "error": f"LLM API error: {e}",
+                "notes": notes,
                 "artifacts": artifacts,
                 "events": events,
                 "tool_uses": tool_uses,
@@ -325,7 +337,8 @@ def run_loop(
 
         # Always print a minimal progress line (even in non-verbose mode)
         first_tool = response.tool_calls[0].name if response.tool_calls else "stop"
-        print(f"{tag} turn {turn}/{max_turns}  {first_tool}", flush=True)
+        from codedoc import log as _log
+        _log.print_progress_line(phase_label, turn, max_turns, first_tool)
 
         # No tool calls → agent is done
         if not response.tool_calls:
@@ -360,9 +373,15 @@ def run_loop(
                 log(f"{tag} context pruned: removed {removed} messages (input tokens so far: {total_input_tokens:,})")
     else:
         log(f"{tag} WARNING: exceeded {max_turns} tool turns — continuing with {len(artifacts)} artifact(s) produced so far")
+        notes = next(
+            (m.get("content") or "" for m in reversed(messages)
+             if m.get("role") == "assistant" and not m.get("tool_calls")),
+            ""
+        )
         return {
             "status": "done",
             "error": None,
+            "notes": notes,
             "artifacts": artifacts,
             "events": events,
             "tool_uses": tool_uses,
@@ -372,9 +391,15 @@ def run_loop(
 
     log(f"{tag} tokens — input: {total_input_tokens:,}  output: {total_output_tokens:,}  total: {total_input_tokens + total_output_tokens:,}")
 
+    notes = next(
+        (m.get("content") or "" for m in reversed(messages)
+         if m.get("role") == "assistant" and not m.get("tool_calls")),
+        ""
+    )
     return {
         "status": "done",
         "error": None,
+        "notes": notes,
         "artifacts": artifacts,
         "events": events,
         "tool_uses": tool_uses,
@@ -390,52 +415,90 @@ def run_loop(
 _PHASE_PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 
-def _detect_repo_type(orientation_summary: str) -> str:
-    """Detect whether the repo is a frontend, backend, or fullstack codebase.
-
-    Uses keyword matching on the orientation summary produced by Phase 1.
-    Returns one of: 'frontend', 'backend', 'fullstack'.
-    """
-    s = orientation_summary.lower()
-    frontend_signals = [
-        "react", "vue", "angular", "svelte", "component", "jsx", "tsx",
-        "next.js", "nuxt", "vite", "webpack", "hook", "redux", "zustand",
-        "jotai", "recoil", "mobx", "tailwind", "css module",
-    ]
-    backend_signals = [
-        "controller", "service", "repository", "entity", "spring", "django",
-        "flask", "fastapi", "express", "annotation", "middleware", "endpoint",
-        "rest api", "graphql server", "grpc", "database", "orm", "hibernate",
-    ]
-    has_frontend = any(w in s for w in frontend_signals)
-    has_backend = any(w in s for w in backend_signals)
-    if has_frontend and has_backend:
-        return "fullstack"
-    return "frontend" if has_frontend else "backend"
+_ANALYST_PROMPT_FILES: dict[str, str] = {
+    "analyst/domain": "analyst-domain.md",
+    "analyst/flows": "analyst-flows.md",
+    "analyst/tech": "analyst-tech.md",
+}
 
 
-def _build_phase_system_prompt(
-    base_prompt: str,
-    phase_file: str,
-    orientation_summary: str,
+def _build_analyst_system_prompt(
+    analyst_name: str,
     db_path: str,
     repo_name: str,
-    output_root: str,
+    orientation_summary: str,
 ) -> str:
-    """Combine base prompt + phase-specific instructions + runtime context."""
-    phase_path = _PHASE_PROMPTS_DIR / phase_file
-    phase_instructions = phase_path.read_text(encoding="utf-8") if phase_path.exists() else ""
-
-    prompt = base_prompt
+    """Build the system prompt for an analyst agent (graph tools + write_artifact)."""
+    fname = _ANALYST_PROMPT_FILES.get(analyst_name, "analyst-domain.md")
+    prompt_path = _PHASE_PROMPTS_DIR / fname
+    prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else (
+        "You are a code analyst. Query the knowledge graph and write artifacts using write_artifact."
+    )
+    if prompt.startswith("---"):
+        end = prompt.find("---", 3)
+        if end != -1:
+            prompt = prompt[end + 3:].lstrip()
     prompt += f"\n\n---\n## Orientation Summary\n\n{orientation_summary}\n"
-    prompt += f"\n\n{phase_instructions}"
     prompt += _GRAPH_CONVENTIONS
     prompt += (
         f"\n\n---\n## Runtime context\n\n"
         f"- KuzuDB path: `{db_path}`\n"
         f"- Repository name: `{repo_name}`\n"
-        f"- Artifact output root: `{output_root}`\n"
-        f"- Write all artifacts using the `write_artifact` tool.\n"
+        f"- Artifact output root: see write_artifact tool\n"
+        f"- Use write_artifact to write each artifact to disk.\n"
+        f"- Do NOT call get_method_source.\n"
+    )
+    return prompt
+
+
+def _build_architect_prompt(
+    orientation_summary: str,
+    artifacts_dir: str,
+    repo_name: str,
+) -> str:
+    """Build the architect system prompt, injecting Phase 2 artifact contents."""
+    prompt_path = _PHASE_PROMPTS_DIR / "architect.md"
+    prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else (
+        "You are a Solution Architect. Write target-state artifacts using write_artifact only. "
+        "Do NOT call graph query tools."
+    )
+    if prompt.startswith("---"):
+        end = prompt.find("---", 3)
+        if end != -1:
+            prompt = prompt[end + 3:].lstrip()
+
+    prompt += f"\n\n---\n## Orientation Summary\n\n{orientation_summary}\n"
+
+    # Inject current-state artifacts written by analysts
+    ARTIFACT_CHAR_LIMIT = 10_000
+    current_state_files = [
+        "domain/business-capabilities.md",
+        "domain/er-diagram.md",
+        "architecture/business-journeys.md",
+        "architecture/c4-context.md",
+        "tech/coupling-hotspots.md",
+    ]
+    prompt += "\n\n---\n## Current State Artifacts (written by analysts)\n\n"
+    for rel_path in current_state_files:
+        full_path = Path(artifacts_dir) / rel_path
+        if full_path.exists():
+            content = full_path.read_text(encoding="utf-8")
+            if len(content) > ARTIFACT_CHAR_LIMIT:
+                content = content[:ARTIFACT_CHAR_LIMIT] + f"\n\n[... truncated at {ARTIFACT_CHAR_LIMIT:,} chars]"
+            prompt += f"### {rel_path}\n\n{content}\n\n"
+        else:
+            prompt += f"### {rel_path}\n\n_Not produced by analyst._\n\n"
+
+    prompt += (
+        f"\n\n---\n## Runtime context\n\n"
+        f"- Repository name: `{repo_name}`\n"
+        f"- Artifact output root: see write_artifact tool\n"
+        f"- Write target-state artifacts using the `write_artifact` tool.\n"
+        f"- Do NOT call any graph query tools.\n"
+        f"- CRITICAL: Write all 4 artifacts in order: "
+        f"target-state/bounded-contexts.md → target-state/c4-target.md → "
+        f"target-state/strangler-fig.md → manifests/artifacts.json. "
+        f"Do NOT stop before writing manifests/artifacts.json.\n"
     )
     return prompt
 
@@ -447,30 +510,23 @@ def run_supervisor_agent(
     repo_name: str,
     artifacts_dir: str,
     base_prompt_path: str | Path,
-    max_turns_per_phase: int = 20,
+    max_turns: int = 120,
     verbose: bool = False,
     use_anthropic_format: bool = False,
     max_context_tokens: int = 120_000,
     max_source_reads: int = 15,
 ) -> dict[str, Any]:
-    """Run the multi-phase parallel supervisor pattern.
+    """Run the Analyst + Architect pattern.
 
-    Phase 1:     direct toolkit query (no LLM tokens).
-    Phase 2 + 3: parallel — api-analyst, architect.
-    Phase 4–7:   parallel — migration-planner, c4-context, sequence-diagrams, er-diagram.
-                 All seeded with Phase 2+3 artifacts. Phase 4 failure is fatal;
-                 Phases 5–7 (diagram subagents) are non-fatal.
+    Phase 1:   direct toolkit query (no LLM tokens) — orientation summary.
+    Phase 2:   3 parallel Analyst agents — each has graph tools + write_artifact:
+               - analyst/domain  (Business Analyst)    → business-capabilities.md + er-diagram.md
+               - analyst/flows   (Integration Architect)→ business-journeys.md + c4-context.md + [api-spec]
+               - analyst/tech    (Staff Engineer)       → coupling-hotspots.md
+    Phase 3:   1 Architect agent — reads Phase 2 artifacts, writes target-state + manifest.
 
     Returns the same dict shape as run_loop().
     """
-    # Load base prompt (evidence model, artifact contract, rules — no workflow section)
-    base_path = Path(base_prompt_path)
-    base_prompt = base_path.read_text(encoding="utf-8") if base_path.exists() else ""
-    if base_prompt.startswith("---"):
-        end = base_prompt.find("---", 3)
-        if end != -1:
-            base_prompt = base_prompt[end + 3:].lstrip()
-
     all_events: list[str] = []
     all_artifacts: list[str] = []
     total_input_tokens = 0
@@ -479,7 +535,8 @@ def run_supervisor_agent(
 
     def log(msg: str) -> None:
         all_events.append(msg)
-        print(msg, flush=True)
+        from codedoc import log as _log
+        _log.print_supervisor_line(msg)
 
     # ------------------------------------------------------------------
     # Phase 1: direct toolkit query — no LLM needed
@@ -494,6 +551,7 @@ def run_supervisor_agent(
         return {
             "status": "failed",
             "error": f"Phase 1 orientation failed: {e}",
+            "notes": "",
             "artifacts": all_artifacts,
             "events": all_events,
             "tool_uses": 0,
@@ -502,186 +560,169 @@ def run_supervisor_agent(
         }
 
     # ------------------------------------------------------------------
-    # Detect repo type and select appropriate prompts
+    # Phase 2: 3 parallel Analysts — graph tools + write_artifact
     # ------------------------------------------------------------------
-    repo_type = _detect_repo_type(orientation_summary)
-    log(f"[supervisor] Detected repo type: {repo_type}")
+    analyst_turns = max(10, max_turns // 5)    # 24 turns for max_turns=120
+    architect_turns = max(10, max_turns // 4)  # 30 turns for max_turns=120
 
-    if repo_type == "frontend":
-        frontend_base_path = _PHASE_PROMPTS_DIR / "re-prompt-frontend.md"
-        if frontend_base_path.exists():
-            raw = frontend_base_path.read_text(encoding="utf-8")
-            if raw.startswith("---"):
-                raw = raw[raw.find("---", 3) + 3:].lstrip()
-            base_prompt = raw
-        phase2_file = "phase2-frontend-inventory.md"
-        phase3_file = "phase3-frontend-architecture.md"
-        phase4_file = "phase4-frontend-migration.md"
-        phase2_req = (
-            "Analyse the component structure, routing, and state management. "
-            "Write current-state/inventory.md. Stop after writing that artifact."
-        )
-        phase3_req = (
-            "Analyse component hierarchy, data flow patterns, and feature organisation. "
-            "Write architecture/system-overview.md and domain/domain-analysis.md. "
-            "Stop after writing both artifacts."
-        )
-    else:
-        phase2_file = "phase2-inventory.md"
-        phase3_file = "phase3-architecture.md"
-        phase4_file = "phase4-migration.md"
-        phase2_req = (
-            "Analyse the API surface and module structure. "
-            "Write current-state/inventory.md. Stop after writing that artifact."
-        )
-        phase3_req = (
-            "Analyse architecture patterns and domain model. "
-            "Write architecture/system-overview.md and domain/domain-analysis.md. "
-            "Stop after writing both artifacts."
-        )
+    analyst_requests: dict[str, str] = {
+        "analyst/domain": (
+            "Execute in 4 turns.\n"
+            "TURN 1 — batch in one response: get_schema, get_domain_model, get_annotations_usage.\n"
+            "TURN 2 — batch in one response: get_class_details on the 5 most important entity classes "
+            "found in Turn 1 (prefer @Entity annotated or aggregate root classes); "
+            "execute_cypher: MATCH (n) WHERE n.name =~ "
+            "'(?i).*(Event|Command|Created|Confirmed|Cancelled|Published|Topic).*' "
+            "RETURN label(n) AS type, n.name AS name LIMIT 30.\n"
+            "TURN 3 — call write_artifact('domain/business-capabilities.md', content). "
+            "One section per capability: name in business terms, core operations (bullets), "
+            "business rules/validations in business language with evidence citations, key entities.\n"
+            "TURN 4 — call write_artifact('domain/er-diagram.md', content) if persistent entities "
+            "were found in Turns 1-2 (look for @Entity, repositories, ORM annotations). "
+            "Content: PlantUML entity diagram + bounded context ownership table. "
+            "If no persistent entities found, write a one-line file: "
+            "'_No persistent entities found in graph._'\n"
+            "Do NOT call get_method_source. Stop after Turn 4."
+        ),
+        "analyst/flows": (
+            "Execute in 5 turns.\n"
+            "TURN 1 — batch in one response: get_entry_points, get_api_endpoints, "
+            "get_external_dependencies, "
+            "execute_cypher: MATCH (n) WHERE n.name =~ "
+            "'(?i).*(Client|Producer|Consumer|Gateway|Adapter|Listener|Sender|Subscriber).*' "
+            "RETURN label(n) AS type, n.name AS name LIMIT 40.\n"
+            "TURN 2 — call trace_user_flow on the 3 most important mutation entry points "
+            "(POST/PUT/PATCH/DELETE) from Turn 1.\n"
+            "TURN 3 — call write_artifact('architecture/business-journeys.md', content). "
+            "3-5 flows each with: '**Business journey:** As a [role], I can [action] by calling "
+            "[METHOD /path].' followed by a PlantUML sequence diagram (@startuml/@enduml). "
+            "Use -> for calls, --> for returns. Mark async steps with 'note right of X: async'.\n"
+            "TURN 4 — call write_artifact('architecture/c4-context.md', content). "
+            "PlantUML C4Context diagram with !include <C4/C4_Context>: upstream callers + this "
+            "system + downstream dependencies. All Rel() arrows with protocol as 4th arg.\n"
+            "TURN 5 — call write_artifact('current-state/api-spec.yaml', content) ONLY if Turn 1 "
+            "found HTTP endpoints with clear path + method signatures. Skip this turn otherwise.\n"
+            "Do NOT call get_method_source. Stop after Turn 5 (or 4 if skipping api-spec)."
+        ),
+        "analyst/tech": (
+            "Execute in 3 turns.\n"
+            "TURN 1 — batch in one response: get_hotspots(coupling), get_hotspots(fan_in), "
+            "get_hotspots(fan_out), get_hotspots(god_class), get_component_coupling_matrix, "
+            "detect_circular_dependencies, get_unused_code, get_design_patterns.\n"
+            "TURN 2 — call impact_analysis on the top 3 hotspot components from Turn 1.\n"
+            "TURN 3 — call write_artifact('tech/coupling-hotspots.md', content). "
+            "Content: hotspot table (component | type | score | migration impact), "
+            "top-5 coupling pairs, dead code top-10, decomposition signals "
+            "(packages with low coupling = good extraction candidates).\n"
+            "Do NOT call get_method_source. Stop after Turn 3."
+        ),
+    }
 
-    # ------------------------------------------------------------------
-    # Helper: run one phase in its own thread
-    # ------------------------------------------------------------------
-    def _run_phase(
-        phase_name: str,
-        phase_file: str,
-        user_request: str,
-        base: str = base_prompt,
-    ) -> tuple[str, dict]:
-        # Each phase gets its own backend + toolkit (KuzuDB connections are not thread-safe)
+    def _run_analyst(name: str, user_request: str) -> tuple[str, dict]:
         backend = KuzuBackend(kuzu_path)
         toolkit = ReverseEngineerToolkit(backend, repo_path=repo_path)
-        system_prompt = _build_phase_system_prompt(
-            base, phase_file, orientation_summary, kuzu_path, repo_name, artifacts_dir
-        )
+        analyst_system = _build_analyst_system_prompt(name, kuzu_path, repo_name, orientation_summary)
         result = run_loop(
             provider=provider,
             toolkit=toolkit,
-            system_prompt=system_prompt,
+            system_prompt=analyst_system,
             user_request=user_request,
             output_root=artifacts_dir,
-            max_turns=max_turns_per_phase,
+            max_turns=analyst_turns,
             verbose=verbose,
             use_anthropic_format=use_anthropic_format,
             max_context_tokens=max_context_tokens,
-            max_source_reads=max_source_reads,
-            phase_label=phase_name,
+            max_source_reads=0,
+            include_write_artifact=True,
+            phase_label=name,
         )
-        return phase_name, result
+        return name, result
 
-    # ------------------------------------------------------------------
-    # Phase 2 + Phase 3: parallel
-    # ------------------------------------------------------------------
-    log("[supervisor] spawning subagent/api-analyst + subagent/architect in parallel…")
+    log(f"[supervisor] Phase 2 — spawning {len(analyst_requests)} analysts in parallel (domain · flows · tech)…")
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=len(analyst_requests)) as pool:
         futures = {
-            pool.submit(_run_phase, "subagent/api-analyst", phase2_file, phase2_req): "subagent/api-analyst",
-            pool.submit(_run_phase, "subagent/architect", phase3_file, phase3_req): "subagent/architect",
+            pool.submit(_run_analyst, name, req): name
+            for name, req in analyst_requests.items()
         }
         for future in as_completed(futures):
-            phase_name, result = future.result()
+            name, result = future.result()
             all_events.extend(result["events"])
-            all_artifacts.extend(result["artifacts"])
             total_input_tokens += result["input_tokens"]
             total_output_tokens += result["output_tokens"]
             total_tool_uses += result["tool_uses"]
-            log(f"[supervisor] {phase_name} done — {len(result['artifacts'])} artifact(s)")
+            n_artifacts = len(result["artifacts"])
             if result["status"] == "failed":
-                return {
-                    "status": "failed",
-                    "error": f"{phase_name} failed: {result['error']}",
-                    "artifacts": all_artifacts,
-                    "events": all_events,
-                    "tool_uses": total_tool_uses,
-                    "input_tokens": total_input_tokens,
-                    "output_tokens": total_output_tokens,
-                }
+                log(f"[supervisor] WARNING: {name} failed: {result['error']}")
+            else:
+                all_artifacts.extend(result["artifacts"])
+                log(f"[supervisor] {name} done — {n_artifacts} artifact(s)")
+            from codedoc import log as _log
+            _log.print_researcher_done(name, n_artifacts)
 
     # ------------------------------------------------------------------
-    # Phase 4 + Phase 5: parallel — both seeded with Phase 2+3 artifacts
+    # Phase 3: Architect — reads Phase 2 artifacts, writes target-state
     # ------------------------------------------------------------------
-    def _read_artifact(rel_path: str) -> str:
-        p = Path(artifacts_dir) / rel_path
-        return p.read_text(encoding="utf-8") if p.exists() else "_Not available._"
-
-    prior_context = (
-        "\n\n---\n## Prior Phase Results (do not re-query these)\n\n"
-        f"### current-state/inventory.md\n\n{_read_artifact('current-state/inventory.md')[:3_000]}\n\n"
-        f"### architecture/system-overview.md\n\n{_read_artifact('architecture/system-overview.md')[:2_000]}\n\n"
-        f"### domain/domain-analysis.md\n\n{_read_artifact('domain/domain-analysis.md')[:2_000]}\n"
+    log("[supervisor] Phase 3 — running architect…")
+    arch_system = _build_architect_prompt(orientation_summary, artifacts_dir, repo_name)
+    arch_backend = KuzuBackend(kuzu_path)
+    arch_toolkit = ReverseEngineerToolkit(arch_backend, repo_path=repo_path)
+    arch_result = run_loop(
+        provider=provider,
+        toolkit=arch_toolkit,
+        system_prompt=arch_system,
+        user_request=(
+            "Write the 4 target-state artifacts in order:\n"
+            "TURN 1: write_artifact('target-state/bounded-contexts.md', ...)\n"
+            "TURN 2: write_artifact('target-state/c4-target.md', ...)\n"
+            "TURN 3: write_artifact('target-state/strangler-fig.md', ...)\n"
+            "TURN 4: write_artifact('manifests/artifacts.json', ...)\n"
+            "Do NOT call any graph query tools. Stop after Turn 4."
+        ),
+        output_root=artifacts_dir,
+        max_turns=architect_turns,
+        verbose=verbose,
+        use_anthropic_format=use_anthropic_format,
+        max_context_tokens=max_context_tokens,
+        max_source_reads=0,
+        include_write_artifact=True,
+        phase_label="architect",
     )
+    all_events.extend(arch_result["events"])
+    all_artifacts.extend(arch_result["artifacts"])
+    total_input_tokens += arch_result["input_tokens"]
+    total_output_tokens += arch_result["output_tokens"]
+    total_tool_uses += arch_result["tool_uses"]
+    all_events.append(f"[supervisor] architect done — {len(arch_result['artifacts'])} artifact(s)")
+    from codedoc import log as _log
+    _log.print_synthesizer_done(len(arch_result["artifacts"]))
 
-    base_with_context = base_prompt + prior_context
-
-    log("[supervisor] spawning subagent/migration-planner + subagent/c4-context + subagent/sequence-diagrams + subagent/er-diagram in parallel…")
-
-    phase4_req = (
-        "Analyse hotspots and migration risk. Write migration/roadmap.md, "
-        "target-state/blueprint.md, and manifests/artifacts.json. "
-        "Write target-state/openapi/*.yaml only if the graph has sufficient endpoint detail."
-    )
-    phase5_req = (
-        "Identify external integration points. "
-        "Write architecture/c4-context.md with a Mermaid C4Context diagram. "
-        "Stop after writing that artifact."
-    )
-    phase6_req = (
-        "Trace the top 3–5 user-facing flows. "
-        "Write architecture/sequence-diagrams.md with Mermaid sequenceDiagram blocks. "
-        "Stop after writing that artifact."
-    )
-    phase7_req = (
-        "Map the data model and entity relationships. "
-        "Write domain/er-diagram.md with a Mermaid erDiagram and bounded context ownership table. "
-        "Stop after writing that artifact."
-    )
-
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = {
-            pool.submit(_run_phase, "subagent/migration-planner", phase4_file,
-                        phase4_req, base_with_context): "subagent/migration-planner",
-            pool.submit(_run_phase, "subagent/c4-context", "phase5-c4-context.md",
-                        phase5_req, base_with_context): "subagent/c4-context",
-            pool.submit(_run_phase, "subagent/sequence-diagrams", "phase6-sequence-diagrams.md",
-                        phase6_req, base_with_context): "subagent/sequence-diagrams",
-            pool.submit(_run_phase, "subagent/er-diagram", "phase7-er-diagram.md",
-                        phase7_req, base_with_context): "subagent/er-diagram",
+    if arch_result["status"] == "failed":
+        return {
+            "status": "failed",
+            "error": f"architect failed: {arch_result['error']}",
+            "notes": "",
+            "artifacts": all_artifacts,
+            "events": all_events,
+            "tool_uses": total_tool_uses,
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens,
         }
-        for future in as_completed(futures):
-            phase_name, result = future.result()
-            all_events.extend(result["events"])
-            all_artifacts.extend(result["artifacts"])
-            total_input_tokens += result["input_tokens"]
-            total_output_tokens += result["output_tokens"]
-            total_tool_uses += result["tool_uses"]
-            log(f"[supervisor] {phase_name} done — {len(result['artifacts'])} artifact(s)")
-            if result["status"] == "failed":
-                if phase_name == "subagent/migration-planner":
-                    return {
-                        "status": "failed",
-                        "error": f"Phase 4 failed: {result['error']}",
-                        "artifacts": all_artifacts,
-                        "events": all_events,
-                        "tool_uses": total_tool_uses,
-                        "input_tokens": total_input_tokens,
-                        "output_tokens": total_output_tokens,
-                    }
-                else:
-                    # Diagram subagents (Phase 5/6/7) are non-fatal — log and continue
-                    log(f"[supervisor] WARNING: {phase_name} failed: {result['error']} — continuing")
 
-    log(
+    _summary = (
         f"[supervisor] all phases complete — "
         f"artifacts: {len(all_artifacts)}  "
         f"tokens: {total_input_tokens:,} in / {total_output_tokens:,} out  "
         f"tool uses: {total_tool_uses}"
     )
+    all_events.append(_summary)
+    from codedoc import log as _log
+    _log.print_supervisor_summary(len(all_artifacts), total_input_tokens, total_output_tokens, total_tool_uses)
 
     return {
         "status": "done",
         "error": None,
+        "notes": "",
         "artifacts": all_artifacts,
         "events": all_events,
         "tool_uses": total_tool_uses,
@@ -744,9 +785,6 @@ def run_agent(state) -> Any:
     artifacts_dir = str(Path(output_dir) / "artifacts")
     Path(artifacts_dir).mkdir(parents=True, exist_ok=True)
 
-    # Turns are distributed across 3 phases; divide the budget evenly
-    max_turns_per_phase = max(10, max_turns // 3)
-
     resolved_prompt = prompt_path or str(_PROMPT_PATH)
 
     result = run_supervisor_agent(
@@ -756,7 +794,7 @@ def run_agent(state) -> Any:
         repo_name=repo_name,
         artifacts_dir=artifacts_dir,
         base_prompt_path=resolved_prompt,
-        max_turns_per_phase=max_turns_per_phase,
+        max_turns=max_turns,
         verbose=verbose,
         use_anthropic_format=use_anthropic,
         max_context_tokens=max_context_tokens,
@@ -850,7 +888,7 @@ def main() -> None:
         repo_name=repo_name,
         artifacts_dir=artifacts_dir,
         base_prompt_path=prompt_path,
-        max_turns_per_phase=max(10, args.max_turns // 3),
+        max_turns=args.max_turns,
         verbose=args.verbose,
         use_anthropic_format=use_anthropic,
     )

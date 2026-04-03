@@ -8,7 +8,7 @@ model         = "claude-sonnet-4-6"
 provider      = "auto"
 # base_url: override API endpoint (e.g. "http://localhost:11434/v1" for Ollama)
 base_url      = ""
-max_turns     = 60
+max_turns     = 120
 timeout       = 300
 
 [paths]

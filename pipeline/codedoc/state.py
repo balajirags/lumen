@@ -53,7 +53,8 @@ class PipelineState:
         ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
         line = f"[{ts}] [{stage}] {message}"
         self.events.append(line)
-        print(line)
+        from codedoc import log as _log  # lazy import avoids circular dep at module level
+        _log.log_to_console(stage, message, ts)
 
     def to_pipeline_json(self) -> dict[str, Any]:
         """Return the dict written to pipeline.json."""

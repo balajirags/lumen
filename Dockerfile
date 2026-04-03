@@ -31,6 +31,10 @@ COPY indexer/ .
 # Build the fat JAR (Gradle wrapper downloads Gradle on first run)
 RUN ./gradlew shadowJar --no-daemon -q
 
+# Download PlantUML JAR (used by mkdocs-build-plantuml-plugin at doc-build time)
+RUN curl -fsSL -o /plantuml.jar \
+    "https://github.com/plantuml/plantuml/releases/latest/download/plantuml.jar"
+
 # Discover required modules, merge with a known-good baseline, then jlink
 RUN JAR=app/build/libs/code-mem-graph.jar && \
     DETECTED=$(jdeps --ignore-missing-deps \
@@ -113,6 +117,11 @@ COPY --from=node:20-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=java-builder /custom-jre                         /opt/jre
 COPY --from=java-builder /build/app/build/libs/code-mem-graph.jar \
                                                              /opt/cmg/code-mem-graph.jar
+
+# ── PlantUML JAR + wrapper script ──
+COPY --from=java-builder /plantuml.jar                       /usr/local/bin/plantuml.jar
+RUN printf '#!/bin/sh\nexec /opt/jre/bin/java -jar /usr/local/bin/plantuml.jar "$@"\n' \
+      > /usr/local/bin/plantuml && chmod +x /usr/local/bin/plantuml
 
 # ── Node JS parser ──
 COPY --from=node-builder /build                              /opt/cmg-js/

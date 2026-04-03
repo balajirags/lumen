@@ -131,15 +131,14 @@ def run_indexer(state: PipelineState) -> PipelineState:
             f"Run the install script or check your indexer_bin_dir setting."
         )
 
-    # index.kuzu/ is the container directory; KuzuDB database lives at index.kuzu/db
+    # index.kuzu/ is the container directory passed as --db-path.
+    # All binaries create {source_dir_name}-db inside it (e.g. index.kuzu/repo-db).
     kuzu_dir = Path(state.output_dir).resolve() / "index.kuzu"
     kuzu_dir.mkdir(parents=True, exist_ok=True)
-    kuzu_path = str(kuzu_dir / "db")
-    state.log(stage, f"Running {binary_name} → {kuzu_path}")
+    state.log(stage, f"Running {binary_name} → {kuzu_dir}/{repo.name}-db")
 
     # --- Execute indexer subprocess ---
-    # All indexer binaries now honor --db-path directly.
-    cmd = [str(binary), str(repo), _DB_FLAG, kuzu_path]
+    cmd = [str(binary), str(repo), _DB_FLAG, str(kuzu_dir)]
     try:
         proc = subprocess.run(
             cmd,
@@ -173,32 +172,32 @@ def run_indexer(state: PipelineState) -> PipelineState:
             f"Indexer exited with code {proc.returncode}.\n{stderr_excerpt}"
         )
 
-    # --- Resolve actual database path ---
-    # All indexer binaries (Java, JS, Python) treat --db-path as a parent
-    # directory and create {repoName}-db/ inside it. Scan for what was created.
-    kuzu = Path(kuzu_path)
-    if not kuzu.exists():
-        state.log(stage, f"stdout:\n{proc.stdout[-1000:]}" if proc.stdout else "No stdout")
-        raise FileNotFoundError(
-            f"Indexer completed but KuzuDB output not found at {kuzu_path}. "
-            "Check the repo contents and indexer output."
-        )
-    if kuzu.is_dir():
-        # All parsers create {repoName}-db inside --db-path.
-        # In KuzuDB 0.11.x this is a single FILE; older versions use a directory.
-        # Scan for any single entry (file or directory) the binary created.
-        entries = list(kuzu.iterdir())
+    # --- Locate the database created by the indexer ---
+    # All binaries (Java, JS, Python) create {source_dir_name}-db inside --db-path.
+    # With KuzuDB 0.11.x this is a single FILE; older versions produce a directory.
+    expected = kuzu_dir / f"{repo.name}-db"
+    if expected.exists():
+        kuzu_path = str(expected)
+        kuzu = expected
+    else:
+        # Fallback: scan kuzu_dir for a single non-hidden entry (handles name mismatches)
+        entries = [e for e in kuzu_dir.iterdir() if not e.name.startswith(".")]
         if len(entries) == 1:
             kuzu_path = str(entries[0])
             kuzu = entries[0]
-            state.log(stage, f"Resolved KuzuDB to {kuzu_path}")
-        elif len(entries) > 1:
-            # Multiple entries — find the expected {repo.name}-db
-            expected = kuzu / f"{repo.name}-db"
-            if expected.exists():
-                kuzu_path = str(expected)
-                kuzu = expected
-                state.log(stage, f"Resolved KuzuDB to {kuzu_path}")
+            state.log(stage, f"KuzuDB entry name '{entries[0].name}' differs from expected '{repo.name}-db'")
+        elif len(entries) == 0:
+            state.log(stage, f"stdout:\n{proc.stdout[-1000:]}" if proc.stdout else "No stdout")
+            raise FileNotFoundError(
+                f"Indexer completed but no KuzuDB output found in {kuzu_dir}. "
+                "Check the repo contents and indexer output."
+            )
+        else:
+            state.log(stage, f"stdout:\n{proc.stdout[-1000:]}" if proc.stdout else "No stdout")
+            raise FileNotFoundError(
+                f"Indexer created {len(entries)} entries in {kuzu_dir} but none match "
+                f"expected '{repo.name}-db'. Found: {[e.name for e in entries]}"
+            )
 
     total_size = sum(f.stat().st_size for f in (kuzu.rglob("*") if kuzu.is_dir() else [kuzu]) if f.is_file())
     if total_size < 1024:
