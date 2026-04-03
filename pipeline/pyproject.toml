@@ -26,4 +26,3 @@ lumen = "codedoc.cli:main"
 include = ["codedoc*", "tools*"]
 
 [tool.uv]
-python-version = "3.11"
