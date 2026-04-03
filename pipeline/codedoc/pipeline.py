@@ -101,10 +101,6 @@ def run_pipeline(
         state.status = "failed"
         state.error = str(exc)
         state.log("pipeline", f"Pipeline failed: {exc}")
-        print("\n--- Last events before failure ---")
-        for line in state.events[-10:]:
-            print(f"  {line}")
-        print(f"\nERROR: {exc}\n")
     finally:
         state.finished_at = datetime.now(timezone.utc).isoformat()
         pipeline_json = run_dir / "pipeline.json"

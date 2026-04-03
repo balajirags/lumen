@@ -71,9 +71,26 @@ def run(
     )
 
     if state.status == "done":
-        click.echo(f"\n✓ Output: {state.output_dir}")
+        click.echo(f"\n✓ Done in {state.output_dir}")
+        if state.site_path:
+            click.echo(f"  Doc-site : {state.site_path}")
+        if state.artifacts_dir:
+            artifacts = list(Path(state.artifacts_dir).rglob("*.md"))
+            click.echo(f"  Artifacts: {len(artifacts)} file(s) in {state.artifacts_dir}")
+        click.echo(f"  Details  : {state.output_dir}/pipeline.json")
         sys.exit(0)
     else:
+        click.echo(f"\n✗ Pipeline did not complete (status: {state.status})", err=True)
+        if state.error:
+            click.echo(f"  Error: {state.error}", err=True)
+        if state.output_dir:
+            click.echo(f"  Details: {state.output_dir}/pipeline.json", err=True)
+        if state.artifacts_dir and Path(state.artifacts_dir).exists():
+            artifacts = list(Path(state.artifacts_dir).rglob("*.md"))
+            if artifacts:
+                click.echo(f"  Partial artifacts ({len(artifacts)} file(s)):", err=True)
+                for a in artifacts:
+                    click.echo(f"    {a.relative_to(state.artifacts_dir)}", err=True)
         sys.exit(1)
 
 
