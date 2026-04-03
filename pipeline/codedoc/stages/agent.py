@@ -359,9 +359,10 @@ def run_loop(
             if removed:
                 log(f"{tag} context pruned: removed {removed} messages (input tokens so far: {total_input_tokens:,})")
     else:
+        log(f"{tag} WARNING: exceeded {max_turns} tool turns — continuing with {len(artifacts)} artifact(s) produced so far")
         return {
-            "status": "failed",
-            "error": f"exceeded {max_turns} tool turns",
+            "status": "done",
+            "error": None,
             "artifacts": artifacts,
             "events": events,
             "tool_uses": tool_uses,
