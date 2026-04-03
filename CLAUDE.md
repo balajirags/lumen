@@ -64,7 +64,7 @@ Key defaults (`pipeline/codedoc/config.py`):
 |---|---|
 | `model` | `claude-sonnet-4-6` |
 | `provider` | `auto` |
-| `max_turns` | 60 |
+| `max_turns` | 120 |
 | `indexer_bin_dir` | `../indexer/bin` (monorepo); `/usr/local/bin` (Docker, via `.codedoc.toml`) |
 | `agent_prompt` | `./codedoc/prompts/re-prompt.md` |
 | `build_script` | `../scripts/build-docs-site.sh` (monorepo); `/opt/lumen/scripts/...` (Docker) |
@@ -126,52 +126,56 @@ Key files:
 - `pipeline/codedoc/cli.py` — Click CLI (`lumen run`), includes `--repo-name` flag
 - `pipeline/codedoc/config.py` — config loader; defaults use `Path(__file__)` relative paths
 - `pipeline/codedoc/pipeline.py` — sequential orchestration: indexer → agent → builder; output dir named `<repo>-<timestamp>`
-- `pipeline/codedoc/stages/agent.py` — supervisor + parallel subagents, `_detect_repo_type()`
+- `pipeline/codedoc/stages/agent.py` — supervisor + parallel analysts + architect
+- `pipeline/codedoc/log.py` — structured progress logging for supervisor, analysts, architect
 - `pipeline/codedoc/llm.py` — LLM abstraction: `ClaudeProvider`, `OllamaProvider`, `OpenAIProvider`
 - `pipeline/codedoc/kg_tools/toolkit.py` — `ReverseEngineerToolkit` (36 graph query tools)
 - `pipeline/codedoc/kg_tools/backends.py` — `KuzuBackend`, `Neo4jBackend`
-- `pipeline/codedoc/prompts/re-prompt.md` — base agent system prompt (backend)
-- `pipeline/codedoc/prompts/re-prompt-frontend.md` — base agent system prompt (frontend)
-- `pipeline/codedoc/prompts/phase{2,3,4}-inventory/architecture/migration.md` — backend phase overrides
-- `pipeline/codedoc/prompts/phase{2,3,4}-frontend-*.md` — frontend phase overrides
-- `pipeline/codedoc/prompts/phase5-c4-context.md` — C4 system context diagram
-- `pipeline/codedoc/prompts/phase6-sequence-diagrams.md` — Mermaid sequence diagrams
-- `pipeline/codedoc/prompts/phase7-er-diagram.md` — Mermaid ER diagram
-- `pipeline/scripts/build-docs-site.sh` — builds MkDocs Material site; supports multi-repo accumulation
-- `pipeline/.codedoc.toml` — runtime config (`indexer_bin_dir = ../indexer/bin`, `max_turns = 60`)
+- `pipeline/codedoc/prompts/analyst-domain.md` — Business Analyst system prompt (writes 2 artifacts)
+- `pipeline/codedoc/prompts/analyst-flows.md` — Integration Architect system prompt (writes 2–3 artifacts)
+- `pipeline/codedoc/prompts/analyst-tech.md` — Staff Engineer system prompt (writes 1 artifact)
+- `pipeline/codedoc/prompts/architect.md` — Solution Architect system prompt (writes target-state + manifest)
+- `pipeline/codedoc/prompts/re-prompt.md` — single-agent fallback prompt (monolithic execution path)
+- `pipeline/scripts/build-docs-site.sh` — builds MkDocs Material site with PlantUML; supports multi-repo accumulation
+- `pipeline/.codedoc.toml` — runtime config (`indexer_bin_dir = ../indexer/bin`, `max_turns = 120`)
 - `pipeline/pyproject.toml` — package name: `lumen`, entry point: `lumen = "codedoc.cli:main"`, uses `uv`
 
-Agent architecture:
+Agent architecture (Analyst + Architect pattern):
 ```
 run_supervisor_agent()
-  ├─ Phase 1: get_architecture_summary()              ← direct graph call, no LLM
-  │            → _detect_repo_type()                  ← selects frontend or backend prompts
-  ├─ Phase 2: run_loop(subagent/api-analyst)           ┐ parallel threads
-  ├─ Phase 3: run_loop(subagent/architect)             ┘ each gets own KuzuBackend
-  ├─ Phase 4: run_loop(subagent/migration-planner)     ┐ parallel — all seeded with
-  ├─ Phase 5: run_loop(subagent/c4-context)            │ Phase 2+3 artifacts
-  ├─ Phase 6: run_loop(subagent/sequence-diagrams)     │ Phase 4 failure is fatal;
-  └─ Phase 7: run_loop(subagent/er-diagram)            ┘ Phase 5/6/7 failures are non-fatal
+  ├─ Phase 1: get_architecture_summary()       ← direct graph call, no LLM
+  │
+  ├─ Phase 2: 3 parallel Analyst agents        ← each has graph tools + write_artifact
+  │   ├─ analyst/domain  (Business Analyst)    → domain/business-capabilities.md
+  │   │                                        → domain/er-diagram.md
+  │   ├─ analyst/flows   (Integration Arch.)   → architecture/business-journeys.md
+  │   │                                        → architecture/c4-context.md
+  │   │                                        → [current-state/api-spec.yaml]
+  │   └─ analyst/tech    (Staff Engineer)      → tech/coupling-hotspots.md
+  │
+  └─ Phase 3: Architect agent                  ← reads Phase 2 artifacts; write_artifact only
+                                               → target-state/bounded-contexts.md
+                                               → target-state/c4-target.md
+                                               → target-state/strangler-fig.md
+                                               → manifests/artifacts.json
 ```
 
-Repo-type detection (`_detect_repo_type` in `agent.py`):
-- Keyword-matches the Phase 1 orientation summary
-- Returns `"frontend"`, `"backend"`, or `"fullstack"`
-- Selects appropriate prompt files and phase requests accordingly
-- Exceeded-turns is non-fatal: returns `status="done"` with a warning
+Each analyst has its own `KuzuBackend` (connections are not thread-safe).
+Analyst turn contract: explicit TURN 1/2/3/N sequence in `user_request`; `max_source_reads=0`.
+Architect receives Phase 2 artifact content injected into its system prompt (up to 10k chars each).
 
-Artifacts produced (100–250 lines each):
+Artifacts produced (PlantUML diagrams):
 ```
-current-state/inventory.md        ← API surface / components, tech stack (ONLY place for tech stack)
-architecture/system-overview.md
-architecture/c4-context.md        ← Mermaid C4Context diagram
-architecture/sequence-diagrams.md ← Mermaid sequence diagrams for key flows
-domain/domain-analysis.md
-domain/er-diagram.md              ← Mermaid erDiagram + bounded context table
-migration/roadmap.md              ← no calendar dates
-target-state/blueprint.md
-target-state/openapi/<ctx>.yaml   ← optional (backend only)
-manifests/artifacts.json
+domain/business-capabilities.md   ← capabilities + business rules/validations per capability
+domain/er-diagram.md              ← PlantUML entity diagram + bounded context ownership table [conditional]
+architecture/business-journeys.md ← 3–5 business user journeys with PlantUML sequence diagrams
+architecture/c4-context.md        ← PlantUML C4Context: upstream + downstream + protocols
+tech/coupling-hotspots.md         ← hotspot table + coupling pairs + dead code + seam candidates
+current-state/api-spec.yaml       ← OpenAPI spec [conditional: backend with endpoint signatures]
+target-state/bounded-contexts.md  ← BC decomposition + service responsibility table
+target-state/c4-target.md         ← PlantUML C4Context of future decomposed state
+target-state/strangler-fig.md     ← ordered extraction plan grounded in hotspot data
+manifests/artifacts.json          ← index of all artifacts written
 ```
 
 ---
@@ -236,13 +240,16 @@ Docker: `make compose-ui` → Express serves everything on port 3002
 | `ui/server/index.ts` production static serving | Single port (3002) for both API and React app in Docker |
 | `extra_hosts: host.docker.internal:host-gateway` | Lets pipeline container reach host Ollama on Linux |
 | LangGraph removed from pipeline | 3 sequential nodes, no branching — 50 MB dep for zero benefit |
-| Parallel Phase 2+3 subagents | Cuts wall-clock time ~50%; phases use disjoint tool sets |
-| Each subagent gets its own KuzuBackend | KuzuDB connections are not thread-safe |
-| `get_method_source` capped at 15 calls | Graph queries ~100–300 tokens; source reads ~1,000–6,000 |
+| Analyst + Architect pattern | Analysts write artifacts directly via `write_artifact` (reliable); avoids fragile note-passing via custom tools |
+| Each analyst gets its own KuzuBackend | KuzuDB connections are not thread-safe |
+| `max_source_reads=0` for analysts | Analysts need only graph structure; source reads add latency and cost without benefit |
+| Explicit TURN N contracts in user_request | Prescriptive turn sequences prevent analysts going off-script; proven more reliable than open-ended instructions |
+| Architect reads artifact files (not notes) | Architect gets formatted markdown input, not raw research notes; higher quality target-state output |
+| PlantUML via mkdocs-build-plantuml-plugin | PlantUML C4 stdlib (`!include <C4/C4_Context>`) gives semantically richer C4 diagrams; renders as SVG at build time |
+| plantuml.jar downloaded in java-builder stage | Java already present for indexer; reuses same JRE; no extra base image needed |
 | No calendar dates in roadmap | Fabricated timelines damage credibility |
 | MkDocs Material instead of Docusaurus | Python-based (~10 MB vs ~200 MB), no npm in pipeline; `mkdocs-material` in pyproject.toml |
 | `uv` instead of `pip` | Faster installs, reproducible lockfile (`uv.lock`); `make install-pipeline` runs `uv sync` |
-| Phase 5/6/7 non-fatal | Diagram subagents are bonus artifacts — failure should not block the docs site |
 | `--repo-name` CLI flag | Docker mounts repo at `/repo` so `Path("/repo").name = "repo"`; flag lets caller override |
 | Output dir `<repo>-<timestamp>` | Allows multiple runs of the same repo side-by-side without overwriting |
 | Multi-repo doc-site | `build-docs-site.sh` iterates `output/*/artifacts/` — accumulates all runs in one site |
