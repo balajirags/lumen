@@ -1,4 +1,4 @@
-.PHONY: install install-indexer install-pipeline dev-ui test \
+.PHONY: install install-indexer install-pipeline run dev-ui test \
         docker-build docker-run \
         compose-pipeline compose-docs compose-ui
 
@@ -10,6 +10,10 @@ install-indexer:
 
 install-pipeline:
 	cd pipeline && uv sync
+
+run:
+	@if [ -z "$(REPO)" ]; then echo "Usage: make run REPO=/path/to/repo [ARGS='--provider ollama ...']"; exit 1; fi
+	cd pipeline && uv run lumen run $(REPO) --output-dir $(PWD)/output $(ARGS)
 
 dev-ui:
 	cd ui && npm install && npm run dev
