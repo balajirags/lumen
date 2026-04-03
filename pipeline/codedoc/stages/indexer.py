@@ -184,14 +184,23 @@ def run_indexer(state: PipelineState) -> PipelineState:
             "Check the repo contents and indexer output."
         )
     if kuzu.is_dir():
-        subdirs = [d for d in kuzu.iterdir() if d.is_dir()]
-        if len(subdirs) == 1:
-            # Binary created a single subdirectory — that IS the database
-            kuzu_path = str(subdirs[0])
-            kuzu = subdirs[0]
+        # All parsers create {repoName}-db inside --db-path.
+        # In KuzuDB 0.11.x this is a single FILE; older versions use a directory.
+        # Scan for any single entry (file or directory) the binary created.
+        entries = list(kuzu.iterdir())
+        if len(entries) == 1:
+            kuzu_path = str(entries[0])
+            kuzu = entries[0]
             state.log(stage, f"Resolved KuzuDB to {kuzu_path}")
+        elif len(entries) > 1:
+            # Multiple entries — find the expected {repo.name}-db
+            expected = kuzu / f"{repo.name}-db"
+            if expected.exists():
+                kuzu_path = str(expected)
+                kuzu = expected
+                state.log(stage, f"Resolved KuzuDB to {kuzu_path}")
 
-    total_size = sum(f.stat().st_size for f in kuzu.rglob("*") if f.is_file())
+    total_size = sum(f.stat().st_size for f in (kuzu.rglob("*") if kuzu.is_dir() else [kuzu]) if f.is_file())
     if total_size < 1024:
         raise ValueError(
             f"KuzuDB output at {kuzu_path} is only {total_size} bytes — "
