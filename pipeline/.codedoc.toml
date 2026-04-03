@@ -3,11 +3,11 @@
 
 [pipeline]
 output_dir    = "./codedoc-output"
-model         = "qwen3.5:35b"
+model         = "claude-sonnet-4-6"
 # provider: "auto" detects from model name. Options: anthropic, ollama, openai
-provider      = "ollama"
-# base_url: override API endpoint
-base_url      = "http://127.0.0.1:11434/v1"
+provider      = "auto"
+# base_url: override API endpoint (e.g. "http://localhost:11434/v1" for Ollama)
+base_url      = ""
 max_turns     = 40
 timeout       = 300
 

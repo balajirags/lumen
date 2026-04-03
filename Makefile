@@ -12,8 +12,18 @@ install-pipeline:
 	cd pipeline && uv sync
 
 run:
-	@if [ -z "$(REPO)" ]; then echo "Usage: make run REPO=/path/to/repo [ARGS='--provider ollama ...']"; exit 1; fi
-	cd pipeline && uv run lumen run $(REPO) --output-dir $(PWD)/output $(ARGS)
+	@if [ -z "$(REPO)" ]; then \
+	  echo "Usage: make run REPO=/path/to/repo ARGS='--provider <p> --model <m> [--base-url <url>]'"; \
+	  echo "  Anthropic: ARGS='--provider anthropic --model claude-sonnet-4-6'"; \
+	  echo "  Ollama:    ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'"; \
+	  echo "  OpenAI:    ARGS='--provider openai --model gpt-4o'"; \
+	  exit 1; fi
+	@if [ -z "$(ARGS)" ]; then \
+	  echo "ERROR: ARGS is required. Pass --provider, --model, and optionally --base-url."; \
+	  echo "  Anthropic: ARGS='--provider anthropic --model claude-sonnet-4-6'"; \
+	  echo "  Ollama:    ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'"; \
+	  exit 1; fi
+	cd pipeline && uv run lumen run "$(REPO)" --output-dir "$(PWD)/output" $(ARGS)
 
 dev-ui:
 	cd ui && npm install && npm run dev
