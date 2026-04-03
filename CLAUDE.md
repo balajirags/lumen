@@ -6,7 +6,7 @@
 documentation, architecture diagrams, and migration roadmaps using LLMs and a knowledge graph.
 
 ```
-Source repo → [indexer] → KuzuDB graph → [pipeline/agent] → Markdown artifacts → [builder] → Docusaurus site
+Source repo → [indexer] → KuzuDB graph → [pipeline/agent] → Markdown artifacts → [builder] → MkDocs Material site
                                      ↘ [ui] → Graph visualization (React + Sigma.js)
 ```
 
@@ -32,20 +32,22 @@ make docker-run REPO=/path/to/repo       # Anthropic Claude
 make compose-pipeline REPO=/path/to/repo \
   ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
 
-make compose-docs    # serve generated doc-site → http://localhost:8080
-make compose-ui      # graph visualization UI  → http://localhost:3001
+make compose-docs    # serve generated doc-site → http://localhost:8081
+make compose-ui      # graph visualization UI  → http://localhost:3002
 ```
 
 ### Native install
 
 ```bash
 make install-indexer   # runs indexer/install.sh — requires Java 21, Node 18, Python 3
-make install-pipeline  # pip install -e pipeline/
+make install-pipeline  # cd pipeline && uv sync
 
-cd pipeline
-lumen run /path/to/repo --verbose
+# Run the pipeline (ARGS required: specify provider + model)
+make run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
+make run REPO=/path/to/repo ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'
 
-make dev-ui            # Vite (port 5173) + Express (port 3001) dev server
+make dev-docs          # builds doc-site + serves at http://localhost:8081
+make dev-ui            # Vite (port 5174) + Express (port 3002) dev server
 ```
 
 Copy `.env.example` → `.env` and set `ANTHROPIC_API_KEY`.
@@ -107,9 +109,9 @@ single Express process on port 3001 handles both API routes and the React app.
 
 | Profile | Command | URL |
 |---|---|---|
-| `pipeline` | `make compose-pipeline REPO=...` | — (writes to `./output/`) |
-| `docs` | `make compose-docs` | http://localhost:8080 |
-| `ui` | `make compose-ui` | http://localhost:3001 |
+| `pipeline` | `make compose-pipeline REPO=... ARGS='...'` | — (writes to `./output/`) |
+| `docs` | `make compose-docs` | http://localhost:8081 |
+| `ui` | `make compose-ui` | http://localhost:3002 |
 
 `pipeline` service has `extra_hosts: host.docker.internal:host-gateway` for Ollama on Linux.
 On Mac/Windows Docker Desktop, `host.docker.internal` is available automatically.
@@ -121,36 +123,54 @@ On Mac/Windows Docker Desktop, `host.docker.internal` is available automatically
 Python package named `codedoc` (internal). CLI entry point: `lumen` (via `pyproject.toml`).
 
 Key files:
-- `pipeline/codedoc/cli.py` — Click CLI (`lumen run`)
+- `pipeline/codedoc/cli.py` — Click CLI (`lumen run`), includes `--repo-name` flag
 - `pipeline/codedoc/config.py` — config loader; defaults use `Path(__file__)` relative paths
-- `pipeline/codedoc/pipeline.py` — sequential orchestration: indexer → agent → builder
-- `pipeline/codedoc/stages/agent.py` — supervisor + parallel subagents
+- `pipeline/codedoc/pipeline.py` — sequential orchestration: indexer → agent → builder; output dir named `<repo>-<timestamp>`
+- `pipeline/codedoc/stages/agent.py` — supervisor + parallel subagents, `_detect_repo_type()`
 - `pipeline/codedoc/llm.py` — LLM abstraction: `ClaudeProvider`, `OllamaProvider`, `OpenAIProvider`
 - `pipeline/codedoc/kg_tools/toolkit.py` — `ReverseEngineerToolkit` (36 graph query tools)
 - `pipeline/codedoc/kg_tools/backends.py` — `KuzuBackend`, `Neo4jBackend`
-- `pipeline/codedoc/prompts/re-prompt.md` — base agent system prompt
-- `pipeline/codedoc/prompts/phase{2,3,4}-*.md` — phase-specific task overrides
-- `pipeline/scripts/build-docs-site.sh` — builds MkDocs Material site from artifacts
-- `pipeline/.codedoc.toml` — runtime config (`indexer_bin_dir = ../indexer/bin`)
-- `pipeline/pyproject.toml` — package name: `lumen`, entry point: `lumen = "codedoc.cli:main"`
+- `pipeline/codedoc/prompts/re-prompt.md` — base agent system prompt (backend)
+- `pipeline/codedoc/prompts/re-prompt-frontend.md` — base agent system prompt (frontend)
+- `pipeline/codedoc/prompts/phase{2,3,4}-inventory/architecture/migration.md` — backend phase overrides
+- `pipeline/codedoc/prompts/phase{2,3,4}-frontend-*.md` — frontend phase overrides
+- `pipeline/codedoc/prompts/phase5-c4-context.md` — C4 system context diagram
+- `pipeline/codedoc/prompts/phase6-sequence-diagrams.md` — Mermaid sequence diagrams
+- `pipeline/codedoc/prompts/phase7-er-diagram.md` — Mermaid ER diagram
+- `pipeline/scripts/build-docs-site.sh` — builds MkDocs Material site; supports multi-repo accumulation
+- `pipeline/.codedoc.toml` — runtime config (`indexer_bin_dir = ../indexer/bin`, `max_turns = 60`)
+- `pipeline/pyproject.toml` — package name: `lumen`, entry point: `lumen = "codedoc.cli:main"`, uses `uv`
 
 Agent architecture:
 ```
 run_supervisor_agent()
-  ├─ Phase 1: get_architecture_summary()             ← direct graph call, no LLM
-  ├─ Phase 2: run_loop(subagent/api-analyst)          ┐ parallel threads
-  ├─ Phase 3: run_loop(subagent/architect)            ┘ each gets own KuzuBackend
-  └─ Phase 4: run_loop(subagent/migration-planner)   ← seeded with Phase 2+3 output
+  ├─ Phase 1: get_architecture_summary()              ← direct graph call, no LLM
+  │            → _detect_repo_type()                  ← selects frontend or backend prompts
+  ├─ Phase 2: run_loop(subagent/api-analyst)           ┐ parallel threads
+  ├─ Phase 3: run_loop(subagent/architect)             ┘ each gets own KuzuBackend
+  ├─ Phase 4: run_loop(subagent/migration-planner)     ┐ parallel — all seeded with
+  ├─ Phase 5: run_loop(subagent/c4-context)            │ Phase 2+3 artifacts
+  ├─ Phase 6: run_loop(subagent/sequence-diagrams)     │ Phase 4 failure is fatal;
+  └─ Phase 7: run_loop(subagent/er-diagram)            ┘ Phase 5/6/7 failures are non-fatal
 ```
+
+Repo-type detection (`_detect_repo_type` in `agent.py`):
+- Keyword-matches the Phase 1 orientation summary
+- Returns `"frontend"`, `"backend"`, or `"fullstack"`
+- Selects appropriate prompt files and phase requests accordingly
+- Exceeded-turns is non-fatal: returns `status="done"` with a warning
 
 Artifacts produced (100–250 lines each):
 ```
-current-state/inventory.md        ← API surface, modules, tech stack (ONLY place for tech stack)
+current-state/inventory.md        ← API surface / components, tech stack (ONLY place for tech stack)
 architecture/system-overview.md
+architecture/c4-context.md        ← Mermaid C4Context diagram
+architecture/sequence-diagrams.md ← Mermaid sequence diagrams for key flows
 domain/domain-analysis.md
+domain/er-diagram.md              ← Mermaid erDiagram + bounded context table
 migration/roadmap.md              ← no calendar dates
 target-state/blueprint.md
-target-state/openapi/<ctx>.yaml   ← optional
+target-state/openapi/<ctx>.yaml   ← optional (backend only)
 manifests/artifacts.json
 ```
 
@@ -179,14 +199,14 @@ Express 5 backend connects to KuzuDB or Neo4j.
 
 Key files:
 - `ui/src/App.tsx` — three-panel layout: QueryPanel | GraphCanvas | NodeDetailPanel
-- `ui/server/index.ts` — Express server (port 3001): `/api/connect`, `/api/query`, `/api/schema`
+- `ui/server/index.ts` — Express server (port 3002): `/api/connect`, `/api/query`, `/api/schema`
   - In production (`NODE_ENV=production`): also serves built React `dist/` as static files
 - `ui/server/kuzu-service.ts` — KuzuDB adapter
 - `ui/server/neo4j-service.ts` — Neo4j adapter
 - `ui/vite.config.ts` — in dev mode proxies `/api` → port 3001
 
-Dev: `cd ui && npm run dev` (Vite port 5173 + Express port 3001)
-Docker: `make compose-ui` → Express serves everything on port 3001
+Dev: `cd ui && npm run dev` (Vite port 5174 + Express port 3002)
+Docker: `make compose-ui` → Express serves everything on port 3002
 
 ---
 
@@ -213,7 +233,7 @@ Docker: `make compose-ui` → Express serves everything on port 3001
 | `python:3.11-slim` as final Docker base | Same glibc as python-deps-builder; Node binary copied from node:20-slim (backwards-compatible) |
 | No `pkg`/Node SEA for JS parser | KuzuDB uses `process.dlopen()` on real `.node` file paths; can't virtualise |
 | Docker runtime `.codedoc.toml` at `/workspace/` | Overrides `indexer_bin_dir` + `build_script` without code changes |
-| `ui/server/index.ts` production static serving | Single port (3001) for both API and React app in Docker |
+| `ui/server/index.ts` production static serving | Single port (3002) for both API and React app in Docker |
 | `extra_hosts: host.docker.internal:host-gateway` | Lets pipeline container reach host Ollama on Linux |
 | LangGraph removed from pipeline | 3 sequential nodes, no branching — 50 MB dep for zero benefit |
 | Parallel Phase 2+3 subagents | Cuts wall-clock time ~50%; phases use disjoint tool sets |
@@ -221,3 +241,8 @@ Docker: `make compose-ui` → Express serves everything on port 3001
 | `get_method_source` capped at 15 calls | Graph queries ~100–300 tokens; source reads ~1,000–6,000 |
 | No calendar dates in roadmap | Fabricated timelines damage credibility |
 | MkDocs Material instead of Docusaurus | Python-based (~10 MB vs ~200 MB), no npm in pipeline; `mkdocs-material` in pyproject.toml |
+| `uv` instead of `pip` | Faster installs, reproducible lockfile (`uv.lock`); `make install-pipeline` runs `uv sync` |
+| Phase 5/6/7 non-fatal | Diagram subagents are bonus artifacts — failure should not block the docs site |
+| `--repo-name` CLI flag | Docker mounts repo at `/repo` so `Path("/repo").name = "repo"`; flag lets caller override |
+| Output dir `<repo>-<timestamp>` | Allows multiple runs of the same repo side-by-side without overwriting |
+| Multi-repo doc-site | `build-docs-site.sh` iterates `output/*/artifacts/` — accumulates all runs in one site |

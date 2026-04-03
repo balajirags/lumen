@@ -24,10 +24,14 @@ Source repo
     ▼
 [Multi-agent pipeline] — graph queries first, source reads second
     │
-    ├─ Supervisor coordinates 3 parallel subagents
-    ├─ Subagent 1: API surface + module inventory
-    ├─ Subagent 2: Architecture + domain model       } run in parallel
-    └─ Subagent 3: Migration risk + target state     } seeded by 1 + 2
+    ├─ Supervisor coordinates 7 phases
+    ├─ Phase 1: Orientation (direct graph call — no LLM)
+    ├─ Phase 2: API / component inventory   } run in parallel
+    ├─ Phase 3: Architecture + domain model } seeded by Phase 1
+    ├─ Phase 4: Migration risk + target state  }
+    ├─ Phase 5: C4 system context diagram      } run in parallel
+    ├─ Phase 6: Sequence diagrams              } seeded by Phase 2+3
+    └─ Phase 7: ER diagram / domain model      }
     │
     ▼
 [Builder] → MkDocs Material documentation site
@@ -57,15 +61,18 @@ metadata to read only the exact method body (50–600 tokens), not the whole fil
 
 ### Multi-agent synthesis
 
-The pipeline runs three specialised subagents under a supervisor:
+The pipeline runs specialised subagents under a supervisor across 7 phases:
 
-- **api-analyst** — entry points, endpoints, module structure, entities
-- **architect** — coupling matrix, design patterns, domain model, external systems
-- **migration-planner** — hotspots, dead code, risk matrix, target state blueprint
+- **api-analyst** (Phase 2) — entry points, endpoints / components, module structure, entities
+- **architect** (Phase 3) — coupling matrix, design patterns, domain model, external systems
+- **migration-planner** (Phase 4) — hotspots, dead code, risk matrix, target state blueprint
+- **c4-context** (Phase 5) — integration points diagram (databases, queues, external APIs)
+- **sequence-diagrams** (Phase 6) — Mermaid sequence diagrams for key runtime flows
+- **er-diagram** (Phase 7) — entity relationships and bounded context ownership
 
-Phase 2 (api-analyst) and Phase 3 (architect) run **in parallel** on independent
-graph tool sets. Phase 4 (migration-planner) runs after both complete, seeded with
-their findings — no redundant queries, no repeated analysis.
+Phases 2+3 run **in parallel**. Phases 4–7 also run **in parallel**, seeded with Phase 2+3
+findings — no redundant queries. The pipeline auto-detects whether the repo is a **frontend**
+(React/Vue/Angular) or **backend** (Spring/Django/Express) and selects appropriate prompts.
 
 ---
 
@@ -73,11 +80,14 @@ their findings — no redundant queries, no repeated analysis.
 
 | Document | What it covers |
 |---|---|
-| API & Module Inventory | Endpoints, packages, domain entities, tech stack |
+| API & Module Inventory | Endpoints / components, packages, domain entities, tech stack |
 | System Architecture | Layered architecture, coupling hotspots, data flow, design patterns |
+| C4 System Context Diagram | Integration points: databases, queues, external APIs (Mermaid) |
 | Domain Analysis | Business capabilities, bounded contexts, domain events |
+| ER Diagram | Entity relationships and bounded context ownership (Mermaid) |
+| Sequence Diagrams | Key runtime flows: request handling, auth, data writes (Mermaid) |
 | Migration Roadmap | Risk matrix, dead code candidates, modernization phases |
-| Target State Blueprint | Target microservice map and migration principles |
+| Target State Blueprint | Target microservice / component map and migration principles |
 
 Plus a **visual graph explorer** (the UI) for ad-hoc Cypher queries on the CPG.
 
@@ -113,16 +123,23 @@ Output lands in `./output/` after every run.
 
 | Service | URL | Command |
 |---|---|---|
-| MkDocs doc-site | http://localhost:8081 | `make compose-docs` |
+| MkDocs doc-site (Docker) | http://localhost:8081 | `make compose-docs` |
+| MkDocs doc-site (native) | http://localhost:8081 | `make dev-docs` |
 | Graph UI (Docker) | http://localhost:3002 | `make compose-ui` |
 | Graph UI (dev) | http://localhost:5174 | `make dev-ui` |
 
 ### Doc-site
 
 ```bash
-make compose-docs
-# → http://localhost:8081
+# Docker
+make compose-docs    # → http://localhost:8081
+
+# Native
+make dev-docs        # builds + serves at http://localhost:8081
 ```
+
+The doc-site **accumulates** across runs — every repo you analyse appears as a top-level
+tab in the navigation. Run against multiple repos and browse them all at once.
 
 ### Graph UI
 
@@ -138,21 +155,20 @@ make compose-ui
 
 ## Native install
 
-Requires Java 21, Node 18, Python 3.11+.
+Requires Java 21, Node 18, Python 3.11+, and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 cp .env.example .env    # add ANTHROPIC_API_KEY
-make install            # builds indexer + installs CLI
-cd pipeline
-lumen run /path/to/repo --verbose
-```
+make install            # builds indexer + installs pipeline via uv
 
-With Ollama (native):
+# Anthropic Claude
+make run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
 
-```bash
-lumen run /path/to/repo \
-  --provider ollama --model qwen2.5:32b \
-  --base-url http://localhost:11434/v1
+# Ollama (local model)
+make run REPO=/path/to/repo ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'
+
+# OpenAI
+make run REPO=/path/to/repo ARGS='--provider openai --model gpt-4o'
 ```
 
 Graph UI in dev mode:
@@ -168,11 +184,12 @@ make dev-ui    # Vite → http://localhost:5174  |  Express → http://localhost
 ```
 lumen run REPO_PATH [OPTIONS]
 
-  --model TEXT        LLM model (default: claude-sonnet-4-6)
   --provider TEXT     auto | anthropic | ollama | openai
+  --model TEXT        LLM model (default: claude-sonnet-4-6)
   --base-url TEXT     Override API endpoint (e.g. http://localhost:11434/v1)
+  --repo-name TEXT    Override repo name in output dir (useful when mounted at /repo)
   --output-dir TEXT   Output directory (default: ./codedoc-output)
-  --max-turns INT     Max LLM turns per phase (default: 40)
+  --max-turns INT     Max LLM turns per phase (default: 60)
   --verbose           Stream logs as the pipeline runs
 ```
 
@@ -181,17 +198,23 @@ lumen run REPO_PATH [OPTIONS]
 ## Output structure
 
 ```
-codedoc-output/<repo-name>-<timestamp>/
+output/<repo-name>-<timestamp>/
 ├── pipeline.json          ← run metadata and token usage
-├── index.kuzu/            ← Code Property Graph database
-├── artifacts/             ← 7 markdown documents
-│   ├── current-state/inventory.md
-│   ├── architecture/system-overview.md
-│   ├── domain/domain-analysis.md
-│   ├── migration/roadmap.md
-│   ├── target-state/blueprint.md
-│   └── manifests/artifacts.json
-└── doc-site/              ← built MkDocs Material site
+├── index.kuzu             ← Code Property Graph database (single file, KuzuDB 0.11+)
+└── artifacts/             ← documentation artifacts
+    ├── current-state/inventory.md
+    ├── architecture/
+    │   ├── system-overview.md
+    │   ├── c4-context.md         ← Mermaid C4Context diagram
+    │   └── sequence-diagrams.md  ← Mermaid sequence diagrams
+    ├── domain/
+    │   ├── domain-analysis.md
+    │   └── er-diagram.md         ← Mermaid erDiagram
+    ├── migration/roadmap.md
+    ├── target-state/blueprint.md
+    └── manifests/artifacts.json
+
+output/doc-site/               ← shared MkDocs Material site (accumulates all runs)
 ```
 
 ---
@@ -203,7 +226,8 @@ codedoc-output/<repo-name>-<timestamp>/
 ```toml
 [pipeline]
 model     = "claude-sonnet-4-6"
-max_turns = 40
+provider  = "auto"
+max_turns = 60
 
 [paths]
 output_dir = "./my-output"
