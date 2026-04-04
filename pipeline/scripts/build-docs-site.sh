@@ -10,7 +10,7 @@
 # Flags:
 #   --output-dir   Path to the forward-engineering output directory (default: ./output)
 #   --site-dir     Where the built site will be written (default: ./doc-site)
-#   --title        Site title shown in the navbar (default: "Forward Engineering Docs")
+#   --title        Site title shown in the navbar (default: "lumen Docs")
 #   --skip-build   Only scaffold; skip the final mkdocs build
 #   --clean        Ignored (kept for CLI compatibility)
 # ─────────────────────────────────────────────────────────────────────
@@ -19,7 +19,7 @@ set -euo pipefail
 # ── Defaults ────────────────────────────────────────────────────────
 OUTPUT_DIR="./output"
 SITE_DIR="./doc-site"
-SITE_TITLE="Forward Engineering Docs"
+SITE_TITLE="lumen Docs"
 SKIP_BUILD=false
 
 # ── Parse args ──────────────────────────────────────────────────────

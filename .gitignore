@@ -32,6 +32,7 @@ indexer/parsers/javascript/package-lock.json
 .idea/
 *.iml
 .vscode/
+output/
 
 #output folder
 .output/

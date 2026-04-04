@@ -27,8 +27,9 @@ def main() -> None:
 @click.option("--model", default=None, help="Model name (default: claude-sonnet-4-6). For Ollama use tool-capable models: llama3.1, qwen2.5, mistral.")
 @click.option("--provider", default=None, type=click.Choice(["auto", "anthropic", "ollama", "openai"]), help="LLM provider (default: auto-detect from model name)")
 @click.option("--base-url", default=None, help="Custom API base URL (e.g. http://localhost:11434/v1 for Ollama)")
-@click.option("--max-turns", type=int, default=None, help="Max agent tool turns (default: 40)")
+@click.option("--max-turns", type=int, default=None, help="Max agent tool turns (default: 60)")
 @click.option("--timeout", type=int, default=None, help="Per-stage timeout in seconds (default: 300)")
+@click.option("--repo-size-check", default=None, type=click.Choice(["off", "warn", "strict"]), help="Repo size guardrail mode (default: warn)")
 @click.option("--verbose", is_flag=True, default=False, help="Print full subprocess output")
 def run(
     repo_path: str,
@@ -39,6 +40,7 @@ def run(
     base_url: str | None,
     max_turns: int | None,
     timeout: int | None,
+    repo_size_check: str | None,
     verbose: bool,
 ) -> None:
     """Run the full pipeline: index → agent → build.
@@ -52,6 +54,7 @@ def run(
         "base_url": base_url,
         "max_turns": max_turns,
         "timeout": timeout,
+        "repo_size_check": repo_size_check,
         "verbose": verbose or None,
     })
 
@@ -65,6 +68,7 @@ def run(
         max_turns=cfg.max_turns,
         max_context_tokens=cfg.max_context_tokens,
         timeout=cfg.timeout,
+        repo_size_check=cfg.repo_size_check,
         verbose=cfg.verbose,
         indexer_bin_dir=cfg.indexer_bin_dir,
         agent_prompt=cfg.agent_prompt,

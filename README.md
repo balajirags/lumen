@@ -39,6 +39,14 @@ Source repo
          → KuzuDB graph (explorable in the UI)
 ```
 
+### What’s new in the current pipeline
+
+- **Multi-language indexing per run** — supported Java/Kotlin, JS/TS, and Python slices are all indexed in the same run when present.
+- **Normalized graph metadata** — nodes and edges carry `language`, `kind`, and `normKind` so tooling can reason across language-specific parser outputs more consistently.
+- **Repo metrics guardrail** — a native preflight plugin estimates repo size using LOC, source-file count, and language mix before indexing starts.
+- **Archetype-aware prompting** — the agent now selects `backend-service`, `frontend-app`, or `library` guidance before the analyst phase.
+- **Improved CLI UX** — indexing shows live per-language progress, and the three parallel analysts render as separate live boxes during Phase 2.
+
 ### Why a Code Property Graph instead of file reading
 
 A **Code Property Graph (CPG)** is a static analysis index that encodes AST, control
@@ -75,6 +83,28 @@ decomposition, target C4 diagram, and strangler fig extraction plan.
 Diagrams are produced in **PlantUML** (C4Context + sequence diagrams) rendered to SVG in the
 built documentation site.
 
+### Repo metrics guardrail
+
+Before indexing, lumen runs a native preflight size check. It does **not** use an LLM.
+
+The default plugin measures:
+
+- total non-empty LOC in supported source files
+- supported source-file count
+- language mix across Java/Kotlin, JS/TS, and Python
+
+It classifies the repo size/risk and warns when the repo is large relative to the current
+analysis settings such as `max_turns` and `max_context_tokens`.
+
+Guardrail modes:
+
+- `warn` — default; show warning and continue
+- `strict` — fail before indexing on high-risk repos
+- `off` — disable the guardrail entirely
+
+The preflight is implemented as a **pluggable module** inside the pipeline, so teams can
+remove or replace it without changing the indexer or agent stages.
+
 ---
 
 ## What you get
@@ -90,6 +120,7 @@ built documentation site.
 | Bounded Contexts | Bounded context decomposition grounded in coupling + domain evidence |
 | Target C4 Context | Future decomposed state as PlantUML C4Context diagram |
 | Strangler Fig Plan | Ordered extraction plan with seam identification and routing strategy |
+| Repo Metrics | Preflight LOC / file-count / language-mix assessment with size/risk classification |
 
 Plus a **visual graph explorer** (the UI) for ad-hoc Cypher queries on the CPG.
 
@@ -191,7 +222,8 @@ lumen run REPO_PATH [OPTIONS]
   --base-url TEXT     Override API endpoint (e.g. http://localhost:11434/v1)
   --repo-name TEXT    Override repo name in output dir (useful when mounted at /repo)
   --output-dir TEXT   Output directory (default: ./codedoc-output)
-  --max-turns INT     Max LLM turns per phase (default: 120)
+  --max-turns INT     Max LLM turns per phase (default: 60)
+  --repo-size-check   off | warn | strict (default: warn)
   --verbose           Stream logs as the pipeline runs
 ```
 
@@ -201,7 +233,7 @@ lumen run REPO_PATH [OPTIONS]
 
 ```
 output/<repo-name>-<timestamp>/
-├── pipeline.json          ← run metadata and token usage
+├── pipeline.json          ← run metadata, repo metrics, and token usage
 ├── index.kuzu             ← Code Property Graph database (KuzuDB)
 └── artifacts/             ← documentation artifacts
     ├── domain/
@@ -233,7 +265,8 @@ output/doc-site/               ← shared MkDocs Material site (accumulates all 
 [pipeline]
 model     = "claude-sonnet-4-6"
 provider  = "auto"
-max_turns = 120
+max_turns = 60
+repo_size_check = "warn"
 
 [paths]
 output_dir = "./my-output"
@@ -248,6 +281,18 @@ output_dir = "./my-output"
 | Java / Kotlin | JavaParser + Kotlin Compiler PSI → fat JAR |
 | JavaScript / TypeScript / React | Babel + custom CFG/DFG walker |
 | Python | `ast` module + custom CFG/DFG walker |
+
+Mixed-language repos are indexed in a single run. The resulting graph keeps parser-native
+labels and also stores normalized metadata so the agent/tooling can work across languages.
+
+## CLI experience
+
+When you run the pipeline in a TTY:
+
+- the repo metrics preflight is shown before indexing
+- the indexer renders a live per-language progress panel
+- the three analyst agents render as separate live boxes during Phase 2
+- supervisor and final stage messages still print as normal log lines
 
 ---
 

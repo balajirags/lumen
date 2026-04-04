@@ -30,6 +30,7 @@ public class KuzuGraphStore implements GraphStore {
                         "CREATE NODE TABLE IF NOT EXISTS %s (id STRING, name STRING, qualifiedName STRING, " +
                                 "visibility STRING, isAbstract BOOLEAN, isStatic BOOLEAN, isFinal BOOLEAN, " +
                                 "returnType STRING, lineNumber INT64, type STRING, external BOOLEAN, path STRING, " +
+                                "language STRING, kind STRING, normKind STRING, " +
                                 "PRIMARY KEY (id))",
                         tableName));
             } catch (Exception e) {
@@ -74,7 +75,7 @@ public class KuzuGraphStore implements GraphStore {
 
         for (String relDef : relDefs) {
             try {
-                connection.query(relDef);
+                connection.query(withNormalizedRelProps(relDef));
             } catch (Exception e) {
                 System.err.printf("Warning: Could not create relationship: %s%n", e.getMessage());
             }
@@ -128,6 +129,9 @@ public class KuzuGraphStore implements GraphStore {
                         props.append(formatValue(entry.getValue()));
                     }
                 }
+                props.append(", language: ").append(formatValue(inferLanguage(node.type())));
+                props.append(", kind: ").append(formatValue(nodeTypeToTable(node.type())));
+                props.append(", normKind: ").append(formatValue(inferNormKind(node.type())));
 
                 cypher += props + "})";
                 connection.query(cypher);
@@ -144,8 +148,15 @@ public class KuzuGraphStore implements GraphStore {
                 if (sourceTable == null || targetTable == null) continue;
 
                 String relProps = "";
-                if (!rel.properties().isEmpty()) {
-                    relProps = " {" + rel.properties().entrySet().stream()
+                Map<String, Object> enrichedProperties = new java.util.LinkedHashMap<>(rel.properties());
+                CodeNode sourceNode = graph.getNode(rel.sourceId());
+                if (sourceNode != null) {
+                    enrichedProperties.put("language", inferLanguage(sourceNode.type()));
+                }
+                enrichedProperties.put("kind", rel.type().name());
+                enrichedProperties.put("normKind", inferRelNormKind(rel.type()));
+                if (!enrichedProperties.isEmpty()) {
+                    relProps = " {" + enrichedProperties.entrySet().stream()
                             .map(e -> e.getKey() + ": " + formatValue(e.getValue()))
                             .collect(Collectors.joining(", ")) + "}";
                 }
@@ -245,6 +256,52 @@ public class KuzuGraphStore implements GraphStore {
             case LAMBDA -> "Lambda";
             case INIT_BLOCK -> "InitBlock";
             case TYPE_ALIAS -> "TypeAlias";
+        };
+    }
+
+    private static String withNormalizedRelProps(String relDef) {
+        int idx = relDef.lastIndexOf(')');
+        if (idx == -1) {
+            return relDef;
+        }
+        return relDef.substring(0, idx) + ", language STRING, kind STRING, normKind STRING" + relDef.substring(idx);
+    }
+
+    private static String inferLanguage(NodeType type) {
+        return switch (type) {
+            case MODULE, FUNCTION, ARROW_FUNCTION, COMPONENT, HOOK, JSX_ELEMENT -> "javascript";
+            case DECORATOR, GENERATOR, ASYNC_FUNCTION, COMPREHENSION -> "python";
+            case DATA_CLASS, SEALED_CLASS, SEALED_INTERFACE, OBJECT_DECL, COMPANION_OBJECT,
+                    EXTENSION_FUNCTION, SUSPEND_FUNCTION, PROPERTY, LAMBDA, INIT_BLOCK, TYPE_ALIAS -> "kotlin";
+            default -> "java";
+        };
+    }
+
+    private static String inferNormKind(NodeType type) {
+        return switch (type) {
+            case PACKAGE, MODULE -> "CodeUnit";
+            case METHOD, CONSTRUCTOR, FUNCTION, ARROW_FUNCTION, HOOK, ASYNC_FUNCTION, GENERATOR,
+                    EXTENSION_FUNCTION, SUSPEND_FUNCTION, LAMBDA -> "Callable";
+            case CLASS, INTERFACE, ENUM, RECORD, DATA_CLASS, SEALED_CLASS, SEALED_INTERFACE,
+                    OBJECT_DECL, TYPE_ALIAS -> "TypeLike";
+            case FIELD, PROPERTY, PARAMETER -> "DataMember";
+            case COMPONENT -> "UiComponent";
+            case FILE -> "SourceFile";
+            case ANNOTATION_TYPE, DECORATOR -> "AnnotationLike";
+            case STATEMENT -> "Statement";
+            default -> "CodeElement";
+        };
+    }
+
+    private static String inferRelNormKind(RelationshipType type) {
+        return switch (type) {
+            case CONTAINS, SOURCE_FILE -> "Contains";
+            case CALLS -> "Calls";
+            case IMPORTS, EXPORTS, PROP_DEPENDENCY, DELEGATES_TO -> "DependsOn";
+            case EXTENDS, IMPLEMENTS, OVERRIDES, SEALED_SUBTYPE, COMPANION_OF, EXTENSION_OF -> "TypeRelation";
+            case RENDERS, USES_HOOK -> "UsesUi";
+            case HAS_PARAMETER, OF_TYPE, RETURNS, THROWS, DECORATES, HAS_ANNOTATION, YIELDS, SUSPENDS -> "SemanticRelation";
+            case AST_CHILD, CFG_NEXT, DATA_FLOW -> "FlowRelation";
         };
     }
 

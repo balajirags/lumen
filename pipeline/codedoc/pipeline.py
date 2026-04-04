@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from codedoc.state import PipelineState
+from codedoc.preflight import run_preflights
 from codedoc.stages.indexer import run_indexer
 from codedoc.stages.agent import run_agent
 from codedoc.stages.builder import run_builder
@@ -26,6 +27,7 @@ def run_pipeline(
     max_turns: int,
     max_context_tokens: int = 120_000,
     timeout: int = 300,
+    repo_size_check: str = "warn",
     verbose: bool = False,
     indexer_bin_dir: str = "",
     agent_prompt: str = "",
@@ -54,6 +56,7 @@ def run_pipeline(
         max_turns=max_turns,
         max_context_tokens=max_context_tokens,
         timeout=timeout,
+        repo_size_check=repo_size_check,
         verbose=verbose,
         indexer_bin_dir=indexer_bin_dir,
         agent_prompt=agent_prompt,
@@ -71,6 +74,12 @@ def run_pipeline(
     pipeline_t0 = time.time()
 
     try:
+        # Stage 1: Repo Metrics Preflight
+        state.log("pipeline", "=== Preflight: Repo Metrics ===")
+        state = run_preflights(state)
+        if state.status == "failed":
+            return state
+
         # Stage 1: Indexer
         state.log("pipeline", "=== Stage 1: Indexer ===")
         _log.print_stage_header(1, "Indexer")

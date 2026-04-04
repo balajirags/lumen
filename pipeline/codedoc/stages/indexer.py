@@ -12,83 +12,57 @@ import time
 from pathlib import Path
 
 from codedoc.state import PipelineState
+from codedoc import log as _log
 
 
 # File-extension heuristics for language detection
-_JAVA_EXTS = {".java", ".kt", ".kts"}
-_JS_EXTS = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
-_PY_EXTS = {".py", ".pyi"}
-
-
-def detect_language(repo_path: str) -> str:
-    """Guess dominant language by scanning file extensions.
-
-    Returns one of: ``java``, ``js``, ``python``.
-    Raises ``ValueError`` if no supported files found.
-    """
-    counts = {"java": 0, "js": 0, "python": 0}
-    for root, _dirs, files in os.walk(repo_path):
-        # skip hidden dirs and common non-source dirs
-        parts = Path(root).parts
-        if any(p.startswith(".") or p in ("node_modules", "__pycache__", "venv", ".venv", "build", "dist", "target") for p in parts):
-            continue
-        for f in files:
-            ext = Path(f).suffix.lower()
-            if ext in _JAVA_EXTS:
-                counts["java"] += 1
-            elif ext in _JS_EXTS:
-                counts["js"] += 1
-            elif ext in _PY_EXTS:
-                counts["python"] += 1
-
-    if all(v == 0 for v in counts.values()):
-        raise ValueError(
-            f"No supported source files found in {repo_path}. "
-            "Expected Java/Kotlin, JavaScript/TypeScript, or Python files."
-        )
-    return max(counts, key=counts.get)  # type: ignore[arg-type]
+_LANG_EXTS = {
+    "java": {".java", ".kt", ".kts"},
+    "js": {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"},
+    "python": {".py", ".pyi"},
+}
 
 
 def _count_languages(repo_path: str) -> dict[str, int]:
     """Return file counts per language for the repo."""
-    counts: dict[str, int] = {"java": 0, "js": 0, "python": 0}
+    counts: dict[str, int] = {name: 0 for name in _LANG_EXTS}
     for root, _dirs, files in os.walk(repo_path):
         parts = Path(root).parts
         if any(p.startswith(".") or p in ("node_modules", "__pycache__", "venv", ".venv", "build", "dist", "target") for p in parts):
             continue
         for f in files:
             ext = Path(f).suffix.lower()
-            if ext in _JAVA_EXTS:
-                counts["java"] += 1
-            elif ext in _JS_EXTS:
-                counts["js"] += 1
-            elif ext in _PY_EXTS:
-                counts["python"] += 1
+            for language, extensions in _LANG_EXTS.items():
+                if ext in extensions:
+                    counts[language] += 1
+                    break
     return counts
+
+
+def detect_languages(repo_path: str) -> dict[str, int]:
+    """Return all supported languages found in the repo with their file counts."""
+    counts = _count_languages(repo_path)
+    detected = {lang: count for lang, count in counts.items() if count > 0}
+    if not detected:
+        raise ValueError(
+            f"No supported source files found in {repo_path}. "
+            "Expected Java/Kotlin, JavaScript/TypeScript, or Python files."
+        )
+    return detected
 
 
 _LANG_DISPLAY = {"java": "Java/Kotlin", "js": "JavaScript/TypeScript", "python": "Python"}
 
 
-def _warn_secondary_languages(state: "PipelineState", stage: str, repo_path: str, dominant: str) -> None:
-    """Log a warning if any secondary language has ≥20% of the dominant language's file count."""
-    counts = _count_languages(repo_path)
-    dominant_count = counts[dominant]
-    if dominant_count == 0:
-        return
-    threshold = max(1, int(dominant_count * 0.20))
-    secondaries = [
-        f"{_LANG_DISPLAY[lang]} ({cnt:,} files)"
-        for lang, cnt in counts.items()
-        if lang != dominant and cnt >= threshold
-    ]
-    if secondaries:
-        state.log(
-            stage,
-            f"WARNING: repo also contains significant {', '.join(secondaries)} in addition to "
-            f"dominant {_LANG_DISPLAY[dominant]} ({dominant_count:,} files). "
-            "Only the dominant language will be indexed.",
-        )
+def _stderr_excerpt(stderr: str) -> str:
+    lines = stderr.strip().splitlines() if stderr else []
+    if not lines:
+        return "(no stderr)"
+    if len(lines) <= 20:
+        return "\n".join(lines)
+    head = "\n".join(lines[:10])
+    tail = "\n".join(lines[-10:])
+    return f"{head}\n[... {len(lines) - 20} lines omitted ...]\n{tail}"
 
 
 _BINARY_MAP = {
@@ -117,60 +91,64 @@ def run_indexer(state: PipelineState) -> PipelineState:
         raise ValueError(f"Repository directory is empty: {repo}")
 
     state.log(stage, f"Scanning {repo} for source files...")
-    language = detect_language(str(repo))
-    state.log(stage, f"Detected dominant language: {language}")
-
-    # Warn if secondary languages are significant (≥20% of dominant)
-    _warn_secondary_languages(state, stage, str(repo), language)
-
-    binary_name = _BINARY_MAP[language]
-    binary = Path(state.indexer_bin_dir) / binary_name
-    if not binary.exists():
-        raise FileNotFoundError(
-            f"Indexer binary not found: {binary}\n"
-            f"Run the install script or check your indexer_bin_dir setting."
-        )
+    detected = detect_languages(str(repo))
+    ordered_languages = [lang for lang, _count in sorted(detected.items(), key=lambda item: (-item[1], item[0]))]
+    state.indexed_languages = ordered_languages
+    state.log(
+        stage,
+        "Detected languages: " + ", ".join(
+            f"{_LANG_DISPLAY[lang]} ({detected[lang]:,} files)" for lang in ordered_languages
+        ),
+    )
 
     # index.kuzu/ is the container directory passed as --db-path.
     # All binaries create {source_dir_name}-db inside it (e.g. index.kuzu/repo-db).
     kuzu_dir = Path(state.output_dir).resolve() / "index.kuzu"
     kuzu_dir.mkdir(parents=True, exist_ok=True)
-    state.log(stage, f"Running {binary_name} → {kuzu_dir}/{repo.name}-db")
-
-    # --- Execute indexer subprocess ---
-    cmd = [str(binary), str(repo), _DB_FLAG, str(kuzu_dir)]
+    _log.start_indexer_progress([_LANG_DISPLAY[lang] for lang in ordered_languages])
     try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=state.timeout,
-        )
-    except subprocess.TimeoutExpired:
-        raise TimeoutError(
-            f"Indexer timed out after {state.timeout}s. "
-            "Try increasing --timeout or indexing a smaller repo."
-        )
+        for language in ordered_languages:
+            binary_name = _BINARY_MAP[language]
+            binary = Path(state.indexer_bin_dir) / binary_name
+            if not binary.exists():
+                raise FileNotFoundError(
+                    f"Indexer binary not found: {binary}\n"
+                    f"Run the install script or check your indexer_bin_dir setting."
+                )
 
-    if state.verbose:
-        if proc.stdout:
-            state.log(stage, f"stdout:\n{proc.stdout}")
-        if proc.stderr:
-            state.log(stage, f"stderr:\n{proc.stderr}")
+            display = _LANG_DISPLAY[language]
+            _log.update_indexer_progress(display, "running")
+            state.log(stage, f"Running {binary_name} for {display} → {kuzu_dir}/{repo.name}-db")
+            cmd = [str(binary), str(repo), _DB_FLAG, str(kuzu_dir)]
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=state.timeout,
+                )
+            except subprocess.TimeoutExpired:
+                _log.update_indexer_progress(display, "failed")
+                raise TimeoutError(
+                    f"{binary_name} timed out after {state.timeout}s. "
+                    "Try increasing --timeout or indexing a smaller repo."
+                )
 
-    if proc.returncode != 0:
-        lines = proc.stderr.strip().splitlines() if proc.stderr else []
-        if not lines:
-            stderr_excerpt = "(no stderr)"
-        elif len(lines) <= 20:
-            stderr_excerpt = "\n".join(lines)
-        else:
-            head = "\n".join(lines[:10])
-            tail = "\n".join(lines[-10:])
-            stderr_excerpt = f"{head}\n[... {len(lines) - 20} lines omitted ...]\n{tail}"
-        raise RuntimeError(
-            f"Indexer exited with code {proc.returncode}.\n{stderr_excerpt}"
-        )
+            if state.verbose:
+                if proc.stdout:
+                    state.log(stage, f"{binary_name} stdout:\n{proc.stdout}")
+                if proc.stderr:
+                    state.log(stage, f"{binary_name} stderr:\n{proc.stderr}")
+
+            if proc.returncode != 0:
+                _log.update_indexer_progress(display, "failed")
+                raise RuntimeError(
+                    f"{binary_name} exited with code {proc.returncode}.\n{_stderr_excerpt(proc.stderr)}"
+                )
+
+            _log.update_indexer_progress(display, "done")
+    finally:
+        _log.stop_indexer_progress()
 
     # --- Locate the database created by the indexer ---
     # All binaries (Java, JS, Python) create {source_dir_name}-db inside --db-path.
@@ -207,7 +185,11 @@ def run_indexer(state: PipelineState) -> PipelineState:
         )
 
     state.kuzu_path = kuzu_path
-    state.log(stage, f"Indexing complete. KuzuDB at {kuzu_path} ({total_size:,} bytes)")
+    state.log(
+        stage,
+        f"Indexing complete. KuzuDB at {kuzu_path} ({total_size:,} bytes) "
+        f"for {len(state.indexed_languages)} language slice(s).",
+    )
     return state
 
 
@@ -255,4 +237,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

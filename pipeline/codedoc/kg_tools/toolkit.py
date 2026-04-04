@@ -70,7 +70,8 @@ class ReverseEngineerToolkit:
                     "id", "name", "qualifiedName", "visibility",
                     "isAbstract", "isStatic", "isFinal", "returnType",
                     "lineNumber", "endLineNumber", "type", "external",
-                    "path", "statementType", "code",
+                    "path", "statementType", "code", "language", "kind",
+                    "normKind",
                 ],
                 "relationship_types": REL_TYPES,
                 "relationship_properties": {
@@ -81,6 +82,7 @@ class ReverseEngineerToolkit:
                     "CFG_NEXT": ["backEdge"],
                     "DATA_FLOW": ["variable"],
                     "IMPORTS": ["importedName", "localName"],
+                    "*": ["language", "kind", "normKind"],
                 },
             }
             return json.dumps(schema, indent=2)
@@ -141,7 +143,8 @@ class ReverseEngineerToolkit:
                     parts.append(
                         f"MATCH (n:{t}) WHERE n.name =~ '(?i).*{regex_pat}.*' "
                         f"RETURN n.name AS name, n.qualifiedName AS qualifiedName, "
-                        f"'{t}' AS type, n.lineNumber AS line, n.path AS path"
+                        f"'{t}' AS type, n.language AS language, n.normKind AS normKind, "
+                        f"n.lineNumber AS line, n.path AS path"
                     )
                 cypher = " UNION ALL ".join(parts) + " LIMIT 50"
             try:
@@ -451,6 +454,19 @@ class ReverseEngineerToolkit:
             """Discover application entry points: annotated controllers/routers, main methods, exported modules, CLI commands."""
             lines = ["=== ENTRY POINTS ===\n"]
 
+            try:
+                rows = backend.execute(
+                    "MATCH (n) WHERE n.normKind = 'Entrypoint' "
+                    "RETURN DISTINCT n.qualifiedName AS target, label(n) AS type, n.language AS language "
+                    "ORDER BY language, target LIMIT 50"
+                )
+                if rows:
+                    lines.append("── Normalized Entrypoints ──")
+                    for r in rows:
+                        lines.append(f"  [{r.get('language', '?')}] {r.get('type', '')}: {r.get('target', '')}")
+            except Exception:
+                pass
+
             # 1. Dynamic annotation-based discovery (works across Java/Kotlin/Python/JS)
             try:
                 rows = backend.execute(
@@ -485,12 +501,12 @@ class ReverseEngineerToolkit:
                 rows = backend.execute(
                     "MATCH (m)-[:EXPORTS]->(e) "
                     "RETURN m.qualifiedName AS module, e.name AS export, "
-                    "label(e) AS type LIMIT 30"
+                    "label(e) AS type, e.language AS language LIMIT 30"
                 )
                 if rows:
                     lines.append("\n── Module Exports ──")
                     for r in rows:
-                        lines.append(f"  {r.get('module', '')} exports {r.get('type', '')}: {r.get('export', '')}")
+                        lines.append(f"  [{r.get('language', '?')}] {r.get('module', '')} exports {r.get('type', '')}: {r.get('export', '')}")
             except Exception:
                 pass
 
@@ -519,6 +535,20 @@ class ReverseEngineerToolkit:
         def get_api_endpoints() -> str:
             """Discover REST/HTTP API endpoints across frameworks (Spring, Flask, FastAPI, Express, etc.)."""
             lines = ["=== API ENDPOINTS ===\n"]
+
+            try:
+                rows = backend.execute(
+                    "MATCH (n) WHERE n.normKind = 'Entrypoint' "
+                    "AND n.name =~ '(?i).*(route|endpoint|handler|controller|api|get_|post_|put_|delete_).*' "
+                    "RETURN DISTINCT n.qualifiedName AS name, label(n) AS type, n.language AS language "
+                    "ORDER BY language, name LIMIT 30"
+                )
+                if rows:
+                    lines.append("── Normalized Endpoint Candidates ──")
+                    for r in rows:
+                        lines.append(f"  [{r.get('language', '?')}] {r.get('type', '')}: {r.get('name', '')}")
+            except Exception:
+                pass
 
             # 1. Annotation-based HTTP endpoints (Java/Kotlin Spring, JAX-RS, etc.)
             try:
@@ -1434,8 +1464,18 @@ class ReverseEngineerToolkit:
         @reg.tool()
         def get_architecture_summary() -> str:
             """One-shot architecture overview: schema + summary + architecture + layer classification. Call this first."""
+            try:
+                coverage_rows = backend.execute(
+                    "MATCH (n) WHERE n.language IS NOT NULL "
+                    "RETURN n.language AS language, count(n) AS count ORDER BY count DESC"
+                )
+                coverage = _format_rows(coverage_rows) if coverage_rows else "No language-tagged nodes."
+            except Exception:
+                coverage = "No language-tagged nodes."
+
             parts = [
                 self.registry.call("get_schema"),
+                "=== LANGUAGE COVERAGE ===\n" + coverage,
                 self.registry.call("summary"),
                 self.registry.call("get_architecture_overview"),
                 self.registry.call("get_layer_classification"),

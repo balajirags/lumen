@@ -6,6 +6,41 @@
 const path = require('path');
 const fs = require('fs');
 
+function withNormalizedRelProps(definition) {
+    const idx = definition.lastIndexOf(')');
+    if (idx === -1) return definition;
+    return `${definition.slice(0, idx)}, language STRING, kind STRING, normKind STRING${definition.slice(idx)}`;
+}
+
+function inferLanguage() {
+    return 'javascript';
+}
+
+function inferNormKind(type) {
+    const normalized = String(type || '').toUpperCase();
+    if (['PACKAGE', 'MODULE'].includes(normalized)) return 'CodeUnit';
+    if (['METHOD', 'CONSTRUCTOR', 'FUNCTION', 'ARROW_FUNCTION', 'HOOK', 'ASYNC_FUNCTION', 'GENERATOR', 'EXTENSION_FUNCTION', 'SUSPEND_FUNCTION', 'LAMBDA'].includes(normalized)) return 'Callable';
+    if (['CLASS', 'INTERFACE', 'ENUM', 'RECORD', 'DATA_CLASS', 'SEALED_CLASS', 'SEALED_INTERFACE', 'OBJECT_DECL', 'TYPE_ALIAS'].includes(normalized)) return 'TypeLike';
+    if (['FIELD', 'PROPERTY', 'PARAMETER'].includes(normalized)) return 'DataMember';
+    if (normalized === 'COMPONENT') return 'UiComponent';
+    if (normalized === 'FILE') return 'SourceFile';
+    if (['ANNOTATION_TYPE', 'DECORATOR'].includes(normalized)) return 'AnnotationLike';
+    if (normalized === 'STATEMENT') return 'Statement';
+    return 'CodeElement';
+}
+
+function inferRelNormKind(type) {
+    const normalized = String(type || '').toUpperCase();
+    if (['CONTAINS', 'SOURCE_FILE'].includes(normalized)) return 'Contains';
+    if (normalized === 'CALLS') return 'Calls';
+    if (['IMPORTS', 'EXPORTS', 'PROP_DEPENDENCY', 'DELEGATES_TO'].includes(normalized)) return 'DependsOn';
+    if (['EXTENDS', 'IMPLEMENTS', 'OVERRIDES', 'SEALED_SUBTYPE', 'COMPANION_OF', 'EXTENSION_OF'].includes(normalized)) return 'TypeRelation';
+    if (['RENDERS', 'USES_HOOK'].includes(normalized)) return 'UsesUi';
+    if (['HAS_PARAMETER', 'OF_TYPE', 'RETURNS', 'THROWS', 'DECORATES', 'HAS_ANNOTATION', 'YIELDS', 'SUSPENDS'].includes(normalized)) return 'SemanticRelation';
+    if (['AST_CHILD', 'CFG_NEXT', 'DATA_FLOW'].includes(normalized)) return 'FlowRelation';
+    return 'CodeRelation';
+}
+
 // ─── KuzuDB Store ───────────────────────────────────────────────────────────
 
 class KuzuStore {
@@ -30,7 +65,7 @@ class KuzuStore {
         ];
 
         for (const t of nodeTypes) {
-            await this._query(`CREATE NODE TABLE IF NOT EXISTS ${t} (id STRING, name STRING, qualifiedName STRING, visibility STRING, isAbstract BOOLEAN, isStatic BOOLEAN, isFinal BOOLEAN, returnType STRING, lineNumber INT64, endLineNumber INT64, statementType STRING, code STRING, type STRING, external BOOLEAN, path STRING, PRIMARY KEY (id))`);
+            await this._query(`CREATE NODE TABLE IF NOT EXISTS ${t} (id STRING, name STRING, qualifiedName STRING, visibility STRING, isAbstract BOOLEAN, isStatic BOOLEAN, isFinal BOOLEAN, returnType STRING, lineNumber INT64, endLineNumber INT64, statementType STRING, code STRING, type STRING, external BOOLEAN, path STRING, language STRING, kind STRING, normKind STRING, PRIMARY KEY (id))`);
         }
 
         const relDefs = [
@@ -63,7 +98,7 @@ class KuzuStore {
         ];
 
         for (const def of relDefs) {
-            await this._query(def);
+            await this._query(withNormalizedRelProps(def));
         }
     }
 
@@ -105,9 +140,14 @@ class KuzuStore {
             const escaped = (s) => (s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             let cypher = `CREATE (n:${table} {id: '${escaped(node.id)}', name: '${escaped(node.name)}', qualifiedName: '${escaped(node.qualifiedName)}'`;
 
-            const props = node.properties || {};
+            const props = {
+                ...(node.properties || {}),
+                language: node.properties?.language || inferLanguage(),
+                kind: table,
+                normKind: node.properties?.normKind || inferNormKind(node.type),
+            };
             for (const [key, val] of Object.entries(props)) {
-                if (['visibility', 'isAbstract', 'isStatic', 'isFinal', 'returnType', 'lineNumber', 'endLineNumber', 'statementType', 'code', 'type', 'external', 'path'].includes(key)) {
+                if (['visibility', 'isAbstract', 'isStatic', 'isFinal', 'returnType', 'lineNumber', 'endLineNumber', 'statementType', 'code', 'type', 'external', 'path', 'language', 'kind', 'normKind'].includes(key)) {
                     if (typeof val === 'boolean') cypher += `, ${key}: ${val}`;
                     else if (typeof val === 'number') cypher += `, ${key}: ${val}`;
                     else cypher += `, ${key}: '${escaped(String(val))}'`;
@@ -125,8 +165,14 @@ class KuzuStore {
 
             const escaped = (s) => (s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             let relProps = '';
-            if (rel.properties && Object.keys(rel.properties).length > 0) {
-                const parts = Object.entries(rel.properties).map(([k, v]) => {
+            const relProperties = {
+                ...(rel.properties || {}),
+                language: inferLanguage(),
+                kind: rel.type,
+                normKind: inferRelNormKind(rel.type),
+            };
+            if (Object.keys(relProperties).length > 0) {
+                const parts = Object.entries(relProperties).map(([k, v]) => {
                     if (typeof v === 'boolean') return `${k}: ${v}`;
                     if (typeof v === 'number') return `${k}: ${v}`;
                     return `${k}: '${escaped(String(v))}'`;

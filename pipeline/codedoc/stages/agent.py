@@ -421,29 +421,211 @@ _ANALYST_PROMPT_FILES: dict[str, str] = {
     "analyst/tech": "analyst-tech.md",
 }
 
+_ARCHETYPE_GUIDANCE_FILES: dict[str, str] = {
+    "backend-service": "archetype-backend-service.md",
+    "frontend-app": "archetype-frontend-app.md",
+    "library": "archetype-library.md",
+}
+
+_MANDATORY_ARTIFACTS = [
+    "domain/business-capabilities.md",
+    "architecture/business-journeys.md",
+    "architecture/c4-context.md",
+    "tech/coupling-hotspots.md",
+    "target-state/bounded-contexts.md",
+    "target-state/c4-target.md",
+    "target-state/strangler-fig.md",
+    "manifests/artifacts.json",
+]
+
+
+def _load_prompt_file(path: Path, fallback: str) -> str:
+    prompt = path.read_text(encoding="utf-8") if path.exists() else fallback
+    if prompt.startswith("---"):
+        end = prompt.find("---", 3)
+        if end != -1:
+            prompt = prompt[end + 3:].lstrip()
+    return prompt
+
+
+def _load_archetype_guidance(archetype: str) -> str:
+    fname = _ARCHETYPE_GUIDANCE_FILES.get(archetype)
+    if not fname:
+        return ""
+    path = _PHASE_PROMPTS_DIR / fname
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8").strip()
+
+
+def _select_repo_archetype(backend: KuzuBackend) -> str:
+    def _count(query: str) -> int:
+        try:
+            rows = backend.execute(query)
+            return int(rows[0]["c"]) if rows else 0
+        except Exception:
+            return 0
+
+    component_count = _count("MATCH (n:Component) RETURN count(n) AS c")
+    hook_count = _count("MATCH (n:Hook) RETURN count(n) AS c")
+    render_count = _count("MATCH ()-[r:RENDERS]->() RETURN count(r) AS c")
+    api_annotation_count = _count(
+        "MATCH (n)-[:HAS_ANNOTATION]->(a:AnnotationType) "
+        "WHERE a.name =~ '(?i).*(RestController|Controller|RequestMapping|GetMapping|PostMapping|PutMapping|DeleteMapping|Path|Route|Router|FastAPI|Blueprint).*' "
+        "RETURN count(DISTINCT n) AS c"
+    )
+    route_like_count = _count(
+        "MATCH (n) WHERE n.name =~ '(?i).*(route|endpoint|handler|controller|api|get_|post_|put_|delete_).*' "
+        "RETURN count(DISTINCT n) AS c"
+    )
+    method_count = _count("MATCH (n:Method) RETURN count(n) AS c")
+    function_count = _count("MATCH (n:Function) RETURN count(n) AS c")
+    package_count = _count("MATCH (n:Package) RETURN count(n) AS c")
+
+    frontend_score = (component_count * 3) + (hook_count * 2) + render_count
+    backend_score = (api_annotation_count * 3) + route_like_count + method_count + package_count
+
+    if frontend_score >= 3 and frontend_score >= backend_score:
+        return "frontend-app"
+    if backend_score >= 3:
+        return "backend-service"
+    if function_count > 0 or method_count > 0:
+        return "library"
+    return "backend-service"
+
+
+def _build_analyst_requests(archetype: str) -> dict[str, str]:
+    domain_turn4 = (
+        "TURN 4 — call write_artifact('domain/er-diagram.md', content) if persistent entities "
+        "were found in Turns 1-2 (look for @Entity, repositories, ORM annotations). "
+        "Content: PlantUML entity diagram + bounded context ownership table. "
+        "If no persistent entities found, write a one-line file: "
+        "'_No persistent entities found in graph._'\n"
+    )
+    flows_turn2 = (
+        "TURN 2 — call trace_user_flow on the 3 most important mutation entry points "
+        "(POST/PUT/PATCH/DELETE) from Turn 1.\n"
+    )
+    flows_turn3 = (
+        "TURN 3 — call write_artifact('architecture/business-journeys.md', content). "
+        "3-5 flows each with: '**Business journey:** As a [role], I can [action] by calling "
+        "[METHOD /path].' followed by a PlantUML sequence diagram (@startuml/@enduml). "
+        "Use -> for calls, --> for returns. Mark async steps with 'note right of X: async'.\n"
+    )
+    tech_turn3 = (
+        "TURN 3 — call write_artifact('tech/coupling-hotspots.md', content). "
+        "Content: hotspot table (component | type | score | migration impact), "
+        "top-5 coupling pairs, dead code top-10, decomposition signals "
+        "(packages with low coupling = good extraction candidates).\n"
+    )
+
+    if archetype == "frontend-app":
+        domain_turn4 = (
+            "TURN 4 — call write_artifact('domain/er-diagram.md', content) ONLY if there is strong persistent "
+            "client-side domain state evidence. Otherwise write '_No persistent entities found in graph._'\n"
+        )
+        flows_turn2 = (
+            "TURN 2 — call trace_user_flow on the 3 most important user-facing flows from Turn 1. "
+            "Prefer route handlers, exported actions, or top-level components over backend-only mutation endpoints.\n"
+        )
+        flows_turn3 = (
+            "TURN 3 — call write_artifact('architecture/business-journeys.md', content). "
+            "Document 3-5 user journeys or interaction flows grounded in routes, components, and async boundaries. "
+            "Use sequence diagrams when they clarify control handoffs.\n"
+        )
+        tech_turn3 = (
+            "TURN 3 — call write_artifact('tech/coupling-hotspots.md', content). "
+            "Focus migration impact on component extraction, shared state, routing boundaries, and API client coupling.\n"
+        )
+    elif archetype == "library":
+        domain_turn4 = (
+            "TURN 4 — write 'domain/er-diagram.md' only if the graph clearly models persistent entities; "
+            "otherwise write '_No persistent entities found in graph._'\n"
+        )
+        flows_turn2 = (
+            "TURN 2 — call trace_user_flow on the 3 most important public entry points from Turn 1. "
+            "Prefer exported/public APIs and integration boundaries over HTTP assumptions.\n"
+        )
+        flows_turn3 = (
+            "TURN 3 — call write_artifact('architecture/business-journeys.md', content). "
+            "For libraries, frame these as consumer usage flows rather than end-user UI journeys.\n"
+        )
+        tech_turn3 = (
+            "TURN 3 — call write_artifact('tech/coupling-hotspots.md', content). "
+            "Focus migration impact on package boundaries, public API stability, and dependency seams.\n"
+        )
+
+    return {
+        "analyst/domain": (
+            "Execute in 4 turns.\n"
+            "TURN 1 — batch in one response: get_schema, get_domain_model, get_annotations_usage.\n"
+            "TURN 2 — batch in one response: get_class_details on the 5 most important entity classes "
+            "found in Turn 1 (prefer @Entity annotated or aggregate root classes); "
+            "execute_cypher: MATCH (n) WHERE n.name =~ "
+            "'(?i).*(Event|Command|Created|Confirmed|Cancelled|Published|Topic).*' "
+            "RETURN label(n) AS type, n.name AS name LIMIT 30.\n"
+            "TURN 3 — call write_artifact('domain/business-capabilities.md', content). "
+            "One section per capability: name in business terms, core operations (bullets), "
+            "business rules/validations in business language with evidence citations, key entities.\n"
+            + domain_turn4 +
+            "Do NOT call get_method_source. Stop after Turn 4."
+        ),
+        "analyst/flows": (
+            "Execute in 5 turns.\n"
+            "TURN 1 — batch in one response: get_entry_points, get_api_endpoints, "
+            "get_external_dependencies, "
+            "execute_cypher: MATCH (n) WHERE n.name =~ "
+            "'(?i).*(Client|Producer|Consumer|Gateway|Adapter|Listener|Sender|Subscriber).*' "
+            "RETURN label(n) AS type, n.name AS name LIMIT 40.\n"
+            + flows_turn2 +
+            flows_turn3 +
+            "TURN 4 — call write_artifact('architecture/c4-context.md', content). "
+            "PlantUML C4Context diagram with !include <C4/C4_Context>: upstream callers + this "
+            "system + downstream dependencies. All Rel() arrows with protocol as 4th arg.\n"
+            "TURN 5 — call write_artifact('current-state/api-spec.yaml', content) ONLY if Turn 1 "
+            "found HTTP endpoints with clear path + method signatures. Skip this turn otherwise.\n"
+            "Do NOT call get_method_source. Stop after Turn 5 (or 4 if skipping api-spec)."
+        ),
+        "analyst/tech": (
+            "Execute in 3 turns.\n"
+            "TURN 1 — batch in one response: get_hotspots(coupling), get_hotspots(fan_in), "
+            "get_hotspots(fan_out), get_hotspots(god_class), get_component_coupling_matrix, "
+            "detect_circular_dependencies, get_unused_code, get_design_patterns.\n"
+            "TURN 2 — call impact_analysis on the top 3 hotspot components from Turn 1.\n"
+            + tech_turn3 +
+            "Do NOT call get_method_source. Stop after Turn 3."
+        ),
+    }
+
+
+def validate_artifacts(artifacts_dir: str, required_artifacts: list[str] | None = None) -> list[str]:
+    required = required_artifacts or _MANDATORY_ARTIFACTS
+    return [rel_path for rel_path in required if not (Path(artifacts_dir) / rel_path).exists()]
+
 
 def _build_analyst_system_prompt(
     analyst_name: str,
     db_path: str,
     repo_name: str,
     orientation_summary: str,
+    archetype: str,
 ) -> str:
     """Build the system prompt for an analyst agent (graph tools + write_artifact)."""
     fname = _ANALYST_PROMPT_FILES.get(analyst_name, "analyst-domain.md")
     prompt_path = _PHASE_PROMPTS_DIR / fname
-    prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else (
+    prompt = _load_prompt_file(prompt_path, (
         "You are a code analyst. Query the knowledge graph and write artifacts using write_artifact."
-    )
-    if prompt.startswith("---"):
-        end = prompt.find("---", 3)
-        if end != -1:
-            prompt = prompt[end + 3:].lstrip()
+    ))
+    guidance = _load_archetype_guidance(archetype)
+    if guidance:
+        prompt += f"\n\n---\n## Repo Archetype Guidance\n\n{guidance}\n"
     prompt += f"\n\n---\n## Orientation Summary\n\n{orientation_summary}\n"
     prompt += _GRAPH_CONVENTIONS
     prompt += (
         f"\n\n---\n## Runtime context\n\n"
         f"- KuzuDB path: `{db_path}`\n"
         f"- Repository name: `{repo_name}`\n"
+        f"- Repo archetype: `{archetype}`\n"
         f"- Artifact output root: see write_artifact tool\n"
         f"- Use write_artifact to write each artifact to disk.\n"
         f"- Do NOT call get_method_source.\n"
@@ -455,17 +637,17 @@ def _build_architect_prompt(
     orientation_summary: str,
     artifacts_dir: str,
     repo_name: str,
+    archetype: str,
 ) -> str:
     """Build the architect system prompt, injecting Phase 2 artifact contents."""
     prompt_path = _PHASE_PROMPTS_DIR / "architect.md"
-    prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else (
+    prompt = _load_prompt_file(prompt_path, (
         "You are a Solution Architect. Write target-state artifacts using write_artifact only. "
         "Do NOT call graph query tools."
-    )
-    if prompt.startswith("---"):
-        end = prompt.find("---", 3)
-        if end != -1:
-            prompt = prompt[end + 3:].lstrip()
+    ))
+    guidance = _load_archetype_guidance(archetype)
+    if guidance:
+        prompt += f"\n\n---\n## Repo Archetype Guidance\n\n{guidance}\n"
 
     prompt += f"\n\n---\n## Orientation Summary\n\n{orientation_summary}\n"
 
@@ -492,6 +674,7 @@ def _build_architect_prompt(
     prompt += (
         f"\n\n---\n## Runtime context\n\n"
         f"- Repository name: `{repo_name}`\n"
+        f"- Repo archetype: `{archetype}`\n"
         f"- Artifact output root: see write_artifact tool\n"
         f"- Write target-state artifacts using the `write_artifact` tool.\n"
         f"- Do NOT call any graph query tools.\n"
@@ -532,6 +715,7 @@ def run_supervisor_agent(
     total_input_tokens = 0
     total_output_tokens = 0
     total_tool_uses = 0
+    repo_archetype = "backend-service"
 
     def log(msg: str) -> None:
         all_events.append(msg)
@@ -546,7 +730,9 @@ def run_supervisor_agent(
         p1_backend = KuzuBackend(kuzu_path)
         p1_toolkit = ReverseEngineerToolkit(p1_backend, repo_path=repo_path)
         orientation_summary = p1_toolkit.call("get_architecture_summary")
+        repo_archetype = _select_repo_archetype(p1_backend)
         log(f"[supervisor] Orientation complete ({len(orientation_summary):,} chars)")
+        log(f"[supervisor] Repo archetype selected: {repo_archetype}")
     except Exception as e:
         return {
             "status": "failed",
@@ -557,6 +743,7 @@ def run_supervisor_agent(
             "tool_uses": 0,
             "input_tokens": 0,
             "output_tokens": 0,
+            "prompt_archetype": repo_archetype,
         }
 
     # ------------------------------------------------------------------
@@ -565,63 +752,12 @@ def run_supervisor_agent(
     analyst_turns = max(10, max_turns // 5)    # 24 turns for max_turns=120
     architect_turns = max(10, max_turns // 4)  # 30 turns for max_turns=120
 
-    analyst_requests: dict[str, str] = {
-        "analyst/domain": (
-            "Execute in 4 turns.\n"
-            "TURN 1 — batch in one response: get_schema, get_domain_model, get_annotations_usage.\n"
-            "TURN 2 — batch in one response: get_class_details on the 5 most important entity classes "
-            "found in Turn 1 (prefer @Entity annotated or aggregate root classes); "
-            "execute_cypher: MATCH (n) WHERE n.name =~ "
-            "'(?i).*(Event|Command|Created|Confirmed|Cancelled|Published|Topic).*' "
-            "RETURN label(n) AS type, n.name AS name LIMIT 30.\n"
-            "TURN 3 — call write_artifact('domain/business-capabilities.md', content). "
-            "One section per capability: name in business terms, core operations (bullets), "
-            "business rules/validations in business language with evidence citations, key entities.\n"
-            "TURN 4 — call write_artifact('domain/er-diagram.md', content) if persistent entities "
-            "were found in Turns 1-2 (look for @Entity, repositories, ORM annotations). "
-            "Content: PlantUML entity diagram + bounded context ownership table. "
-            "If no persistent entities found, write a one-line file: "
-            "'_No persistent entities found in graph._'\n"
-            "Do NOT call get_method_source. Stop after Turn 4."
-        ),
-        "analyst/flows": (
-            "Execute in 5 turns.\n"
-            "TURN 1 — batch in one response: get_entry_points, get_api_endpoints, "
-            "get_external_dependencies, "
-            "execute_cypher: MATCH (n) WHERE n.name =~ "
-            "'(?i).*(Client|Producer|Consumer|Gateway|Adapter|Listener|Sender|Subscriber).*' "
-            "RETURN label(n) AS type, n.name AS name LIMIT 40.\n"
-            "TURN 2 — call trace_user_flow on the 3 most important mutation entry points "
-            "(POST/PUT/PATCH/DELETE) from Turn 1.\n"
-            "TURN 3 — call write_artifact('architecture/business-journeys.md', content). "
-            "3-5 flows each with: '**Business journey:** As a [role], I can [action] by calling "
-            "[METHOD /path].' followed by a PlantUML sequence diagram (@startuml/@enduml). "
-            "Use -> for calls, --> for returns. Mark async steps with 'note right of X: async'.\n"
-            "TURN 4 — call write_artifact('architecture/c4-context.md', content). "
-            "PlantUML C4Context diagram with !include <C4/C4_Context>: upstream callers + this "
-            "system + downstream dependencies. All Rel() arrows with protocol as 4th arg.\n"
-            "TURN 5 — call write_artifact('current-state/api-spec.yaml', content) ONLY if Turn 1 "
-            "found HTTP endpoints with clear path + method signatures. Skip this turn otherwise.\n"
-            "Do NOT call get_method_source. Stop after Turn 5 (or 4 if skipping api-spec)."
-        ),
-        "analyst/tech": (
-            "Execute in 3 turns.\n"
-            "TURN 1 — batch in one response: get_hotspots(coupling), get_hotspots(fan_in), "
-            "get_hotspots(fan_out), get_hotspots(god_class), get_component_coupling_matrix, "
-            "detect_circular_dependencies, get_unused_code, get_design_patterns.\n"
-            "TURN 2 — call impact_analysis on the top 3 hotspot components from Turn 1.\n"
-            "TURN 3 — call write_artifact('tech/coupling-hotspots.md', content). "
-            "Content: hotspot table (component | type | score | migration impact), "
-            "top-5 coupling pairs, dead code top-10, decomposition signals "
-            "(packages with low coupling = good extraction candidates).\n"
-            "Do NOT call get_method_source. Stop after Turn 3."
-        ),
-    }
+    analyst_requests = _build_analyst_requests(repo_archetype)
 
     def _run_analyst(name: str, user_request: str) -> tuple[str, dict]:
         backend = KuzuBackend(kuzu_path)
         toolkit = ReverseEngineerToolkit(backend, repo_path=repo_path)
-        analyst_system = _build_analyst_system_prompt(name, kuzu_path, repo_name, orientation_summary)
+        analyst_system = _build_analyst_system_prompt(name, kuzu_path, repo_name, orientation_summary, repo_archetype)
         result = run_loop(
             provider=provider,
             toolkit=toolkit,
@@ -640,31 +776,38 @@ def run_supervisor_agent(
 
     log(f"[supervisor] Phase 2 — spawning {len(analyst_requests)} analysts in parallel (domain · flows · tech)…")
 
-    with ThreadPoolExecutor(max_workers=len(analyst_requests)) as pool:
-        futures = {
-            pool.submit(_run_analyst, name, req): name
-            for name, req in analyst_requests.items()
-        }
-        for future in as_completed(futures):
-            name, result = future.result()
-            all_events.extend(result["events"])
-            total_input_tokens += result["input_tokens"]
-            total_output_tokens += result["output_tokens"]
-            total_tool_uses += result["tool_uses"]
-            n_artifacts = len(result["artifacts"])
-            if result["status"] == "failed":
-                log(f"[supervisor] WARNING: {name} failed: {result['error']}")
-            else:
-                all_artifacts.extend(result["artifacts"])
-                log(f"[supervisor] {name} done — {n_artifacts} artifact(s)")
-            from codedoc import log as _log
-            _log.print_researcher_done(name, n_artifacts)
-
+    from codedoc import log as _log
+    _log.start_agent_boxes()
+    try:
+        with ThreadPoolExecutor(max_workers=len(analyst_requests)) as pool:
+            futures = {
+                pool.submit(_run_analyst, name, req): name
+                for name, req in analyst_requests.items()
+            }
+            for name in analyst_requests:
+                _log.update_agent_box(name, status="running", tool="starting")
+            for future in as_completed(futures):
+                name, result = future.result()
+                all_events.extend(result["events"])
+                total_input_tokens += result["input_tokens"]
+                total_output_tokens += result["output_tokens"]
+                total_tool_uses += result["tool_uses"]
+                n_artifacts = len(result["artifacts"])
+                if result["status"] == "failed":
+                    _log.update_agent_box(name, status="failed", tool="error")
+                    log(f"[supervisor] WARNING: {name} failed: {result['error']}")
+                else:
+                    all_artifacts.extend(result["artifacts"])
+                    _log.update_agent_box(name, status="done", tool="complete", artifacts=n_artifacts)
+                    log(f"[supervisor] {name} done — {n_artifacts} artifact(s)")
+                _log.print_researcher_done(name, n_artifacts)
+    finally:
+        _log.stop_agent_boxes()
     # ------------------------------------------------------------------
     # Phase 3: Architect — reads Phase 2 artifacts, writes target-state
     # ------------------------------------------------------------------
     log("[supervisor] Phase 3 — running architect…")
-    arch_system = _build_architect_prompt(orientation_summary, artifacts_dir, repo_name)
+    arch_system = _build_architect_prompt(orientation_summary, artifacts_dir, repo_name, repo_archetype)
     arch_backend = KuzuBackend(kuzu_path)
     arch_toolkit = ReverseEngineerToolkit(arch_backend, repo_path=repo_path)
     arch_result = run_loop(
@@ -707,6 +850,7 @@ def run_supervisor_agent(
             "tool_uses": total_tool_uses,
             "input_tokens": total_input_tokens,
             "output_tokens": total_output_tokens,
+            "prompt_archetype": repo_archetype,
         }
 
     _summary = (
@@ -728,6 +872,7 @@ def run_supervisor_agent(
         "tool_uses": total_tool_uses,
         "input_tokens": total_input_tokens,
         "output_tokens": total_output_tokens,
+        "prompt_archetype": repo_archetype,
     }
 
 
@@ -807,6 +952,7 @@ def run_agent(state) -> Any:
         ps.input_tokens = result["input_tokens"]
         ps.output_tokens = result["output_tokens"]
         ps.tool_uses = result["tool_uses"]
+        ps.prompt_archetype = result.get("prompt_archetype", "")
         if result["status"] == "failed":
             ps.status = "failed"
             ps.error = result["error"]
@@ -816,9 +962,16 @@ def run_agent(state) -> Any:
                 ps.status = "failed"
                 ps.error = "agent completed but wrote no artifacts"
             else:
-                ps.log("agent", f"{len(result['artifacts'])} artifact(s) → {artifacts_dir}")
-                ps.log("agent", f"tool calls used: {result['tool_uses']}")
-                ps.log("agent", f"tokens — input: {result['input_tokens']:,}  output: {result['output_tokens']:,}  total: {result['input_tokens'] + result['output_tokens']:,}")
+                missing_artifacts = validate_artifacts(artifacts_dir)
+                if missing_artifacts:
+                    ps.status = "failed"
+                    ps.error = "agent completed but missed mandatory artifacts: " + ", ".join(missing_artifacts)
+                else:
+                    ps.log("agent", f"{len(result['artifacts'])} artifact(s) → {artifacts_dir}")
+                    if ps.prompt_archetype:
+                        ps.log("agent", f"repo archetype: {ps.prompt_archetype}")
+                    ps.log("agent", f"tool calls used: {result['tool_uses']}")
+                    ps.log("agent", f"tokens — input: {result['input_tokens']:,}  output: {result['output_tokens']:,}  total: {result['input_tokens'] + result['output_tokens']:,}")
         return ps
     else:
         # Dict-based state (legacy)
@@ -826,9 +979,22 @@ def run_agent(state) -> Any:
             return {**state, "status": "failed", "error": result["error"], "events": events}
         if not result["artifacts"]:
             return {**state, "status": "failed", "error": "agent completed but wrote no artifacts", "events": events}
+        missing_artifacts = validate_artifacts(artifacts_dir)
+        if missing_artifacts:
+            return {
+                **state,
+                "status": "failed",
+                "error": "agent completed but missed mandatory artifacts: " + ", ".join(missing_artifacts),
+                "events": events,
+            }
         events.append(f"[agent] {len(result['artifacts'])} artifact(s) → {artifacts_dir}")
         events.append(f"[agent] tool calls used: {result['tool_uses']}")
-        return {**state, "artifacts_dir": artifacts_dir, "events": events}
+        return {
+            **state,
+            "artifacts_dir": artifacts_dir,
+            "events": events,
+            "prompt_archetype": result.get("prompt_archetype", ""),
+        }
 
 
 # ---------------------------------------------------------------------------

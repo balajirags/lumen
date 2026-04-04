@@ -23,6 +23,7 @@ _DEFAULTS = {
     "max_turns": 60,
     "max_context_tokens": 120_000,
     "timeout": 300,
+    "repo_size_check": "warn",
     "indexer_bin_dir": str(Path(__file__).resolve().parent.parent.parent / "indexer" / "bin"),
     "agent_prompt": str(
         Path(__file__).resolve().parent / "prompts" / "re-prompt.md"
@@ -42,6 +43,7 @@ class Config:
     max_turns: int = _DEFAULTS["max_turns"]
     max_context_tokens: int = _DEFAULTS["max_context_tokens"]
     timeout: int = _DEFAULTS["timeout"]
+    repo_size_check: str = _DEFAULTS["repo_size_check"]
     indexer_bin_dir: str = _DEFAULTS["indexer_bin_dir"]
     agent_prompt: str = _DEFAULTS["agent_prompt"]
     build_script: str = _DEFAULTS["build_script"]

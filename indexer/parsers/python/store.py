@@ -5,6 +5,13 @@ Supports KuzuDB (embedded) and Neo4j backends.
 
 import os
 
+
+def with_normalized_rel_props(definition):
+    idx = definition.rfind(')')
+    if idx == -1:
+        return definition
+    return definition[:idx] + ", language STRING, kind STRING, normKind STRING" + definition[idx:]
+
 # ─── KuzuDB Store ───────────────────────────────────────────────────────────
 
 NODE_TYPES = [
@@ -70,6 +77,46 @@ def _escape(s):
     return str(s).replace('\\', '\\\\').replace("'", "\\'")
 
 
+def infer_language(_node_type):
+    return 'python'
+
+
+def infer_norm_kind(node_type):
+    normalized = str(node_type or '').upper()
+    if normalized in {'PACKAGE', 'MODULE'}:
+        return 'CodeUnit'
+    if normalized in {'METHOD', 'CONSTRUCTOR', 'FUNCTION', 'ARROW_FUNCTION', 'ASYNC_FUNCTION', 'GENERATOR', 'EXTENSION_FUNCTION', 'SUSPEND_FUNCTION', 'LAMBDA'}:
+        return 'Callable'
+    if normalized in {'CLASS', 'INTERFACE', 'ENUM', 'RECORD', 'DATA_CLASS', 'SEALED_CLASS', 'SEALED_INTERFACE', 'OBJECT_DECL', 'TYPE_ALIAS'}:
+        return 'TypeLike'
+    if normalized in {'FIELD', 'PROPERTY', 'PARAMETER'}:
+        return 'DataMember'
+    if normalized == 'FILE':
+        return 'SourceFile'
+    if normalized in {'DECORATOR', 'ANNOTATION_TYPE'}:
+        return 'AnnotationLike'
+    if normalized == 'STATEMENT':
+        return 'Statement'
+    return 'CodeElement'
+
+
+def infer_rel_norm_kind(rel_type):
+    normalized = str(rel_type or '').upper()
+    if normalized in {'CONTAINS', 'SOURCE_FILE'}:
+        return 'Contains'
+    if normalized == 'CALLS':
+        return 'Calls'
+    if normalized in {'IMPORTS', 'EXPORTS', 'PROP_DEPENDENCY', 'DELEGATES_TO'}:
+        return 'DependsOn'
+    if normalized in {'EXTENDS', 'IMPLEMENTS', 'OVERRIDES', 'SEALED_SUBTYPE', 'COMPANION_OF', 'EXTENSION_OF'}:
+        return 'TypeRelation'
+    if normalized in {'HAS_PARAMETER', 'OF_TYPE', 'RETURNS', 'THROWS', 'DECORATES', 'HAS_ANNOTATION', 'YIELDS', 'SUSPENDS'}:
+        return 'SemanticRelation'
+    if normalized in {'AST_CHILD', 'CFG_NEXT', 'DATA_FLOW'}:
+        return 'FlowRelation'
+    return 'CodeRelation'
+
+
 class KuzuStore:
     def __init__(self, db_path):
         import kuzu
@@ -88,10 +135,11 @@ class KuzuStore:
                 f"isFinal BOOLEAN, returnType STRING, lineNumber INT64, "
                 f"endLineNumber INT64, type STRING, external BOOLEAN, "
                 f"path STRING, statementType STRING, code STRING, "
+                f"language STRING, kind STRING, normKind STRING, "
                 f"PRIMARY KEY (id))"
             )
         for rel_def in REL_DEFINITIONS:
-            self._query(rel_def)
+            self._query(with_normalized_rel_props(rel_def))
 
     def clear(self):
         rel_types = [
@@ -122,11 +170,16 @@ class KuzuStore:
                 f"qualifiedName: '{_escape(node['qualifiedName'])}'"
             )
 
-            props = node.get('properties', {})
+            props = {
+                **node.get('properties', {}),
+                'language': node.get('properties', {}).get('language', infer_language(node['type'])),
+                'kind': table,
+                'normKind': node.get('properties', {}).get('normKind', infer_norm_kind(node['type'])),
+            }
             valid_keys = {'visibility', 'isAbstract', 'isStatic', 'isFinal',
                           'returnType', 'lineNumber', 'endLineNumber',
                           'type', 'external', 'path',
-                          'statementType', 'code'}
+                          'statementType', 'code', 'language', 'kind', 'normKind'}
             for key, val in props.items():
                 if key in valid_keys:
                     if isinstance(val, bool):
@@ -147,7 +200,12 @@ class KuzuStore:
                 continue
 
             rel_props = ''
-            props = rel.get('properties', {})
+            props = {
+                **rel.get('properties', {}),
+                'language': infer_language(rel.get('type')),
+                'kind': rel.get('type'),
+                'normKind': infer_rel_norm_kind(rel.get('type')),
+            }
             if props:
                 parts = []
                 for k, v in props.items():

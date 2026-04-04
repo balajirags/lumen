@@ -14,7 +14,7 @@ This is a monorepo containing three sub-projects:
 
 | Directory | Former repo | Purpose |
 |---|---|---|
-| `pipeline/` | `reverse-eng-agent` | Python LLM pipeline: indexer stage, agent (supervisor+subagents), Docusaurus builder |
+| `pipeline/` | `reverse-eng-agent` | Python LLM pipeline: indexer stage, agent (supervisor+subagents), MkDocs builder |
 | `indexer/` | `code-mem-graph` | Indexer runtimes: Java fat JAR, JS parser, Python parser |
 | `ui/` | `code-mem-graph-ui` | React + Express graph visualization UI |
 
@@ -64,7 +64,8 @@ Key defaults (`pipeline/codedoc/config.py`):
 |---|---|
 | `model` | `claude-sonnet-4-6` |
 | `provider` | `auto` |
-| `max_turns` | 120 |
+| `max_turns` | 60 |
+| `repo_size_check` | `warn` |
 | `indexer_bin_dir` | `../indexer/bin` (monorepo); `/usr/local/bin` (Docker, via `.codedoc.toml`) |
 | `agent_prompt` | `./codedoc/prompts/re-prompt.md` |
 | `build_script` | `../scripts/build-docs-site.sh` (monorepo); `/opt/lumen/scripts/...` (Docker) |
@@ -125,9 +126,11 @@ Python package named `codedoc` (internal). CLI entry point: `lumen` (via `pyproj
 Key files:
 - `pipeline/codedoc/cli.py` — Click CLI (`lumen run`), includes `--repo-name` flag
 - `pipeline/codedoc/config.py` — config loader; defaults use `Path(__file__)` relative paths
-- `pipeline/codedoc/pipeline.py` — sequential orchestration: indexer → agent → builder; output dir named `<repo>-<timestamp>`
+- `pipeline/codedoc/pipeline.py` — sequential orchestration: preflight → indexer → agent → builder; output dir named `<repo>-<timestamp>`
+- `pipeline/codedoc/preflight/repo_metrics.py` — native pluggable repo metrics guardrail (LOC, file count, language mix)
+- `pipeline/codedoc/preflight/runner.py` — preflight registry/runner; pipeline core depends on this, not on repo-metrics directly
 - `pipeline/codedoc/stages/agent.py` — supervisor + parallel analysts + architect
-- `pipeline/codedoc/log.py` — structured progress logging for supervisor, analysts, architect
+- `pipeline/codedoc/log.py` — structured progress logging, indexer progress panel, repo metrics panel, analyst live boxes
 - `pipeline/codedoc/llm.py` — LLM abstraction: `ClaudeProvider`, `OllamaProvider`, `OpenAIProvider`
 - `pipeline/codedoc/kg_tools/toolkit.py` — `ReverseEngineerToolkit` (36 graph query tools)
 - `pipeline/codedoc/kg_tools/backends.py` — `KuzuBackend`, `Neo4jBackend`
@@ -135,9 +138,10 @@ Key files:
 - `pipeline/codedoc/prompts/analyst-flows.md` — Integration Architect system prompt (writes 2–3 artifacts)
 - `pipeline/codedoc/prompts/analyst-tech.md` — Staff Engineer system prompt (writes 1 artifact)
 - `pipeline/codedoc/prompts/architect.md` — Solution Architect system prompt (writes target-state + manifest)
+- `pipeline/codedoc/prompts/archetype-*.md` — archetype overlays for `backend-service`, `frontend-app`, and `library`
 - `pipeline/codedoc/prompts/re-prompt.md` — single-agent fallback prompt (monolithic execution path)
 - `pipeline/scripts/build-docs-site.sh` — builds MkDocs Material site with PlantUML; supports multi-repo accumulation
-- `pipeline/.codedoc.toml` — runtime config (`indexer_bin_dir = ../indexer/bin`, `max_turns = 120`)
+- `pipeline/.codedoc.toml` — runtime config (`indexer_bin_dir = ../indexer/bin`, `max_turns = 60`, `repo_size_check = "warn"`)
 - `pipeline/pyproject.toml` — package name: `lumen`, entry point: `lumen = "codedoc.cli:main"`, uses `uv`
 
 Agent architecture (Analyst + Architect pattern):
@@ -163,6 +167,8 @@ run_supervisor_agent()
 Each analyst has its own `KuzuBackend` (connections are not thread-safe).
 Analyst turn contract: explicit TURN 1/2/3/N sequence in `user_request`; `max_source_reads=0`.
 Architect receives Phase 2 artifact content injected into its system prompt (up to 10k chars each).
+Before Stage 1, the pipeline may run pluggable native preflights; the default one is repo metrics.
+Agent prompting is archetype-aware: `backend-service`, `frontend-app`, or `library`.
 
 Artifacts produced (PlantUML diagrams):
 ```
@@ -193,6 +199,12 @@ Key files:
 
 `install.sh` uses `$SCRIPT_DIR` — re-run after cloning or moving the repo. Generated
 `indexer/bin/` wrappers contain absolute paths and are gitignored.
+
+Current indexing behavior:
+- The pipeline detects all supported languages present in the repo and runs all relevant indexers in one pipeline run.
+- The graph preserves parser-native labels and also stores normalized metadata on nodes/edges:
+  `language`, `kind`, `normKind`
+- This normalized metadata is used by the toolkit and agent layer for more consistent cross-language reasoning.
 
 ---
 
@@ -232,6 +244,10 @@ Docker: `make compose-ui` → Express serves everything on port 3002
 | No pnpm workspaces | JS parser (`indexer/parsers/javascript`) is private and tiny |
 | `indexer/install.sh` unchanged | Already uses `$SCRIPT_DIR`; relocatable as-is |
 | `indexer_bin_dir = ../indexer/bin` | Wires pipeline to indexer binaries across monorepo boundary |
+| Repo metrics is a preflight plugin, not core pipeline logic | Easy for the team to disable/remove/replace without changing indexer/agent stages |
+| Multi-language indexing in one run | Real repos are often polyglot; warning-only detection was too weak |
+| Normalized graph metadata (`language`, `kind`, `normKind`) is additive | Preserve parser-native fidelity while improving toolkit/agent consistency |
+| Repo archetype prompt overlays | Backend-only prompting was too brittle for frontend and library repos |
 | jlink instead of GraalVM native-image | KuzuDB extracts JNI `.so` from JAR at runtime; native-image can't handle this |
 | No PyInstaller; pip install directly | PyInstaller bundles cause GLIBC mismatch on aarch64 between python:3.11-slim and node:20-slim |
 | `python:3.11-slim` as final Docker base | Same glibc as python-deps-builder; Node binary copied from node:20-slim (backwards-compatible) |
@@ -245,6 +261,7 @@ Docker: `make compose-ui` → Express serves everything on port 3002
 | `max_source_reads=0` for analysts | Analysts need only graph structure; source reads add latency and cost without benefit |
 | Explicit TURN N contracts in user_request | Prescriptive turn sequences prevent analysts going off-script; proven more reliable than open-ended instructions |
 | Architect reads artifact files (not notes) | Architect gets formatted markdown input, not raw research notes; higher quality target-state output |
+| Rich live progress UX in CLI | Indexer and analyst phases should feel active during long runs |
 | PlantUML via mkdocs-build-plantuml-plugin | PlantUML C4 stdlib (`!include <C4/C4_Context>`) gives semantically richer C4 diagrams; renders as SVG at build time |
 | plantuml.jar downloaded in java-builder stage | Java already present for indexer; reuses same JRE; no extra base image needed |
 | No calendar dates in roadmap | Fabricated timelines damage credibility |
