@@ -128,28 +128,29 @@ class ReverseEngineerToolkit:
                 name_pattern: Name pattern to match. Use * as wildcard (e.g. '*Service*').
                 node_type: Optional node type filter (e.g. 'Class', 'Method').
             """
-            regex_pat = re.escape(name_pattern).replace(r"\*", ".*")
+            raw_terms = [term.lower() for term in name_pattern.split("*") if term]
             label = node_type if node_type in NODE_TYPES else None
-            if label:
-                cypher = (
-                    f"MATCH (n:{label}) WHERE n.name =~ '(?i).*{regex_pat}.*' "
-                    f"RETURN n.name AS name, n.qualifiedName AS qualifiedName, "
-                    f"n.lineNumber AS line, n.path AS path LIMIT 50"
-                )
-            else:
-                parts = []
-                for t in ["Package", "Class", "Interface", "Method", "Function",
-                           "Module", "Component", "Field", "Constructor"]:
-                    parts.append(
-                        f"MATCH (n:{t}) WHERE n.name =~ '(?i).*{regex_pat}.*' "
+
+            labels = [label] if label else [
+                "Package", "Class", "Interface", "Method", "Function",
+                "Module", "Component", "Field", "Constructor",
+            ]
+            try:
+                rows: list[dict[str, Any]] = []
+                for t in labels:
+                    chunk = backend.execute(
+                        f"MATCH (n:{t}) "
                         f"RETURN n.name AS name, n.qualifiedName AS qualifiedName, "
                         f"'{t}' AS type, n.language AS language, n.normKind AS normKind, "
-                        f"n.lineNumber AS line, n.path AS path"
+                        f"n.lineNumber AS line, n.path AS path LIMIT 200"
                     )
-                cypher = " UNION ALL ".join(parts) + " LIMIT 50"
-            try:
-                rows = backend.execute(cypher)
-                return _format_rows(rows)
+                    rows.extend(chunk)
+                filtered = []
+                for row in rows:
+                    haystack = " ".join(str(row.get(k, "") or "") for k in ("name", "qualifiedName")).lower()
+                    if all(term in haystack for term in raw_terms):
+                        filtered.append(row)
+                return _format_rows(filtered[:50]) if filtered else "No results."
             except Exception as e:
                 return f"Search error: {e}"
 
@@ -597,6 +598,249 @@ class ReverseEngineerToolkit:
                 pass
 
             return "\n".join(lines) if len(lines) > 1 else "No API endpoints detected."
+
+        # ------------------------------------------------------------------ #
+        # get_route_map
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_route_map() -> str:
+            """Summarize frontend route/screen candidates and their owning modules."""
+            lines = ["=== ROUTE MAP ===\n"]
+
+            try:
+                rows = backend.execute(
+                    "MATCH (n) "
+                    "WHERE label(n) IN ['Component', 'Function', 'ArrowFunction', 'Module'] "
+                    "AND n.name =~ '(?i).*(route|router|page|screen|layout|view).*' "
+                    "OPTIONAL MATCH (owner)-[:CONTAINS]->(n) "
+                    "RETURN DISTINCT n.name AS name, label(n) AS type, n.path AS path, "
+                    "owner.qualifiedName AS owner "
+                    "ORDER BY path, name LIMIT 60"
+                )
+                if rows:
+                    lines.append("── Route / Screen Candidates ──")
+                    lines.append(_format_rows(rows))
+            except Exception as e:
+                lines.append(f"  (route scan error: {e})")
+
+            try:
+                rows = backend.execute(
+                    "MATCH (m:Module)-[:EXPORTS]->(n) "
+                    "WHERE n.name =~ '(?i).*(route|router|page|screen|layout|view).*' "
+                    "RETURN m.qualifiedName AS module, n.name AS exported, label(n) AS type "
+                    "ORDER BY module, exported LIMIT 40"
+                )
+                if rows:
+                    lines.append("\n── Exported Route Entries ──")
+                    lines.append(_format_rows(rows))
+            except Exception:
+                pass
+
+            return "\n".join(lines) if len(lines) > 1 else "No route-like frontend structures detected."
+
+        # ------------------------------------------------------------------ #
+        # get_component_boundary_map
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_component_boundary_map() -> str:
+            """Summarize component/module ownership and render relationships for frontend analysis."""
+            lines = ["=== COMPONENT BOUNDARIES ===\n"]
+
+            try:
+                rows = backend.execute(
+                    "MATCH (owner)-[:CONTAINS]->(c:Component) "
+                    "RETURN owner.qualifiedName AS owner_name, c.qualifiedName AS component_name, c.path AS path "
+                    "LIMIT 80"
+                )
+                if rows:
+                    rows = sorted(rows, key=lambda r: ((r.get("owner_name") or ""), (r.get("component_name") or "")))
+                    lines.append("── Owned Components ──")
+                    lines.append(_format_rows([
+                        {"owner": r.get("owner_name"), "component": r.get("component_name"), "path": r.get("path")}
+                        for r in rows
+                    ]))
+            except Exception as e:
+                lines.append(f"  (component ownership error: {e})")
+
+            try:
+                rows = backend.execute(
+                    "MATCH (a)-[r:RENDERS]->(b) "
+                    "RETURN a.qualifiedName AS parent, b.qualifiedName AS child, r.lineNumber AS line "
+                    "ORDER BY parent, child LIMIT 80"
+                )
+                if rows:
+                    lines.append("\n── Render Relationships ──")
+                    lines.append(_format_rows(rows))
+            except Exception:
+                pass
+
+            return "\n".join(lines) if len(lines) > 1 else "No component/render boundaries detected."
+
+        # ------------------------------------------------------------------ #
+        # get_state_management_summary
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_state_management_summary() -> str:
+            """Summarize hooks, stores, contexts, and state-like dependencies."""
+            lines = ["=== STATE MANAGEMENT ===\n"]
+
+            try:
+                rows = backend.execute(
+                    "MATCH (h:Hook) "
+                    "RETURN h.qualifiedName AS hook, h.path AS path "
+                    "ORDER BY hook LIMIT 50"
+                )
+                if rows:
+                    lines.append("── Hooks ──")
+                    lines.append(_format_rows(rows))
+            except Exception as e:
+                lines.append(f"  (hook scan error: {e})")
+
+            try:
+                rows = backend.execute(
+                    "MATCH (n) "
+                    "WHERE label(n) IN ['Component', 'Module', 'Function'] "
+                    "AND n.name =~ '(?i).*(store|context|provider|state|query|cache|reducer).*' "
+                    "RETURN DISTINCT label(n) AS type, n.qualifiedName AS name, n.path AS path "
+                    "ORDER BY type, name LIMIT 60"
+                )
+                if rows:
+                    lines.append("\n── Store / Context Candidates ──")
+                    lines.append(_format_rows(rows))
+            except Exception:
+                pass
+
+            return "\n".join(lines) if len(lines) > 1 else "No state-management structures detected."
+
+        # ------------------------------------------------------------------ #
+        # get_api_client_summary
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_api_client_summary() -> str:
+            """Summarize frontend API client modules, fetch wrappers, and gateway-like integrations."""
+            lines = ["=== API CLIENT SUMMARY ===\n"]
+
+            try:
+                rows = backend.execute(
+                    "MATCH (n) "
+                    "WHERE label(n) IN ['Module', 'Function', 'Class', 'Component'] "
+                    "AND n.name =~ '(?i).*(client|api|fetch|axios|gateway|service|query).*' "
+                    "RETURN DISTINCT label(n) AS type, n.qualifiedName AS name, n.path AS path "
+                    "ORDER BY type, name LIMIT 60"
+                )
+                if rows:
+                    lines.append("── API Client Candidates ──")
+                    lines.append(_format_rows(rows))
+            except Exception as e:
+                lines.append(f"  (api client scan error: {e})")
+
+            try:
+                rows = backend.execute(
+                    "MATCH (m:Module)-[:IMPORTS]->(dep) "
+                    "WHERE dep.name =~ '(?i).*(axios|fetch|graphql|apollo|swr|react-query).*' "
+                    "RETURN m.qualifiedName AS module, dep.name AS dependency "
+                    "ORDER BY module, dependency LIMIT 40"
+                )
+                if rows:
+                    lines.append("\n── Data Fetching Dependencies ──")
+                    lines.append(_format_rows(rows))
+            except Exception:
+                pass
+
+            return "\n".join(lines) if len(lines) > 1 else "No API client structures detected."
+
+        # ------------------------------------------------------------------ #
+        # get_public_api_surface
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_public_api_surface() -> str:
+            """Summarize exported/public library API surface."""
+            lines = ["=== PUBLIC API SURFACE ===\n"]
+
+            try:
+                rows = backend.execute(
+                    "MATCH (m:Module)-[:EXPORTS]->(n) "
+                    "RETURN m.qualifiedName AS module, n.name AS export, label(n) AS type, n.path AS path "
+                    "ORDER BY module, export LIMIT 80"
+                )
+                if rows:
+                    lines.append("── Exported Symbols ──")
+                    lines.append(_format_rows(rows))
+            except Exception as e:
+                lines.append(f"  (exports scan error: {e})")
+
+            try:
+                rows = backend.execute(
+                    "MATCH (n:Method) "
+                    "WHERE n.visibility = 'public' "
+                    "RETURN n.qualifiedName AS symbol, 'Method' AS type, n.path AS path "
+                    "ORDER BY symbol LIMIT 80"
+                )
+                if rows:
+                    lines.append("\n── Public Methods ──")
+                    lines.append(_format_rows(rows))
+            except Exception:
+                pass
+
+            return "\n".join(lines) if len(lines) > 1 else "No public API surface detected."
+
+        # ------------------------------------------------------------------ #
+        # get_extension_points
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_extension_points() -> str:
+            """Summarize library extension seams such as interfaces, abstract classes, hooks, and plugins."""
+            lines = ["=== EXTENSION POINTS ===\n"]
+
+            try:
+                rows = backend.execute(
+                    "MATCH (n) "
+                    "WHERE label(n) IN ['Interface', 'AbstractClass', 'SealedClass', 'Hook', 'Function'] "
+                    "OR n.name =~ '(?i).*(plugin|extension|hook|adapter|strategy|callback|listener|provider).*' "
+                    "RETURN DISTINCT label(n) AS type, n.qualifiedName AS name, n.path AS path "
+                    "ORDER BY type, name LIMIT 80"
+                )
+                if rows:
+                    lines.append(_format_rows(rows))
+            except Exception as e:
+                lines.append(f"  (extension-point scan error: {e})")
+
+            return "\n".join(lines) if len(lines) > 1 else "No extension points detected."
+
+        # ------------------------------------------------------------------ #
+        # get_module_dependency_map
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_module_dependency_map() -> str:
+            """Summarize module/package dependencies using imports, calls, and containment."""
+            lines = ["=== MODULE DEPENDENCY MAP ===\n"]
+
+            try:
+                rows = backend.execute(
+                    "MATCH (a)-[:IMPORTS|CALLS]->(b) "
+                    "WHERE a.path IS NOT NULL AND b.path IS NOT NULL AND a.path <> b.path "
+                    "RETURN a.path AS from_path, b.path AS to_path, count(*) AS weight "
+                    "ORDER BY weight DESC, from_path, to_path LIMIT 80"
+                )
+                if rows:
+                    lines.append("── File / Module Dependencies ──")
+                    lines.append(_format_rows(rows))
+            except Exception as e:
+                lines.append(f"  (dependency-map error: {e})")
+
+            try:
+                rows = backend.execute(
+                    "MATCH (m:Module)-[:IMPORTS]->(n) "
+                    "RETURN m.qualifiedName AS module, n.name AS dependency, label(n) AS type "
+                    "ORDER BY module, dependency LIMIT 80"
+                )
+                if rows:
+                    lines.append("\n── Module Imports ──")
+                    lines.append(_format_rows(rows))
+            except Exception:
+                pass
+
+            return "\n".join(lines) if len(lines) > 1 else "No module dependency data detected."
 
         # ------------------------------------------------------------------ #
         # get_dependency_graph
