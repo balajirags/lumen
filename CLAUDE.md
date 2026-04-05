@@ -6,8 +6,11 @@
 documentation, architecture diagrams, and migration roadmaps using LLMs and a knowledge graph.
 
 ```
-Source repo → [indexer] → KuzuDB graph → [pipeline/agent] → Markdown artifacts → [builder] → MkDocs Material site
-                                     ↘ [ui] → Graph visualization (React + Sigma.js)
+Source repo → [preflight + indexer] → KuzuDB graph
+                                      ├─ [full pipeline] -> [agent] -> Markdown artifacts -> [builder] -> MkDocs Material site
+                                      ├─ [mcp pipeline] -> MCP server (stdio)
+                                      ├─ [mcp-http pipeline] -> MCP server (Streamable HTTP)
+                                      └─ [ui] -> Graph visualization (React + Sigma.js)
 ```
 
 This is a monorepo containing three sub-projects:
@@ -29,8 +32,10 @@ make docker-build                        # builds lumen pipeline image
 make docker-run REPO=/path/to/repo       # Anthropic Claude
 
 # Ollama (local model — host.docker.internal bridges container → host)
-make compose-pipeline REPO=/path/to/repo \
+make docker-pipeline REPO=/path/to/repo \
   ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
+
+make docker-mcp REPO=/path/to/repo PORT=8765
 
 make compose-docs    # serve generated doc-site → http://localhost:8081
 make compose-ui      # graph visualization UI  → http://localhost:3002
@@ -81,7 +86,7 @@ baked into the image — `load_config()` reads `.codedoc.toml` from CWD at start
 |---|---|
 | `Dockerfile` | Multi-stage pipeline image: jlink JRE + PyInstaller binaries + Node JS parser |
 | `Dockerfile.ui` | Multi-stage UI image: Vite build + tsx Express server |
-| `docker-compose.yml` | Three profiles: `pipeline`, `docs`, `ui` |
+| `docker-compose.yml` | Four profiles: `pipeline`, `mcp`, `docs`, `ui` |
 
 ### Dockerfile (pipeline) — 4 stages
 
@@ -110,12 +115,15 @@ single Express process on port 3001 handles both API routes and the React app.
 
 | Profile | Command | URL |
 |---|---|---|
-| `pipeline` | `make compose-pipeline REPO=... ARGS='...'` | — (writes to `./output/`) |
+| `pipeline` | `make docker-pipeline REPO=... ARGS='...'` | — (writes to `./output/`) |
+| `mcp` | `make docker-mcp REPO=... PORT=8765` | http://localhost:8765/mcp |
 | `docs` | `make compose-docs` | http://localhost:8081 |
 | `ui` | `make compose-ui` | http://localhost:3002 |
 
 `pipeline` service has `extra_hosts: host.docker.internal:host-gateway` for Ollama on Linux.
 On Mac/Windows Docker Desktop, `host.docker.internal` is available automatically.
+`mcp-http` uses the same image and host bridge, but runs `lumen mcp-http` with `--host 0.0.0.0`.
+Normal MCP commands already print config snippets before serving; `--print-config` is only for config-only output.
 
 ---
 
@@ -124,27 +132,32 @@ On Mac/Windows Docker Desktop, `host.docker.internal` is available automatically
 Python package named `codedoc` (internal). CLI entry point: `lumen` (via `pyproject.toml`).
 
 Key files:
-- `pipeline/codedoc/cli.py` — Click CLI (`lumen run`), includes `--repo-name` flag
+- `pipeline/codedoc/cli.py` — Click CLI (`lumen run`, `lumen mcp`, `lumen mcp-http`), includes MCP serve flags
 - `pipeline/codedoc/config.py` — config loader; defaults use `Path(__file__)` relative paths
-- `pipeline/codedoc/pipeline.py` — sequential orchestration: preflight → indexer → agent → builder; output dir named `<repo>-<timestamp>`
+- `pipeline/codedoc/pipelines/full.py` — full docs pipeline: preflight → indexer → agent → builder
+- `pipeline/codedoc/pipelines/mcp.py` — MCP pipeline: preflight → indexer → MCP serve metadata
+- `pipeline/codedoc/pipelines/mcp_http.py` — HTTP MCP pipeline: preflight → indexer → HTTP MCP serve metadata
+- `pipeline/codedoc/pipelines/common.py` — shared run-dir, state-init, and finalization helpers
+- `pipeline/codedoc/pipeline.py` — compatibility shim exporting the pipeline entrypoints
 - `pipeline/codedoc/preflight/repo_metrics.py` — native pluggable repo metrics guardrail (LOC, file count, language mix)
 - `pipeline/codedoc/preflight/runner.py` — preflight registry/runner; pipeline core depends on this, not on repo-metrics directly
 - `pipeline/codedoc/stages/agent.py` — supervisor + parallel analysts + architect
 - `pipeline/codedoc/log.py` — structured progress logging, indexer progress panel, repo metrics panel, analyst live boxes
+- `pipeline/codedoc/mcp_server.py` — MCP server backed by `kg_tools`; supports stdio and Streamable HTTP, plus native/Docker/client config output
 - `pipeline/codedoc/llm.py` — LLM abstraction: `ClaudeProvider`, `OllamaProvider`, `OpenAIProvider`
 - `pipeline/codedoc/kg_tools/toolkit.py` — `ReverseEngineerToolkit` (36 graph query tools)
 - `pipeline/codedoc/kg_tools/backends.py` — `KuzuBackend`, `Neo4jBackend`
 - `pipeline/codedoc/prompts/analyst-domain.md` — Business Analyst system prompt (writes 2 artifacts)
 - `pipeline/codedoc/prompts/analyst-flows.md` — Integration Architect system prompt (writes 2–3 artifacts)
 - `pipeline/codedoc/prompts/analyst-tech.md` — Staff Engineer system prompt (writes 1 artifact)
-- `pipeline/codedoc/prompts/architect.md` — Solution Architect system prompt (writes target-state + manifest)
+- `pipeline/codedoc/prompts/architect.md` — Solution Architect system prompt (writes target-state artifacts; manifest is machine-generated)
 - `pipeline/codedoc/prompts/archetype-*.md` — archetype overlays for `backend-service`, `frontend-app`, and `library`
 - `pipeline/codedoc/prompts/re-prompt.md` — single-agent fallback prompt (monolithic execution path)
 - `pipeline/scripts/build-docs-site.sh` — builds MkDocs Material site with PlantUML; supports multi-repo accumulation
 - `pipeline/.codedoc.toml` — runtime config (`indexer_bin_dir = ../indexer/bin`, `max_turns = 60`, `repo_size_check = "warn"`)
 - `pipeline/pyproject.toml` — package name: `lumen`, entry point: `lumen = "codedoc.cli:main"`, uses `uv`
 
-Agent architecture (Analyst + Architect pattern):
+Full pipeline architecture (Analyst + Architect pattern):
 ```
 run_supervisor_agent()
   ├─ Phase 1: get_architecture_summary()       ← direct graph call, no LLM
@@ -161,14 +174,30 @@ run_supervisor_agent()
                                                → target-state/bounded-contexts.md
                                                → target-state/c4-target.md
                                                → target-state/strangler-fig.md
-                                               → manifests/artifacts.json
 ```
 
 Each analyst has its own `KuzuBackend` (connections are not thread-safe).
 Analyst turn contract: explicit TURN 1/2/3/N sequence in `user_request`; `max_source_reads=0`.
 Architect receives Phase 2 artifact content injected into its system prompt (up to 10k chars each).
+`manifests/artifacts.json` is machine-written by the pipeline, not the model.
 Before Stage 1, the pipeline may run pluggable native preflights; the default one is repo metrics.
 Agent prompting is archetype-aware: `backend-service`, `frontend-app`, or `library`.
+
+MCP pipeline architecture:
+```
+run_mcp_pipeline()
+  ├─ Preflight: repo metrics
+  ├─ Stage 1: indexer
+  └─ Prepare MCP command + stdio server config snippets
+```
+
+HTTP MCP pipeline architecture:
+```
+run_mcp_http_pipeline()
+  ├─ Preflight: repo metrics
+  ├─ Stage 1: indexer
+  └─ Prepare HTTP URL + native/Docker/client config snippets
+```
 
 Artifacts produced (PlantUML diagrams):
 ```
@@ -181,7 +210,7 @@ current-state/api-spec.yaml       ← OpenAPI spec [conditional: backend with en
 target-state/bounded-contexts.md  ← BC decomposition + service responsibility table
 target-state/c4-target.md         ← PlantUML C4Context of future decomposed state
 target-state/strangler-fig.md     ← ordered extraction plan grounded in hotspot data
-manifests/artifacts.json          ← index of all artifacts written
+manifests/artifacts.json          ← machine-generated index of all artifacts written
 ```
 
 ---
@@ -191,11 +220,10 @@ manifests/artifacts.json          ← index of all artifacts written
 Gradle multi-project (Java + embedded JS/Python parsers). Builds wrapper scripts in `indexer/bin/`.
 
 Key files:
-- `indexer/install.sh` — builds all runtimes, generates `bin/cmg-{java,js,python,mcp}` wrappers
+- `indexer/install.sh` — builds all runtimes, generates `bin/cmg-{java,js,python}` wrappers
 - `indexer/app/` — Java/Kotlin fat JAR (Gradle Shadow, main: `code.graph.App`)
 - `indexer/parsers/javascript/parse.js` — Babel-based JS/TS parser
 - `indexer/parsers/python/parse.py` — Python AST parser
-- `indexer/mcp/` — MCP server
 
 `install.sh` uses `$SCRIPT_DIR` — re-run after cloning or moving the repo. Generated
 `indexer/bin/` wrappers contain absolute paths and are gitignored.
@@ -245,9 +273,12 @@ Docker: `make compose-ui` → Express serves everything on port 3002
 | `indexer/install.sh` unchanged | Already uses `$SCRIPT_DIR`; relocatable as-is |
 | `indexer_bin_dir = ../indexer/bin` | Wires pipeline to indexer binaries across monorepo boundary |
 | Repo metrics is a preflight plugin, not core pipeline logic | Easy for the team to disable/remove/replace without changing indexer/agent stages |
+| Separate full, MCP, and MCP HTTP pipeline modules | Keeps `lumen run`, `lumen mcp`, and `lumen mcp-http` independent while reusing shared setup/finalization helpers |
+| HTTP MCP is additive, not a replacement | URL-based MCP is the simplest client UX, but stdio remains useful for local process-based clients |
 | Multi-language indexing in one run | Real repos are often polyglot; warning-only detection was too weak |
 | Normalized graph metadata (`language`, `kind`, `normKind`) is additive | Preserve parser-native fidelity while improving toolkit/agent consistency |
 | Repo archetype prompt overlays | Backend-only prompting was too brittle for frontend and library repos |
+| Machine-written `artifacts.json` manifest | Prevents LLM hallucination of repo metadata and timestamps |
 | jlink instead of GraalVM native-image | KuzuDB extracts JNI `.so` from JAR at runtime; native-image can't handle this |
 | No PyInstaller; pip install directly | PyInstaller bundles cause GLIBC mismatch on aarch64 between python:3.11-slim and node:20-slim |
 | `python:3.11-slim` as final Docker base | Same glibc as python-deps-builder; Node binary copied from node:20-slim (backwards-compatible) |

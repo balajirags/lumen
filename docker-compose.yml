@@ -21,10 +21,16 @@
 #     docker compose --profile ui up ui
 #     → http://localhost:3002  (connect to /data/<run>/index.kuzu/db)
 #
+#   Run MCP HTTP pipeline:
+#     REPO_PATH=/path/to/repo OUTPUT_PATH=./output MCP_PORT=8765 \
+#       docker compose --profile mcp run --service-ports --rm mcp-http
+#     → http://localhost:8765/mcp
+#
 # Environment variables:
 #   ANTHROPIC_API_KEY   Required for Anthropic provider
 #   REPO_PATH           Path to the source repo to analyse (pipeline only)
 #   OUTPUT_PATH         Where output is written/read (default: ./output)
+#   MCP_PORT            Host/container port for HTTP MCP server (default: 8765)
 
 services:
 
@@ -44,6 +50,33 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     profiles: [pipeline]
+
+  mcp-http:
+    image: lumen
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      - mcp-http
+      - /repo
+      - --repo-name
+      - ${REPO_NAME:-repo}
+      - --output-dir
+      - /workspace/output
+      - --host
+      - 0.0.0.0
+      - --port
+      - ${MCP_PORT:-8765}
+    volumes:
+      - ${REPO_PATH:-/tmp}:/repo
+      - ${OUTPUT_PATH:-./output}:/workspace/output
+    ports:
+      - "${MCP_PORT:-8765}:${MCP_PORT:-8765}"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    profiles: [mcp]
 
   docs:
     image: python:3.11-slim

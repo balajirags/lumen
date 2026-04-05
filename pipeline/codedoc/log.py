@@ -338,3 +338,38 @@ def print_failure_panel(
     _err_console.print(
         Panel("\n".join(lines), title="[bold red] Pipeline Failed [/bold red]", border_style="red")
     )
+
+
+def print_mcp_panel(db_path: str, command: str, snippets: dict[str, str]) -> None:
+    lines = [
+        f"[dim]Kuzu DB [/dim]  {db_path}",
+        f"[dim]Command [/dim]  {command}",
+    ]
+    console.print()
+    console.print(Panel("\n".join(lines), title="[bold cyan] MCP Ready [/bold cyan]", border_style="cyan"))
+
+
+def print_mcp_http_panel(
+    db_path: str,
+    url: str,
+    command: str,
+    docker_command: str,
+    snippets: dict[str, str],
+) -> None:
+    lines = [
+        f"[dim]DB[/dim]      {db_path}",
+        f"[dim]URL[/dim]     {url}",
+        "",
+        "[bold]Native[/bold]",
+        command,
+        "",
+        "[bold]Docker[/bold]",
+        docker_command,
+    ]
+    for title, snippet in snippets.items():
+        lines.extend(["", f"[bold]{title}[/bold]", snippet])
+    console.print()
+    console.print(Panel("\n".join(lines), title="[bold cyan] MCP HTTP Ready [/bold cyan]", border_style="cyan"))
+    for name, snippet in snippets.items():
+        console.print()
+        console.print(Panel(snippet, title=f"[bold]{name}[/bold]", border_style="blue"))

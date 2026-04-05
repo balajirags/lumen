@@ -58,22 +58,6 @@ else
     echo "  ⚠ Python 3 not found — skipping Python setup"
 fi
 
-# --- MCP Server ---
-echo "--- Setting up MCP server ---"
-if command -v python3 >/dev/null 2>&1; then
-    pip3 install -q -r "$SCRIPT_DIR/mcp/requirements.txt" 2>/dev/null || \
-        python3 -m pip install -q -r "$SCRIPT_DIR/mcp/requirements.txt" 2>/dev/null || \
-        echo "  ⚠ pip install failed — install dependencies manually: pip install -r mcp/requirements.txt"
-    cat > "$BIN_DIR/cmg-mcp" <<EOF
-#!/usr/bin/env bash
-exec python3 "$SCRIPT_DIR/mcp/server.py" "\$@"
-EOF
-    chmod +x "$BIN_DIR/cmg-mcp"
-    echo "  ✓ bin/cmg-mcp"
-else
-    echo "  ⚠ Python 3 not found — skipping MCP server setup"
-fi
-
 echo ""
 echo "==> Done! Executables created in: $BIN_DIR"
 echo ""
@@ -81,7 +65,6 @@ echo "Usage:"
 [ -f "$BIN_DIR/cmg-java" ]   && echo "  cmg-java   /path/to/java/project"
 [ -f "$BIN_DIR/cmg-js" ]     && echo "  cmg-js     /path/to/react/app"
 [ -f "$BIN_DIR/cmg-python" ] && echo "  cmg-python /path/to/flask/app"
-[ -f "$BIN_DIR/cmg-mcp" ]    && echo "  cmg-mcp    --db-path ./bin/kuzu_db/<project>-db"
 echo ""
 echo "Add to your PATH (optional):"
 echo "  export PATH=\"$BIN_DIR:\$PATH\""

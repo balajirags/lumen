@@ -23,6 +23,9 @@ class PipelineState:
     # --- Stage 2 outputs ---
     artifacts_dir: str = ""
     prompt_archetype: str = ""
+    mode: str = "full"
+    mcp_command: str = ""
+    mcp_url: str = ""
 
     # --- Stage 3 outputs ---
     site_path: str = ""
@@ -73,6 +76,9 @@ class PipelineState:
             "indexed_languages": self.indexed_languages,
             "artifacts_dir": self.artifacts_dir,
             "prompt_archetype": self.prompt_archetype,
+            "mode": self.mode,
+            "mcp_command": self.mcp_command,
+            "mcp_url": self.mcp_url,
             "site_path": self.site_path,
             "tokens": {
                 "input": self.input_tokens,

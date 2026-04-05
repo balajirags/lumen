@@ -46,6 +46,8 @@ Source repo
 - **Repo metrics guardrail** — a native preflight plugin estimates repo size using LOC, source-file count, and language mix before indexing starts.
 - **Archetype-aware prompting** — the agent now selects `backend-service`, `frontend-app`, or `library` guidance before the analyst phase.
 - **Improved CLI UX** — indexing shows live per-language progress, and the three parallel analysts render as separate live boxes during Phase 2.
+- **MCP modes** — `lumen mcp` keeps the stdio flow, and `lumen mcp-http` adds a simpler URL-based MCP server for VS Code, Docker, and cross-workspace use.
+- **Split pipeline modules** — the full docs flow and the MCP flow now live in separate pipeline modules with shared setup/finalization helpers.
 
 ### Why a Code Property Graph instead of file reading
 
@@ -107,7 +109,7 @@ remove or replace it without changing the indexer or agent stages.
 
 ---
 
-## What you get
+## What you get from `lumen run`
 
 | Document | What it covers |
 |---|---|
@@ -126,6 +128,75 @@ Plus a **visual graph explorer** (the UI) for ad-hoc Cypher queries on the CPG.
 
 ---
 
+## MCP Mode
+
+If you already have your own LLM client and just want graph tools over MCP, use an MCP flow instead
+of the full docs-generation pipeline.
+
+### Recommended: HTTP MCP
+
+For VS Code and Docker users, the simplest setup is the HTTP MCP server because client config is
+just a localhost URL.
+
+```bash
+# Index repo -> print URL config -> start local HTTP MCP server
+lumen mcp-http /path/to/repo
+```
+
+This flow does:
+
+1. repo metrics preflight
+2. indexing into KuzuDB
+3. launch of a local Streamable HTTP MCP server, defaulting to `http://127.0.0.1:8765/mcp`
+
+It prints:
+
+- the server URL
+- the exact native launch command
+- the exact Docker launch command
+- copy-paste HTTP MCP config for VS Code and other MCP clients
+
+### Existing: stdio MCP
+
+```bash
+# Index repo -> print process-launch config -> start stdio MCP server
+lumen mcp /path/to/repo
+```
+
+This flow does:
+
+1. repo metrics preflight
+2. indexing into KuzuDB
+3. launch of a local MCP stdio server backed by the richer `kg_tools` toolkit
+
+It also prints:
+
+- the generated Kuzu DB path
+- the exact relaunch command
+- copy-paste config snippets for common MCP clients
+
+Pipeline split:
+
+- `lumen run` → `preflight -> indexer -> agent -> builder`
+- `lumen mcp` → `preflight -> indexer -> stdio MCP server`
+- `lumen mcp-http` → `preflight -> indexer -> HTTP MCP server`
+
+### Serve an existing Kuzu DB
+
+```bash
+lumen mcp --db-path /path/to/output/<repo>-<timestamp>/index.kuzu/<repo>-db
+lumen mcp-http --db-path /path/to/output/<repo>-<timestamp>/index.kuzu/<repo>-db
+```
+
+### Print config snippets only
+
+```bash
+lumen mcp /path/to/repo --print-config
+lumen mcp-http /path/to/repo --print-config
+```
+
+---
+
 ## Quickstart (Docker — no local prerequisites)
 
 ```bash
@@ -133,6 +204,7 @@ git clone <repo-url> lumen && cd lumen
 make docker-build
 cp .env.example .env    # add ANTHROPIC_API_KEY
 make docker-run REPO=/path/to/your/repo
+make docker-mcp REPO=/path/to/your/repo
 ```
 
 ### With a local Ollama model
@@ -144,8 +216,30 @@ Inside Docker, `localhost` is the container — not your machine. Use
 # Mac/Windows: host.docker.internal is automatic
 # Linux: docker-compose.yml already sets extra_hosts
 
-make compose-pipeline REPO=/path/to/repo \
+make docker-pipeline REPO=/path/to/repo \
   ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
+```
+
+### Docker MCP HTTP
+
+For Docker-only users who want MCP tools without a native install:
+
+```bash
+make docker-build
+make docker-mcp REPO=/path/to/repo PORT=8765
+```
+
+That runs:
+
+1. repo metrics preflight
+2. indexing into KuzuDB
+3. a local HTTP MCP server exposed on `http://127.0.0.1:8765/mcp`
+
+To print the VS Code config without starting the server:
+
+```bash
+cd pipeline
+uv run lumen mcp-http /path/to/repo --print-config
 ```
 
 ---
@@ -157,6 +251,7 @@ Output lands in `./output/` after every run.
 | Service | URL | Command |
 |---|---|---|
 | MkDocs doc-site (Docker) | http://localhost:8081 | `make compose-docs` |
+| MCP HTTP (Docker) | http://localhost:8765/mcp | `make docker-mcp REPO=/path/to/repo PORT=8765` |
 | MkDocs doc-site (native) | http://localhost:8081 | `make dev-docs` |
 | Graph UI (Docker) | http://localhost:3002 | `make compose-ui` |
 | Graph UI (dev) | http://localhost:5174 | `make dev-ui` |
@@ -226,6 +321,44 @@ lumen run REPO_PATH [OPTIONS]
   --repo-size-check   off | warn | strict (default: warn)
   --verbose           Stream logs as the pipeline runs
 ```
+
+```
+lumen mcp [REPO_PATH] [OPTIONS]
+
+  --db-path TEXT         Serve an existing Kuzu DB directly
+  --repo-path TEXT       Optional source repo path when serving an existing DB
+  --repo-name TEXT       Override repo name in output dir
+  --output-dir TEXT      Output directory (default: ./codedoc-output)
+  --timeout INT          Per-stage timeout in seconds (default: 300)
+  --repo-size-check      off | warn | strict (default: warn)
+  --print-config         Print MCP client config snippets and exit
+  --verbose              Stream logs as the pipeline runs
+```
+
+```
+lumen mcp-http [REPO_PATH] [OPTIONS]
+
+  --db-path TEXT         Serve an existing Kuzu DB directly
+  --repo-path TEXT       Optional source repo path when serving an existing DB
+  --repo-name TEXT       Override repo name in output dir
+  --output-dir TEXT      Output directory (default: ./codedoc-output)
+  --timeout INT          Per-stage timeout in seconds (default: 300)
+  --repo-size-check      off | warn | strict (default: warn)
+  --host TEXT            HTTP bind host (default: 127.0.0.1)
+  --port INT             HTTP bind port (default: 8765)
+  --path TEXT            HTTP MCP path (default: /mcp)
+  --print-config         Print MCP client config snippets and exit
+  --verbose              Stream logs as the pipeline runs
+```
+
+Docker convenience:
+
+```bash
+make docker-pipeline REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
+make docker-mcp REPO=/path/to/repo PORT=8765
+```
+Both `make mcp-http` and `make docker-mcp` already print the config before starting the server.
+Use `--print-config` only when you want config output without keeping the MCP server running.
 
 ---
 
