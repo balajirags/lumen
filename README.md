@@ -395,12 +395,30 @@ output_dir = "./my-output"
 
 ## Cost
 
-A typical run on a medium-sized repo (~50k lines) uses roughly 150,000–300,000 tokens
-across the three analysts and the architect (graph queries + artifact writing).
+Run cost depends on:
 
-At Claude Sonnet pricing: approximately **$0.20–$0.50 per run**.
+- provider pricing
+- model choice
+- the input/output token split
+- repo size and complexity
+- whether you are doing a first full run or reusing an indexed graph over MCP
 
-Token usage is recorded in `pipeline.json` after every run.
+For Sonnet-class pricing, output tokens are materially more expensive than input tokens, so
+a flat "total tokens = cost" estimate is often misleading.
+
+Example from a recent run:
+
+- `311,287` input tokens
+- `28,098` output tokens
+- `339,385` total tokens
+- roughly `$1.36` at Sonnet 4 API pricing
+
+The main cost advantage of lumen is not that every full run is always cheaper. It is that
+the graph-first architecture scales better than naive full-repo prompting on medium and
+large repos, and that follow-up analysis becomes cheaper once the same indexed repo is
+reused through MCP.
+
+Exact token usage is recorded in `pipeline.json` after every run.
 
 ---
 

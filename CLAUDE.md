@@ -304,6 +304,7 @@ Docker: `make compose-ui` → Express serves everything on port 3002
 | Analyst + Architect pattern | Analysts write artifacts directly via `write_artifact` (reliable); avoids fragile note-passing via custom tools |
 | Each analyst gets its own KuzuBackend | KuzuDB connections are not thread-safe |
 | `max_source_reads=0` for analysts | Analysts need only graph structure; source reads add latency and cost without benefit |
+| No fixed "$ per run" claim in docs | Actual cost depends on provider pricing and the input/output token split; use `pipeline.json` token totals for grounded examples |
 | Explicit TURN N contracts in user_request | Prescriptive turn sequences prevent analysts going off-script; proven more reliable than open-ended instructions |
 | Architect reads artifact files (not notes) | Architect gets formatted markdown input, not raw research notes; higher quality target-state output |
 | Rich live progress UX in CLI | Indexer and analyst phases should feel active during long runs |
