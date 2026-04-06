@@ -50,6 +50,7 @@ class PipelineState:
     max_context_tokens: int = 120_000
     timeout: int = 300
     repo_size_check: str = "warn"
+    allow_xlarge: bool = False
     verbose: bool = False
     indexer_bin_dir: str = ""
     agent_prompt: str = ""

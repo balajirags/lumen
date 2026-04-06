@@ -161,6 +161,13 @@ Step by step for `xlarge` repos:
 Repo metrics are otherwise informational. The hard stop is only the full pipeline's
 `xlarge` guardrail.
 
+If you explicitly want to force the full docs pipeline anyway, use:
+
+```bash
+make docker-pipeline REPO=/path/to/your/repo \
+  ARGS='--allow-xlarge --provider anthropic --model claude-sonnet-4-6'
+```
+
 ### With a local Ollama model
 
 Inside Docker, `localhost` is the container — not your machine. Use
@@ -386,6 +393,7 @@ model     = "claude-sonnet-4-6"
 provider  = "auto"
 max_turns = 60
 repo_size_check = "warn"
+allow_xlarge = false
 
 [paths]
 output_dir = "./my-output"

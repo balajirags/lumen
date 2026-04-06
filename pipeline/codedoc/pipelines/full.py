@@ -29,6 +29,7 @@ def run_pipeline(
     max_context_tokens: int = 120_000,
     timeout: int = 300,
     repo_size_check: str = "warn",
+    allow_xlarge: bool = False,
     verbose: bool = False,
     indexer_bin_dir: str = "",
     agent_prompt: str = "",
@@ -51,6 +52,7 @@ def run_pipeline(
         max_context_tokens=max_context_tokens,
         timeout=timeout,
         repo_size_check=repo_size_check,
+        allow_xlarge=allow_xlarge,
         verbose=verbose,
         indexer_bin_dir=indexer_bin_dir,
         agent_prompt=agent_prompt,
@@ -67,11 +69,16 @@ def run_pipeline(
         state = run_preflights(state)
         if state.status == "failed":
             return state
+        if state.allow_xlarge and str((state.repo_metrics or {}).get("size_band", "")) == "xlarge":
+            state.log(
+                "pipeline",
+                "Repo classified as xlarge, but --allow-xlarge is set. Continuing with full pipeline.",
+            )
         if should_stop_full_pipeline_for_xlarge_repo(state):
             state.status = "stopped"
             state.error = (
                 "Repo classified as xlarge; full pipeline stopped before indexing. "
-                "Use MCP mode for targeted exploration."
+                "Use MCP mode for targeted exploration or rerun with --allow-xlarge."
             )
             state.log(
                 "pipeline",

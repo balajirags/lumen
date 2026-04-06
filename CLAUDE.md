@@ -53,6 +53,7 @@ The intended user journey is:
 3. let MCP mode perform indexing
 4. connect an MCP-capable client to `http://127.0.0.1:8765/mcp`
 Repo metrics are otherwise informational; the only hard stop is the full pipeline's `xlarge` guardrail.
+Set `--allow-xlarge` if you explicitly want to continue the full docs pipeline anyway.
 `make docker-docs` is the only supported docs viewer path. It rebuilds the doc-site from
 the existing `./output` directory before serving, so pipeline reruns are not required for docs refreshes.
 
@@ -84,6 +85,7 @@ Key defaults (`pipeline/codedoc/config.py`):
 | `provider` | `auto` |
 | `max_turns` | 60 |
 | `repo_size_check` | `warn` |
+| `allow_xlarge` | `false` |
 | `indexer_bin_dir` | `../indexer/bin` (monorepo); `/usr/local/bin` (Docker, via `.codedoc.toml`) |
 | `agent_prompt` | `./codedoc/prompts/re-prompt.md` |
 | `build_script` | `../scripts/build-docs-site.sh` (monorepo); `/opt/lumen/scripts/...` (Docker) |
@@ -196,7 +198,7 @@ Architect receives Phase 2 artifact content injected into its system prompt (up 
 `manifests/artifacts.json` is machine-written by the pipeline, not the model.
 Before Stage 1, the pipeline may run pluggable native preflights; the default one is repo metrics.
 Agent prompting is archetype-aware: `backend-service`, `frontend-app`, or `library`.
-For `xlarge` repos, the full docs pipeline stops after preflight and directs the user to MCP mode instead of indexing.
+For `xlarge` repos, the full docs pipeline stops after preflight and directs the user to MCP mode instead of indexing, unless `--allow-xlarge` is set.
 
 MCP pipeline architecture:
 ```

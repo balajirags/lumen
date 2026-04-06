@@ -14,6 +14,7 @@ def test_load_config_defaults_and_cli_override(monkeypatch, tmp_path):
     assert cfg.output_dir == "/tmp/out"
     assert cfg.provider == "auto"
     assert cfg.repo_size_check == "warn"
+    assert cfg.allow_xlarge is False
 
 
 def test_load_config_reads_toml(tmp_path, monkeypatch):
@@ -24,6 +25,7 @@ def test_load_config_reads_toml(tmp_path, monkeypatch):
 max_turns = 45
 provider = "openai"
 repo_size_check = "strict"
+allow_xlarge = true
 
 [paths]
 output_dir = "./custom-output"
@@ -36,3 +38,4 @@ output_dir = "./custom-output"
     assert cfg.provider == "openai"
     assert cfg.output_dir == "./custom-output"
     assert cfg.repo_size_check == "strict"
+    assert cfg.allow_xlarge is True

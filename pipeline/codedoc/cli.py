@@ -38,6 +38,7 @@ def main() -> None:
 @click.option("--max-turns", type=int, default=None, help="Max agent tool turns (default: 60)")
 @click.option("--timeout", type=int, default=None, help="Per-stage timeout in seconds (default: 300)")
 @click.option("--repo-size-check", default=None, type=click.Choice(["off", "warn", "strict"]), help="Repo size guardrail mode (default: warn)")
+@click.option("--allow-xlarge", is_flag=True, default=False, help="Allow the full docs pipeline to continue even when preflight classifies the repo as xlarge")
 @click.option("--verbose", is_flag=True, default=False, help="Print full subprocess output")
 def run(
     repo_path: str,
@@ -49,6 +50,7 @@ def run(
     max_turns: int | None,
     timeout: int | None,
     repo_size_check: str | None,
+    allow_xlarge: bool,
     verbose: bool,
 ) -> None:
     """Run the full pipeline: index → agent → build.
@@ -63,6 +65,7 @@ def run(
         "max_turns": max_turns,
         "timeout": timeout,
         "repo_size_check": repo_size_check,
+        "allow_xlarge": allow_xlarge or None,
         "verbose": verbose or None,
     })
 
@@ -77,6 +80,7 @@ def run(
         max_context_tokens=cfg.max_context_tokens,
         timeout=cfg.timeout,
         repo_size_check=cfg.repo_size_check,
+        allow_xlarge=cfg.allow_xlarge,
         verbose=cfg.verbose,
         indexer_bin_dir=cfg.indexer_bin_dir,
         agent_prompt=cfg.agent_prompt,

@@ -29,6 +29,7 @@ def init_state(
     max_context_tokens: int = 120_000,
     timeout: int = 300,
     repo_size_check: str = "warn",
+    allow_xlarge: bool = False,
     verbose: bool = False,
     indexer_bin_dir: str = "",
     agent_prompt: str = "",
@@ -46,6 +47,7 @@ def init_state(
         max_context_tokens=max_context_tokens,
         timeout=timeout,
         repo_size_check=repo_size_check,
+        allow_xlarge=allow_xlarge,
         verbose=verbose,
         indexer_bin_dir=indexer_bin_dir,
         agent_prompt=agent_prompt,
@@ -81,5 +83,6 @@ def should_stop_full_pipeline_for_xlarge_repo(state: PipelineState) -> bool:
     return (
         state.mode == "full"
         and bool(state.repo_metrics)
+        and not state.allow_xlarge
         and str(state.repo_metrics.get("size_band", "")) == "xlarge"
     )

@@ -16,7 +16,7 @@ docker-rebuild:
 
 # ── Docker Compose ──
 docker-pipeline:
-	@if [ -z "$(REPO)" ]; then echo "Usage: make docker-pipeline REPO=/path/to/repo [ARGS='--provider ollama ...']"; exit 1; fi
+	@if [ -z "$(REPO)" ]; then echo "Usage: make docker-pipeline REPO=/path/to/repo [ARGS='--provider ollama ... [--allow-xlarge]']"; exit 1; fi
 	REPO_PATH="$(REPO)" OUTPUT_PATH="$(PWD)/output" DOCKER_IMAGE="$(DOCKER_IMAGE)" COMPOSE_PROFILES=pipeline \
 	  docker-compose run pipeline -- \
 	  run /repo --repo-name "$(notdir $(REPO))" --output-dir /workspace/output $(ARGS)
@@ -92,11 +92,12 @@ help:
 	      echo "  REPO=/path/to/repo"; \
 	      echo ""; \
 	      echo "Optional:"; \
-	      echo "  ARGS='--provider <p> --model <m> [--base-url <url>] [other lumen run flags]'"; \
+	      echo "  ARGS='--provider <p> --model <m> [--base-url <url>] [--allow-xlarge] [other lumen run flags]'"; \
 	      echo "  DOCKER_IMAGE=lumen"; \
 	      echo ""; \
 	      echo "Example:"; \
 	      echo "  make docker-pipeline REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'"; \
+	      echo "  make docker-pipeline REPO=/path/to/repo ARGS='--allow-xlarge --provider anthropic --model claude-sonnet-4-6'"; \
 	      ;; \
 	    docker-mcp) \
 	      echo "make docker-mcp"; \
@@ -171,7 +172,7 @@ help:
 	  echo "Docker-first:"; \
 	  echo "  make docker-build"; \
 	  echo "    Build the reusable '$(DOCKER_IMAGE)' image."; \
-	  echo "  make docker-pipeline REPO=/path/to/repo ARGS='--provider <p> --model <m> [--base-url <url>]'"; \
+	  echo "  make docker-pipeline REPO=/path/to/repo ARGS='--provider <p> --model <m> [--base-url <url>] [--allow-xlarge]'"; \
 	  echo "    Run preflight + index + multi-agent analysis + docs build in Docker."; \
 	  echo "  make docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db"; \
 	  echo "    Serve an existing indexed DB over HTTP MCP in Docker."; \
