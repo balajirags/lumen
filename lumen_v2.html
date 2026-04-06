@@ -1031,11 +1031,11 @@ img, .image-container {
         <div class="s1-stats reveal">
             <div class="s1-stat">
                 <div class="num">100×</div>
-                <div class="lbl">fewer tokens than raw-file reading</div>
+                <div class="lbl">fewer graph tokens vs raw-file reading</div>
             </div>
             <div class="s1-stat">
-                <div class="num">$0.20</div>
-                <div class="lbl">typical cost per 50k-line repo</div>
+                <div class="num">3 langs</div>
+                <div class="lbl">Java/Kotlin · JS/TS · Python · one run</div>
             </div>
             <div class="s1-stat">
                 <div class="num">4 modes</div>
@@ -1045,7 +1045,7 @@ img, .image-container {
     </div>
 
     <div class="chrome-bottom">
-        <div class="folio">lumen · product page · 2026</div>
+        <div class="folio">lumen · product overview · 2026</div>
         <div class="progress-segs">
             <div class="seg on"></div>
             <div class="seg"></div>
@@ -1165,8 +1165,8 @@ img, .image-container {
             </div>
         </div>
         <div class="s3-footer reveal">
-            <span>AST + CFG + DFG encoded in a single queryable graph</span>
-            <span>36 purpose-built graph query tools</span>
+            <span>AST + CFG + DFG — one queryable graph</span>
+            <span>36 graph query tools · scales on medium + large repos</span>
             <span>KuzuDB — embedded, single-file DB</span>
         </div>
     </div>
@@ -1507,36 +1507,36 @@ img, .image-container {
 
     <div class="slide-content">
         <div class="s7-overline reveal">Token economics</div>
-        <h2 class="s7-title reveal">Cheap enough to run on every PR</h2>
+        <h2 class="s7-title reveal">Graph-first scales. Raw-file reading doesn't.</h2>
         <div class="econ-grid">
             <div class="econ-card highlight reveal-scale">
-                <div class="econ-label">Graph queries (lumen)</div>
+                <div class="econ-label">CPG query tokens (lumen)</div>
                 <div class="econ-num green">5–10k</div>
-                <div class="econ-context">tokens for full architecture analysis across all three analysts via CPG queries</div>
+                <div class="econ-context">tokens for full architecture analysis across all three analysts via graph queries</div>
             </div>
             <div class="econ-card reveal-scale">
-                <div class="econ-label">Raw file reading (naive approach)</div>
+                <div class="econ-label">Naive full-repo file reading</div>
                 <div class="econ-num red">500k–2M+</div>
-                <div class="econ-context">tokens — often impossible before hitting context limits</div>
+                <div class="econ-context">tokens — often impossible before hitting context limits on medium repos</div>
             </div>
             <div class="econ-card highlight reveal-scale">
-                <div class="econ-label">Cost per run (Claude Sonnet)</div>
-                <div class="econ-num green">$0.20–0.50</div>
-                <div class="econ-context">on a typical 50k-line repo including targeted source reads by all analysts</div>
+                <div class="econ-label">Example run total (recent)</div>
+                <div class="econ-num green">339k</div>
+                <div class="econ-context">311k input + 28k output · cost = provider price × token split · check pipeline.json</div>
             </div>
             <div class="econ-card reveal-scale">
-                <div class="econ-label">Ollama (self-hosted)</div>
+                <div class="econ-label">MCP reuse advantage</div>
                 <div class="econ-num green">$0.00</div>
-                <div class="econ-context">run locally with qwen2.5:32b or any compatible model via --provider ollama</div>
+                <div class="econ-context">re-query indexed graph over MCP without re-running the full pipeline · Ollama also free</div>
             </div>
         </div>
         <p class="econ-vs reveal">
-            Analysts use <strong>get_method_source</strong> only for business-critical logic — pricing rules, security checks, state machines — reading just the exact method body (50–600 tokens), never the whole file.
+            Cost depends on provider, model, and the input/output split — output tokens are materially more expensive on Sonnet-class pricing. Use <strong>pipeline.json</strong> for grounded estimates. Analysts use <strong>get_method_source</strong> only for business-critical logic (50–600 tokens per call).
         </p>
     </div>
 
     <div class="chrome-bottom">
-        <div class="folio">Token usage logged to pipeline.json after every run · 150k–300k total for medium repos</div>
+        <div class="folio">Token usage logged to pipeline.json · MCP reuse indexes once, queries many times for free</div>
         <div class="progress-segs">
             <div class="seg on"></div>
             <div class="seg on"></div>
