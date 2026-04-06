@@ -29,17 +29,28 @@ This is a monorepo containing three sub-projects:
 
 ```bash
 make docker-build                        # builds lumen pipeline image
-make docker-run REPO=/path/to/repo       # Anthropic Claude
+make docker-pipeline REPO=/path/to/repo \
+  ARGS="--provider anthropic --model claude-sonnet-4-6"
 
 # Ollama (local model — host.docker.internal bridges container → host)
 make docker-pipeline REPO=/path/to/repo \
   ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
 
-make docker-mcp REPO=/path/to/repo PORT=8765
+make docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
+make docker-docs
 
-make compose-docs    # serve generated doc-site → http://localhost:8081
+make docker-docs     # serve generated doc-site → http://localhost:8081
 make compose-ui      # graph visualization UI  → http://localhost:3002
 ```
+
+For `xlarge` repos, `docker-pipeline` intentionally stops after preflight and recommends
+`make docker-mcp REPO=/path/to/repo` so MCP mode can perform indexing and support focused questions.
+The intended user journey is:
+1. run `make docker-pipeline ...`
+2. if Lumen stops after preflight for an `xlarge` repo, switch to `make docker-mcp REPO=/path/to/repo`
+3. let MCP mode perform indexing
+4. connect an MCP-capable client to `http://127.0.0.1:8765/mcp`
+Repo metrics are otherwise informational; the only hard stop is the full pipeline's `xlarge` guardrail.
 
 ### Native install
 
@@ -55,7 +66,7 @@ make dev-docs          # builds doc-site + serves at http://localhost:8081
 make dev-ui            # Vite (port 5174) + Express (port 3002) dev server
 ```
 
-Copy `.env.example` → `.env` and set `ANTHROPIC_API_KEY`.
+Set provider credentials via environment variables such as `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
 
 ---
 
@@ -86,7 +97,7 @@ baked into the image — `load_config()` reads `.codedoc.toml` from CWD at start
 |---|---|
 | `Dockerfile` | Multi-stage pipeline image: jlink JRE + PyInstaller binaries + Node JS parser |
 | `Dockerfile.ui` | Multi-stage UI image: Vite build + tsx Express server |
-| `docker-compose.yml` | Four profiles: `pipeline`, `mcp`, `docs`, `ui` |
+| `docker-compose.yml` | Four profiles: `pipeline`, `mcp`, `docs`, `ui` using the same `lumen` image for pipeline, MCP, and docs |
 
 ### Dockerfile (pipeline) — 4 stages
 
@@ -116,13 +127,15 @@ single Express process on port 3001 handles both API routes and the React app.
 | Profile | Command | URL |
 |---|---|---|
 | `pipeline` | `make docker-pipeline REPO=... ARGS='...'` | — (writes to `./output/`) |
-| `mcp` | `make docker-mcp REPO=... PORT=8765` | http://localhost:8765/mcp |
-| `docs` | `make compose-docs` | http://localhost:8081 |
+| `mcp` | `make docker-mcp DB=...` | http://localhost:8765/mcp |
+| `docs` | `make docker-docs` | http://localhost:8081 |
 | `ui` | `make compose-ui` | http://localhost:3002 |
 
+`pipeline`, `mcp-http`, and `docs` all use the same `DOCKER_IMAGE` runtime.
 `pipeline` service has `extra_hosts: host.docker.internal:host-gateway` for Ollama on Linux.
 On Mac/Windows Docker Desktop, `host.docker.internal` is available automatically.
-`mcp-http` uses the same image and host bridge, but runs `lumen mcp-http` with `--host 0.0.0.0`.
+`mcp-http` prefers serving an existing DB via `DB_PATH`, and falls back to repo indexing when only `REPO_PATH` is set.
+`docs` now serves `output/doc-site` from the same `lumen` image instead of a separate generic Python image.
 Normal MCP commands already print config snippets before serving; `--print-config` is only for config-only output.
 
 ---
@@ -182,6 +195,7 @@ Architect receives Phase 2 artifact content injected into its system prompt (up 
 `manifests/artifacts.json` is machine-written by the pipeline, not the model.
 Before Stage 1, the pipeline may run pluggable native preflights; the default one is repo metrics.
 Agent prompting is archetype-aware: `backend-service`, `frontend-app`, or `library`.
+For `xlarge` repos, the full docs pipeline stops after preflight and directs the user to MCP mode instead of indexing.
 
 MCP pipeline architecture:
 ```

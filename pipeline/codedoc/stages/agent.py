@@ -927,7 +927,7 @@ def _build_architect_prompt(
         f"- Forbidden artifacts for this repo archetype: {forbidden_text}\n"
         f"- If you emit PlantUML, fence every diagram as ` ```plantuml ` with `@startuml` / `@enduml`.\n"
         f"- Every recommendation must stay native to the selected archetype; do not invent backend services for frontend repos or HTTP/service plans for libraries without clear evidence.\n"
-        f"Do NOT stop before writing manifests/artifacts.json.\n"
+        f"- Stop only after all required target-state artifacts have been written.\n"
     )
     return prompt
 
@@ -961,6 +961,17 @@ def _build_architect_request(archetype: str) -> str:
         "Do NOT write manifests/artifacts.json; the pipeline will generate it.\n"
         "Do NOT call any graph query tools. Stop after Turn 3."
     )
+
+
+def _missing_target_state_artifacts(artifacts_dir: str, archetype: str) -> list[str]:
+    contract = _artifact_contract(archetype)
+    missing: list[str] = []
+    for rel_path in contract["architect_sequence"]:
+        if not rel_path.startswith("target-state/"):
+            continue
+        if not (Path(artifacts_dir) / rel_path).exists():
+            missing.append(rel_path)
+    return missing
 
 
 def _backfill_required_artifacts(kuzu_path: str, repo_path: str, artifacts_dir: str, archetype: str) -> list[str]:
@@ -1136,6 +1147,42 @@ def run_supervisor_agent(
         include_write_artifact=True,
         phase_label="architect",
     )
+
+    missing_target_artifacts = _missing_target_state_artifacts(artifacts_dir, repo_archetype)
+    if arch_result["status"] != "failed" and missing_target_artifacts:
+        recovery_request = (
+            "You stopped before writing the required target-state artifacts.\n"
+            f"Write ONLY these missing artifacts now, in order: {', '.join(missing_target_artifacts)}.\n"
+            "Use write_artifact for each file and stop only after all listed files are written.\n"
+            "Do NOT call graph query tools. Do NOT write manifests/artifacts.json.\n"
+        )
+        all_events.append(
+            "[supervisor] architect recovery — missing target-state artifacts: "
+            + ", ".join(missing_target_artifacts)
+        )
+        recovery_result = run_loop(
+            provider=provider,
+            toolkit=arch_toolkit,
+            system_prompt=arch_system,
+            user_request=recovery_request,
+            output_root=artifacts_dir,
+            max_turns=max(6, architect_turns // 2),
+            verbose=verbose,
+            use_anthropic_format=use_anthropic_format,
+            max_context_tokens=max_context_tokens,
+            max_source_reads=0,
+            include_write_artifact=True,
+            phase_label="architect/recovery",
+        )
+        arch_result["events"].extend(recovery_result["events"])
+        arch_result["artifacts"].extend(recovery_result["artifacts"])
+        arch_result["tool_uses"] += recovery_result["tool_uses"]
+        arch_result["input_tokens"] += recovery_result["input_tokens"]
+        arch_result["output_tokens"] += recovery_result["output_tokens"]
+        if recovery_result["status"] == "failed":
+            arch_result["status"] = "failed"
+            arch_result["error"] = recovery_result["error"]
+
     all_events.extend(arch_result["events"])
     all_artifacts.extend(arch_result["artifacts"])
     total_input_tokens += arch_result["input_tokens"]

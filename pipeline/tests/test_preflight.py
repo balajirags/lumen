@@ -50,7 +50,7 @@ def test_run_preflights_off_leaves_state_untouched(tmp_path):
     assert result.repo_metrics is None
 
 
-def test_run_preflights_strict_blocks_large_repo(tmp_path):
+def test_run_preflights_strict_keeps_repo_metrics_informational(tmp_path):
     (tmp_path / "src").mkdir()
     large_file = tmp_path / "src" / "big.py"
     large_file.write_text("\n".join(f"line_{i}" for i in range(60_001)))
@@ -66,7 +66,7 @@ def test_run_preflights_strict_blocks_large_repo(tmp_path):
 
     result = run_preflights(state)
 
-    assert result.status == "failed"
+    assert result.status == "running"
     assert result.repo_metrics is not None
     assert result.repo_metrics["guardrail_triggered"] is True
 

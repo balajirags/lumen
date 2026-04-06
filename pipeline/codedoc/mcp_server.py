@@ -15,6 +15,25 @@ def _pipeline_dir() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _repo_label(db_path: str, repo_path: str = "") -> str:
+    if repo_path:
+        return Path(repo_path).name or "unknown-repo"
+    db_name = Path(db_path).name
+    if db_name.endswith("-db"):
+        return db_name[:-3]
+    return db_name or "unknown-repo"
+
+
+def format_server_identity(db_path: str, repo_path: str = "") -> dict[str, str]:
+    repo_name = _repo_label(db_path, repo_path)
+    return {
+        "repo_name": repo_name,
+        "repo_path": repo_path or "",
+        "db_path": db_path,
+        "server_name": f"lumen-{repo_name}",
+    }
+
+
 def _python_type(param_type: str) -> Any:
     return {
         "integer": int,
@@ -31,13 +50,17 @@ def build_mcp_server(
     port: int = 8000,
     path: str = "/mcp",
 ) -> FastMCP:
+    identity = format_server_identity(db_path, repo_path)
     backend = KuzuBackend(db_path)
     toolkit = ReverseEngineerToolkit(backend, repo_path=repo_path)
     server = FastMCP(
-        "lumen",
+        identity["server_name"],
         instructions=(
             "Lumen MCP server for exploring a code property graph stored in KuzuDB. "
-            "Use the higher-level repo analysis tools first; use generic query only as an escape hatch."
+            f"Current repo: {identity['repo_name']}. "
+            f"Current db_path: {db_path}. "
+            + (f"Current repo_path: {repo_path}. " if repo_path else "")
+            + "Use the higher-level repo analysis tools first; use generic query only as an escape hatch."
         ),
         host=host,
         port=port,
@@ -47,10 +70,25 @@ def build_mcp_server(
     @server.tool(name="help", description="List the available MCP tools and what they do.")
     def help_tool() -> str:
         lines: list[str] = []
+        lines.append(f"Connected repo: {identity['repo_name']}")
+        lines.append(f"DB path: {db_path}")
+        if repo_path:
+            lines.append(f"Repo path: {repo_path}")
+        lines.append("")
         for tool in toolkit.registry.list_tools():
             params = ", ".join(tool.parameters.keys()) or "no params"
             lines.append(f"- {tool.name}({params})")
         return "\n".join(lines)
+
+    @server.tool(name="server_info", description="Return the active repo and db identity for this MCP server.")
+    def server_info_tool() -> str:
+        return (
+            f"repo_name: {identity['repo_name']}\n"
+            f"db_path: {db_path}\n"
+            f"repo_path: {repo_path or '[not provided]'}\n"
+            f"server_name: {identity['server_name']}\n"
+            f"http_path: {path}"
+        )
 
     for tool in toolkit.registry.list_tools():
         params = []
@@ -94,7 +132,8 @@ def format_mcp_command(db_path: str, repo_path: str = "") -> str:
 
 def format_mcp_http_url(*, host: str, port: int, path: str) -> str:
     normalized = path if path.startswith("/") else f"/{path}"
-    return f"http://{host}:{port}{normalized}"
+    advertised_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+    return f"http://{advertised_host}:{port}{normalized}"
 
 
 def format_mcp_http_command(
@@ -136,6 +175,7 @@ def format_mcp_http_docker_command(
 
 
 def format_client_snippets(db_path: str, repo_path: str = "") -> dict[str, str]:
+    identity = format_server_identity(db_path, repo_path)
     pipeline_dir = str(_pipeline_dir())
     uv_args = ["--directory", pipeline_dir, "run", "lumen", "mcp", "--db-path", db_path]
     global_args = ["mcp", "--db-path", db_path]
@@ -168,7 +208,7 @@ def format_client_snippets(db_path: str, repo_path: str = "") -> dict[str, str]:
         "VS Code / Claude Desktop (uv)": (
             "{\n"
             "  \"mcpServers\": {\n"
-            "    \"lumen\": {\n"
+            f"    \"{identity['server_name']}\": {{\n"
             "      \"command\": \"uv\",\n"
             f"      \"args\": [{uv_args_json}]\n"
             "    }\n"
@@ -177,14 +217,14 @@ def format_client_snippets(db_path: str, repo_path: str = "") -> dict[str, str]:
         ),
         "Global PATH Install": (
             "{\n"
-            "  \"name\": \"lumen\",\n"
+            f"  \"name\": \"{identity['server_name']}\",\n"
             "  \"command\": \"lumen\",\n"
             f"  \"args\": [{global_args_json}]\n"
             "}"
         ),
         "Docker": (
             "{\n"
-            "  \"name\": \"lumen\",\n"
+            f"  \"name\": \"{identity['server_name']}\",\n"
             "  \"command\": \"docker\",\n"
             f"  \"args\": [{docker_args_json}]\n"
             "}"
@@ -192,12 +232,13 @@ def format_client_snippets(db_path: str, repo_path: str = "") -> dict[str, str]:
     }
 
 
-def format_http_client_snippets(url: str) -> dict[str, str]:
+def format_http_client_snippets(url: str, db_path: str = "", repo_path: str = "") -> dict[str, str]:
+    identity = format_server_identity(db_path, repo_path) if db_path or repo_path else {"server_name": "lumen"}
     return {
         "VS Code / Claude Desktop (HTTP)": (
             "{\n"
             "  \"mcpServers\": {\n"
-            "    \"lumen\": {\n"
+            f"    \"{identity['server_name']}\": {{\n"
             "      \"type\": \"http\",\n"
             f"      \"url\": \"{url}\"\n"
             "    }\n"
@@ -206,7 +247,7 @@ def format_http_client_snippets(url: str) -> dict[str, str]:
         ),
         "Cursor / Generic MCP (HTTP)": (
             "{\n"
-            "  \"name\": \"lumen\",\n"
+            f"  \"name\": \"{identity['server_name']}\",\n"
             "  \"type\": \"http\",\n"
             f"  \"url\": \"{url}\"\n"
             "}"

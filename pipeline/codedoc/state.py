@@ -31,7 +31,7 @@ class PipelineState:
     site_path: str = ""
 
     # --- Metadata ---
-    status: str = "pending"  # pending | running | done | failed
+    status: str = "pending"  # pending | running | done | failed | stopped
     error: str | None = None
     started_at: str = ""
     finished_at: str = ""

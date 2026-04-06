@@ -7,9 +7,6 @@ from datetime import datetime
 from pathlib import Path
 
 import click
-from dotenv import load_dotenv
-
-load_dotenv()
 
 from codedoc.config import load_config
 from codedoc.mcp_server import (
@@ -272,7 +269,7 @@ def mcp_http(
         port=port,
         path=path,
     )
-    snippets = format_http_client_snippets(url)
+    snippets = format_http_client_snippets(url, final_db_path, effective_repo_path)
     _log.print_mcp_http_panel(final_db_path, url, command, docker_command, snippets)
 
     if print_config:

@@ -1,12 +1,20 @@
 # lumen
 
+```text
+ _                             
+| |    _   _ _ __ ___   ___ _ __ 
+| |   | | | | '_ ` _ \ / _ \ '_ \
+| |___| |_| | | | | | |  __/ | | |
+|_____|\__,_|_| |_| |_|\___|_| |_|
+```
+
 **Illuminate any codebase.** lumen reverse-engineers a source repository into a full
 documentation site — architecture diagrams, domain model, migration roadmap — without
 reading source files en masse.
 
 ---
 
-## How it works
+## Product
 
 Most AI documentation tools feed raw source files into an LLM context window. That approach
 fails at scale: a medium Java service (50k–200k lines) exhausts any context budget before
@@ -16,6 +24,10 @@ lumen takes a different path:
 
 ```
 Source repo
+    │
+    ▼
+[Preflight] — native repo metrics + size guardrail
+    │         LOC, file count, language mix, risk band
     │
     ▼
 [Indexer] — static analysis → Code Property Graph (KuzuDB)
@@ -39,7 +51,34 @@ Source repo
          → KuzuDB graph (explorable in the UI)
 ```
 
-### What’s new in the current pipeline
+### Supported languages
+
+lumen currently supports:
+
+- Java / Kotlin
+- JavaScript / TypeScript
+- Python
+
+Multi-language repos are indexed in one run when supported language slices are present.
+
+### Core USP
+
+The main differentiators are:
+
+1. **Token efficiency** — lumen minimizes raw source stuffing, which directly reduces model cost.
+2. **Code Property Graph over files or plain AST** — lumen indexes the repo into a graph with structural and relationship-aware facts instead of relying on file-by-file reading or a plain syntax tree.
+3. **Multi-agent analysis** — lumen uses parallel analysts plus a synthesizing architect, closer to stochastic consensus / distributed research than a single monolithic agent pass.
+4. **Model flexibility** — lumen can run with local Ollama models as well as OpenAI and Anthropic models.
+
+In practice, that gives you:
+
+- lower token usage
+- lower analysis cost
+- better structural reasoning on medium and large repos
+- stronger synthesis through parallel graph-driven investigation
+- local or hosted model choice depending on cost, privacy, and quality needs
+
+### Why it is different
 
 - **Multi-language indexing per run** — supported Java/Kotlin, JS/TS, and Python slices are all indexed in the same run when present.
 - **Normalized graph metadata** — nodes and edges carry `language`, `kind`, and `normKind` so tooling can reason across language-specific parser outputs more consistently.
@@ -70,46 +109,7 @@ For the few methods where business logic matters (pricing rules, security checks
 state machines), lumen uses `get_method_source` — which uses the graph's own line-number
 metadata to read only the exact method body (50–600 tokens), not the whole file.
 
-### Multi-agent synthesis
-
-The pipeline uses an **Analyst + Architect** pattern:
-
-- **Domain Analyst** — queries domain model, capabilities, validation rules, entity relationships
-- **Flows Analyst** — traces user flows, integration points (upstream + downstream), API surface
-- **Tech Analyst** — coupling hotspots, dead code, circular dependencies, decomposition signals
-
-All three analysts run **in parallel**, each writing their own artifacts directly to disk.
-The **Architect** then reads those artifacts and designs the target state — bounded context
-decomposition, target C4 diagram, and strangler fig extraction plan.
-
-Diagrams are produced in **PlantUML** (C4Context + sequence diagrams) rendered to SVG in the
-built documentation site.
-
-### Repo metrics guardrail
-
-Before indexing, lumen runs a native preflight size check. It does **not** use an LLM.
-
-The default plugin measures:
-
-- total non-empty LOC in supported source files
-- supported source-file count
-- language mix across Java/Kotlin, JS/TS, and Python
-
-It classifies the repo size/risk and warns when the repo is large relative to the current
-analysis settings such as `max_turns` and `max_context_tokens`.
-
-Guardrail modes:
-
-- `warn` — default; show warning and continue
-- `strict` — fail before indexing on high-risk repos
-- `off` — disable the guardrail entirely
-
-The preflight is implemented as a **pluggable module** inside the pipeline, so teams can
-remove or replace it without changing the indexer or agent stages.
-
----
-
-## What you get from `lumen run`
+### What `lumen run` produces
 
 | Document | What it covers |
 |---|---|
@@ -128,84 +128,38 @@ Plus a **visual graph explorer** (the UI) for ad-hoc Cypher queries on the CPG.
 
 ---
 
-## MCP Mode
-
-If you already have your own LLM client and just want graph tools over MCP, use an MCP flow instead
-of the full docs-generation pipeline.
-
-### Recommended: HTTP MCP
-
-For VS Code and Docker users, the simplest setup is the HTTP MCP server because client config is
-just a localhost URL.
-
-```bash
-# Index repo -> print URL config -> start local HTTP MCP server
-lumen mcp-http /path/to/repo
-```
-
-This flow does:
-
-1. repo metrics preflight
-2. indexing into KuzuDB
-3. launch of a local Streamable HTTP MCP server, defaulting to `http://127.0.0.1:8765/mcp`
-
-It prints:
-
-- the server URL
-- the exact native launch command
-- the exact Docker launch command
-- copy-paste HTTP MCP config for VS Code and other MCP clients
-
-### Existing: stdio MCP
-
-```bash
-# Index repo -> print process-launch config -> start stdio MCP server
-lumen mcp /path/to/repo
-```
-
-This flow does:
-
-1. repo metrics preflight
-2. indexing into KuzuDB
-3. launch of a local MCP stdio server backed by the richer `kg_tools` toolkit
-
-It also prints:
-
-- the generated Kuzu DB path
-- the exact relaunch command
-- copy-paste config snippets for common MCP clients
-
-Pipeline split:
-
-- `lumen run` → `preflight -> indexer -> agent -> builder`
-- `lumen mcp` → `preflight -> indexer -> stdio MCP server`
-- `lumen mcp-http` → `preflight -> indexer -> HTTP MCP server`
-
-### Serve an existing Kuzu DB
-
-```bash
-lumen mcp --db-path /path/to/output/<repo>-<timestamp>/index.kuzu/<repo>-db
-lumen mcp-http --db-path /path/to/output/<repo>-<timestamp>/index.kuzu/<repo>-db
-```
-
-### Print config snippets only
-
-```bash
-lumen mcp /path/to/repo --print-config
-lumen mcp-http /path/to/repo --print-config
-```
-
----
-
-## Quickstart (Docker — no local prerequisites)
+## Quickstart (Docker — recommended)
 
 ```bash
 git clone <repo-url> lumen && cd lumen
 make docker-build
-cp .env.example .env    # add ANTHROPIC_API_KEY
-make docker-run REPO=/path/to/your/repo
+export ANTHROPIC_API_KEY=...
+# or: export OPENAI_API_KEY=...
+```
+
+### 1. docker-pipeline
+
+```bash
+make docker-pipeline REPO=/path/to/your/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
+```
+
+If preflight classifies the repo as `xlarge`, `docker-pipeline` stops before indexing and
+walks you to MCP mode instead. In that case, continue with:
+
+```bash
 make docker-mcp REPO=/path/to/your/repo
 ```
+
+Step by step for `xlarge` repos:
+
+1. Run `make docker-pipeline ...` as usual.
+2. If Lumen stops after preflight, do not rerun `docker-pipeline`.
+3. Start MCP mode with `make docker-mcp REPO=/path/to/your/repo`.
+4. Let MCP mode perform indexing and expose `http://127.0.0.1:8765/mcp`.
+5. Connect your LLM client to that MCP URL and ask focused questions.
+
+Repo metrics are otherwise informational. The hard stop is only the full pipeline's
+`xlarge` guardrail.
 
 ### With a local Ollama model
 
@@ -220,26 +174,36 @@ make docker-pipeline REPO=/path/to/repo \
   ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
 ```
 
-### Docker MCP HTTP
+### 2. docker-mcp
 
-For Docker-only users who want MCP tools without a native install:
+If the pipeline output is good enough, stop there. If you want to keep asking questions over MCP,
+reuse the same `lumen` image against the DB from that pipeline run:
 
 ```bash
-make docker-build
-make docker-mcp REPO=/path/to/repo PORT=8765
+make docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
 ```
 
-That runs:
+`PORT` defaults to `8765`.
 
-1. repo metrics preflight
-2. indexing into KuzuDB
-3. a local HTTP MCP server exposed on `http://127.0.0.1:8765/mcp`
-
-To print the VS Code config without starting the server:
+If you do not already have pipeline output, this also works:
 
 ```bash
-cd pipeline
-uv run lumen mcp-http /path/to/repo --print-config
+make docker-mcp REPO=/path/to/repo
+```
+
+That flow:
+
+1. runs preflight
+2. indexes the repo
+3. exposes a local HTTP MCP server on `http://127.0.0.1:8765/mcp`
+
+
+### 3. docker-mkdocs
+
+Serve the generated site from the same `lumen` image:
+
+```bash
+make docker-docs
 ```
 
 ---
@@ -250,8 +214,8 @@ Output lands in `./output/` after every run.
 
 | Service | URL | Command |
 |---|---|---|
-| MkDocs doc-site (Docker) | http://localhost:8081 | `make compose-docs` |
-| MCP HTTP (Docker) | http://localhost:8765/mcp | `make docker-mcp REPO=/path/to/repo PORT=8765` |
+| MkDocs doc-site (Docker) | http://localhost:8081 | `make docker-docs` |
+| MCP HTTP (Docker) | http://localhost:8765/mcp | `make docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db` |
 | MkDocs doc-site (native) | http://localhost:8081 | `make dev-docs` |
 | Graph UI (Docker) | http://localhost:3002 | `make compose-ui` |
 | Graph UI (dev) | http://localhost:5174 | `make dev-ui` |
@@ -260,10 +224,7 @@ Output lands in `./output/` after every run.
 
 ```bash
 # Docker
-make compose-docs    # → http://localhost:8081
-
-# Native
-make dev-docs        # builds + serves at http://localhost:8081
+make docker-docs     # → http://localhost:8081
 ```
 
 The doc-site **accumulates** across runs — every repo you analyse appears as a top-level
@@ -281,21 +242,44 @@ make compose-ui
 
 ---
 
-## Native install
+## Native Mode
 
-Requires Java 21, Node 18, Python 3.11+, and [uv](https://docs.astral.sh/uv/).
+### 1. Prerequisites
+
+- Java 21
+- Node 18
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/)
+
+Install and configure:
 
 ```bash
-cp .env.example .env    # add ANTHROPIC_API_KEY
+export ANTHROPIC_API_KEY=...
+# or: export OPENAI_API_KEY=...
 make install            # builds indexer + installs pipeline via uv
+```
 
+### 2. Run with `lumen`
+
+`lumen` is the native CLI. `make` is just a repo-local wrapper around it.
+
+```bash
 # Anthropic Claude
-make run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
+cd pipeline
+uv run lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
 
 # Ollama (local model)
-make run REPO=/path/to/repo ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'
+uv run lumen run /path/to/repo --provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1
 
 # OpenAI
+uv run lumen run /path/to/repo --provider openai --model gpt-4o
+```
+
+Equivalent `make` wrapper:
+
+```bash
+make run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
+make run REPO=/path/to/repo ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'
 make run REPO=/path/to/repo ARGS='--provider openai --model gpt-4o'
 ```
 
@@ -355,7 +339,8 @@ Docker convenience:
 
 ```bash
 make docker-pipeline REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
-make docker-mcp REPO=/path/to/repo PORT=8765
+make docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
+make docker-docs
 ```
 Both `make mcp-http` and `make docker-mcp` already print the config before starting the server.
 Use `--print-config` only when you want config output without keeping the MCP server running.
@@ -404,28 +389,6 @@ repo_size_check = "warn"
 [paths]
 output_dir = "./my-output"
 ```
-
----
-
-## Supported languages
-
-| Language | Indexer |
-|---|---|
-| Java / Kotlin | JavaParser + Kotlin Compiler PSI → fat JAR |
-| JavaScript / TypeScript / React | Babel + custom CFG/DFG walker |
-| Python | `ast` module + custom CFG/DFG walker |
-
-Mixed-language repos are indexed in a single run. The resulting graph keeps parser-native
-labels and also stores normalized metadata so the agent/tooling can work across languages.
-
-## CLI experience
-
-When you run the pipeline in a TTY:
-
-- the repo metrics preflight is shown before indexing
-- the indexer renders a live per-language progress panel
-- the three analyst agents render as separate live boxes during Phase 2
-- supervisor and final stage messages still print as normal log lines
 
 ---
 

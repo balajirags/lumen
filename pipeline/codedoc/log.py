@@ -113,6 +113,31 @@ def print_repo_metrics_panel(metrics: dict[str, object], repo_size_check: str) -
     console.print(Panel("\n".join(lines), title="[bold yellow] Repo Metrics [/bold yellow]", border_style="yellow"))
 
 
+def print_xlarge_mcp_guidance_panel(repo_path: str) -> None:
+    lines = [
+        "[bold yellow]Full pipeline stopped after preflight.[/bold yellow]",
+        "This repo is classified as [bold]xlarge[/bold], so Lumen is recommending MCP mode instead of a full multi-agent docs run.",
+        "",
+        "[bold]What to do next[/bold]",
+        "1. Start MCP mode. It will handle indexing and expose the graph tools:",
+        f"   make docker-mcp REPO={repo_path}",
+        "2. Wait for the MCP HTTP URL to appear in the terminal.",
+        "3. Connect your LLM client to that MCP server.",
+        "4. Ask focused questions against the indexed graph.",
+        "",
+        "[bold]Native alternative[/bold]",
+        f"   cd pipeline && uv run lumen mcp-http {repo_path}",
+    ]
+    console.print()
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title="[bold yellow] XLarge Repo Guidance [/bold yellow]",
+            border_style="yellow",
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Supervisor / agent lines
 # ---------------------------------------------------------------------------
@@ -334,16 +359,26 @@ def print_failure_panel(
         for a in partial_artifacts:
             lines.append(f"  {a}")
 
+    title = "[bold red] Pipeline Failed [/bold red]"
+    border_style = "red"
+    if status == "stopped":
+        title = "[bold yellow] Pipeline Stopped [/bold yellow]"
+        border_style = "yellow"
+
     _err_console.print()
     _err_console.print(
-        Panel("\n".join(lines), title="[bold red] Pipeline Failed [/bold red]", border_style="red")
+        Panel("\n".join(lines), title=title, border_style=border_style)
     )
 
 
 def print_mcp_panel(db_path: str, command: str, snippets: dict[str, str]) -> None:
+    from codedoc.mcp_server import format_server_identity
+    identity = format_server_identity(db_path)
     lines = [
+        f"[dim]Repo    [/dim]  {identity['repo_name']}",
         f"[dim]Kuzu DB [/dim]  {db_path}",
         f"[dim]Command [/dim]  {command}",
+        "[dim]Tip     [/dim]  Call the MCP tool `server_info` to confirm the active repo after reconnects.",
     ]
     console.print()
     console.print(Panel("\n".join(lines), title="[bold cyan] MCP Ready [/bold cyan]", border_style="cyan"))
@@ -356,9 +391,14 @@ def print_mcp_http_panel(
     docker_command: str,
     snippets: dict[str, str],
 ) -> None:
+    from codedoc.mcp_server import format_server_identity
+    identity = format_server_identity(db_path)
     lines = [
+        f"[dim]Repo[/dim]    {identity['repo_name']}",
         f"[dim]DB[/dim]      {db_path}",
         f"[dim]URL[/dim]     {url}",
+        f"[dim]Server[/dim]  {identity['server_name']}",
+        "[dim]Tip[/dim]     Call the MCP tool `server_info` to verify the active repo after switching services.",
         "",
         "[bold]Native[/bold]",
         command,

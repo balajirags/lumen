@@ -1,5 +1,132 @@
-.PHONY: install install-indexer install-pipeline run mcp mcp-http dev-docs dev-ui test \
-        docker-build docker-run docker-pipeline docker-mcp compose-docs compose-ui
+.PHONY: help install install-indexer install-pipeline run mcp mcp-http dev-docs dev-ui test \
+        docker-build docker-rebuild docker-pipeline docker-mcp docker-docs compose-ui
+
+help:
+	@if [ -n "$(CMD)" ]; then \
+	  case "$(CMD)" in \
+	    docker-pipeline) \
+	      echo "make docker-pipeline"; \
+	      echo ""; \
+	      echo "Run preflight + index + multi-agent analysis + docs build in Docker."; \
+	      echo ""; \
+	      echo "Required:"; \
+	      echo "  REPO=/path/to/repo"; \
+	      echo ""; \
+	      echo "Optional:"; \
+	      echo "  ARGS='--provider <p> --model <m> [--base-url <url>] [other lumen run flags]'"; \
+	      echo "  DOCKER_IMAGE=lumen"; \
+	      echo ""; \
+	      echo "Example:"; \
+	      echo "  make docker-pipeline REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'"; \
+	      ;; \
+	    docker-mcp) \
+	      echo "make docker-mcp"; \
+	      echo ""; \
+	      echo "Serve HTTP MCP in Docker."; \
+	      echo ""; \
+	      echo "Provide exactly one of:"; \
+	      echo "  DB=/path/to/output/<run>/index.kuzu/<repo>-db"; \
+	      echo "  REPO=/path/to/repo"; \
+	      echo ""; \
+	      echo "Behavior:"; \
+	      echo "  DB=...   serve an existing indexed DB"; \
+	      echo "  REPO=... run preflight + index + MCP"; \
+	      echo ""; \
+	      echo "Optional:"; \
+	      echo "  PORT=8765"; \
+	      echo "  DOCKER_IMAGE=lumen"; \
+	      echo ""; \
+	      echo "Examples:"; \
+	      echo "  make docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db"; \
+	      echo "  make docker-mcp REPO=/path/to/repo PORT=9000"; \
+	      ;; \
+	    docker-docs) \
+	      echo "make docker-docs"; \
+	      echo ""; \
+	      echo "Serve ./output/doc-site from the lumen Docker image."; \
+	      echo ""; \
+	      echo "Optional:"; \
+	      echo "  PORT=8081"; \
+	      echo "  DOCKER_IMAGE=lumen"; \
+	      ;; \
+	    run) \
+	      echo "make run"; \
+	      echo ""; \
+	      echo "Run the full Lumen pipeline natively."; \
+	      echo ""; \
+	      echo "Required:"; \
+	      echo "  REPO=/path/to/repo"; \
+	      echo "  ARGS='--provider <p> --model <m> [--base-url <url>] [other lumen run flags]'"; \
+	      ;; \
+	    mcp) \
+	      echo "make mcp"; \
+	      echo ""; \
+	      echo "Run stdio MCP natively."; \
+	      echo ""; \
+	      echo "Required:"; \
+	      echo "  REPO=/path/to/repo"; \
+	      echo ""; \
+	      echo "Optional:"; \
+	      echo "  ARGS='--timeout 1800 --repo-size-check warn'"; \
+	      ;; \
+	    mcp-http) \
+	      echo "make mcp-http"; \
+	      echo ""; \
+	      echo "Run HTTP MCP natively."; \
+	      echo ""; \
+	      echo "Required:"; \
+	      echo "  REPO=/path/to/repo"; \
+	      echo ""; \
+	      echo "Optional:"; \
+	      echo "  ARGS='--port 8765 --repo-size-check warn'"; \
+	      ;; \
+	    *) \
+	      echo "Unknown CMD: $(CMD)"; \
+	      echo "Use: make help"; \
+	      exit 1; \
+	      ;; \
+	  esac; \
+	else \
+	  echo "Lumen Make Targets"; \
+	  echo ""; \
+	  echo "Docker-first:"; \
+	  echo "  make docker-build"; \
+	  echo "    Build the reusable '$(DOCKER_IMAGE)' image."; \
+	  echo "  make docker-pipeline REPO=/path/to/repo ARGS='--provider <p> --model <m> [--base-url <url>]'"; \
+	  echo "    Run preflight + index + multi-agent analysis + docs build in Docker."; \
+	  echo "  make docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db"; \
+	  echo "    Serve an existing indexed DB over HTTP MCP in Docker."; \
+	  echo "  make docker-mcp REPO=/path/to/repo"; \
+	  echo "    Run preflight + index + HTTP MCP in Docker."; \
+	  echo "  make docker-docs"; \
+	  echo "    Serve the generated MkDocs site from ./output/doc-site in Docker."; \
+	  echo ""; \
+	  echo "Native:"; \
+	  echo "  make install"; \
+	  echo "    Build indexers and sync the Python pipeline environment."; \
+	  echo "  make run REPO=/path/to/repo ARGS='--provider <p> --model <m> [--base-url <url>]'"; \
+	  echo "    Run the full Lumen pipeline natively."; \
+	  echo "  make mcp REPO=/path/to/repo"; \
+	  echo "    Run stdio MCP natively."; \
+	  echo "  make mcp-http REPO=/path/to/repo"; \
+	  echo "    Run HTTP MCP natively."; \
+	  echo ""; \
+	  echo "Development:"; \
+	  echo "  make dev-docs"; \
+	  echo "  make dev-ui"; \
+	  echo "  make compose-ui"; \
+	  echo ""; \
+	  echo "Common variables:"; \
+	  echo "  REPO=/path/to/repo"; \
+	  echo "  DB=/path/to/output/<run>/index.kuzu/<repo>-db"; \
+	  echo "  ARGS='--provider anthropic --model claude-sonnet-4-6'"; \
+	  echo "  PORT=8765"; \
+	  echo "  DOCKER_IMAGE=lumen"; \
+	  echo ""; \
+	  echo "Per-command help:"; \
+	  echo "  make help CMD=docker-mcp"; \
+	  echo "  make help CMD=docker-pipeline"; \
+	fi
 
 # ── Native install (requires Java 21, Node 18, Python 3.11) ──
 install: install-indexer install-pipeline
@@ -57,28 +184,26 @@ docker-rebuild:
 	docker build --no-cache -t $(DOCKER_IMAGE) .
 	docker image prune -f
 
-docker-run:
-	@if [ -z "$(REPO)" ]; then echo "Usage: make docker-run REPO=/path/to/repo"; exit 1; fi
-	docker run --rm \
-	  -v "$(REPO)":/repo \
-	  -v "$(PWD)/output":/workspace/output \
-	  -e ANTHROPIC_API_KEY="$(ANTHROPIC_API_KEY)" \
-	  $(DOCKER_IMAGE) run /repo --repo-name "$(notdir $(REPO))" --output-dir /workspace/output
-
 # ── Docker Compose ──
 docker-pipeline:
 	@if [ -z "$(REPO)" ]; then echo "Usage: make docker-pipeline REPO=/path/to/repo [ARGS='--provider ollama ...']"; exit 1; fi
-	REPO_PATH="$(REPO)" OUTPUT_PATH="$(PWD)/output" COMPOSE_PROFILES=pipeline \
+	REPO_PATH="$(REPO)" OUTPUT_PATH="$(PWD)/output" DOCKER_IMAGE="$(DOCKER_IMAGE)" COMPOSE_PROFILES=pipeline \
 	  docker-compose run pipeline -- \
 	  run /repo --repo-name "$(notdir $(REPO))" --output-dir /workspace/output $(ARGS)
 
 docker-mcp:
-	@if [ -z "$(REPO)" ]; then echo "Usage: make docker-mcp REPO=/path/to/repo [ARGS='--repo-size-check warn'] [PORT=8765]"; exit 1; fi
-	REPO_PATH="$(REPO)" REPO_NAME="$(notdir $(REPO))" OUTPUT_PATH="$(PWD)/output" MCP_PORT="$${PORT:-8765}" COMPOSE_PROFILES=mcp \
-	  docker-compose run --service-ports --rm mcp-http $(ARGS)
+	@if [ -z "$(DB)" ] && [ -z "$(REPO)" ]; then \
+	  echo "Usage: make docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db"; \
+	  echo "   or: make docker-mcp REPO=/path/to/repo"; \
+	  echo "PORT defaults to 8765."; \
+	  exit 1; fi
+	@REPO_NAME_VALUE=""; \
+	if [ -n "$(REPO)" ]; then REPO_NAME_VALUE="$(notdir $(REPO))"; fi; \
+	REPO_PATH="$(REPO)" REPO_NAME="$$REPO_NAME_VALUE" DB_PATH="$(DB)" OUTPUT_PATH="$(PWD)/output" DOCKER_IMAGE="$(DOCKER_IMAGE)" MCP_PORT="$${PORT:-8765}" COMPOSE_PROFILES=mcp \
+	  docker-compose run --service-ports --rm mcp-http
 
-compose-docs:
-	OUTPUT_PATH="$(PWD)/output" COMPOSE_PROFILES=docs docker-compose up docs
+docker-docs:
+	OUTPUT_PATH="$(PWD)/output" DOCKER_IMAGE="$(DOCKER_IMAGE)" DOCS_PORT="$${PORT:-8081}" COMPOSE_PROFILES=docs docker-compose up docs
 
 compose-ui:
 	OUTPUT_PATH="$(PWD)/output" COMPOSE_PROFILES=ui docker-compose up ui

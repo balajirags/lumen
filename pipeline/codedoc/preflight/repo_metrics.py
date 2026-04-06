@@ -138,12 +138,11 @@ class RepoMetricsPreflight:
             max_context_tokens=int(config.get("max_context_tokens", 120_000)),
         )
         warning = str(classified.get("warning_message", ""))
-        should_block = config.get("repo_size_check") == "strict" and classified["risk_level"] in {"high", "critical"}
         summary = f"{classified['total_loc']:,} LOC across {classified['total_source_files']:,} source files"
         return PreflightResult(
-            status="failed" if should_block else "done",
+            status="done",
             summary=summary,
             warnings=[warning] if warning else [],
             metadata=classified,
-            should_block=should_block,
+            should_block=False,
         )

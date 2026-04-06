@@ -6,7 +6,13 @@ import time
 from pathlib import Path
 
 from codedoc.preflight import run_preflights
-from codedoc.pipelines.common import create_run_dir, finalize_state, init_state, log_pipeline_start
+from codedoc.pipelines.common import (
+    create_run_dir,
+    finalize_state,
+    init_state,
+    log_pipeline_start,
+    should_stop_full_pipeline_for_xlarge_repo,
+)
 from codedoc.stages.agent import run_agent
 from codedoc.stages.builder import run_builder
 from codedoc.stages.indexer import run_indexer
@@ -61,6 +67,18 @@ def run_pipeline(
         state = run_preflights(state)
         if state.status == "failed":
             return state
+        if should_stop_full_pipeline_for_xlarge_repo(state):
+            state.status = "stopped"
+            state.error = (
+                "Repo classified as xlarge; full pipeline stopped before indexing. "
+                "Use MCP mode for targeted exploration."
+            )
+            state.log(
+                "pipeline",
+                "Repo classified as xlarge. Stopping full pipeline before indexing and recommending MCP mode.",
+            )
+            _log.print_xlarge_mcp_guidance_panel(state.repo_path)
+            return state
 
         state.log("pipeline", "=== Stage 1: Indexer ===")
         _log.print_stage_header(1, "Indexer")
@@ -101,4 +119,3 @@ def run_pipeline(
         finalize_state(state, run_dir)
 
     return state
-

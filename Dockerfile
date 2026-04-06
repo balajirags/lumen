@@ -18,6 +18,7 @@
 #     -v /path/to/repo:/repo \
 #     -v $(pwd)/output:/workspace/output \
 #     -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+#     -e OPENAI_API_KEY=$OPENAI_API_KEY \
 #     lumen run /repo --output-dir /workspace/output
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -80,7 +81,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install lumen pipeline (includes mkdocs-material, anthropic, openai, kuzu…)
-COPY pipeline/ /opt/lumen-pipeline/
+COPY pipeline/pyproject.toml /opt/lumen-pipeline/pyproject.toml
+COPY pipeline/codedoc/ /opt/lumen-pipeline/codedoc/
+COPY pipeline/scripts/ /opt/lumen-pipeline/scripts/
 COPY indexer/parsers/python/requirements.txt /tmp/py-parser-requirements.txt
 
 RUN uv pip install --no-cache-dir --prefix=/deps /opt/lumen-pipeline/ \
@@ -131,7 +134,7 @@ COPY indexer/parsers/python/                                 /opt/cmg-python-src
 
 # ── Pipeline scripts ──
 COPY pipeline/scripts/                                       /opt/lumen/scripts/
-RUN chmod +x /opt/lumen/scripts/build-docs-site.sh
+RUN chmod +x /opt/lumen/scripts/build-docs-site.sh /opt/lumen/scripts/run-mcp-http.sh
 
 # ── Wrapper scripts + runtime config (single layer) ──
 RUN printf '#!/bin/sh\nexec /opt/jre/bin/java -jar /opt/cmg/code-mem-graph.jar "$@"\n' \

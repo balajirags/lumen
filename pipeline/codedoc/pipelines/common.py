@@ -75,3 +75,11 @@ def finalize_state(state: PipelineState, run_dir: Path) -> None:
     )
     state.log("pipeline", f"Wrote {pipeline_json}")
 
+
+def should_stop_full_pipeline_for_xlarge_repo(state: PipelineState) -> bool:
+    """Return True when the full pipeline should stop after preflight."""
+    return (
+        state.mode == "full"
+        and bool(state.repo_metrics)
+        and str(state.repo_metrics.get("size_band", "")) == "xlarge"
+    )

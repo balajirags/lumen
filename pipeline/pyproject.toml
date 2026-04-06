@@ -13,7 +13,6 @@ dependencies = [
     "mcp>=1.0.0",
     "anthropic>=0.39",
     "openai>=1.0",
-    "python-dotenv>=1.0",
     "mkdocs-material>=9.0",
     "mkdocs-build-plantuml-plugin>=0.10",
     "rich>=13.0",

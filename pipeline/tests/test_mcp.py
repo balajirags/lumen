@@ -11,6 +11,7 @@ from codedoc.mcp_server import (
     format_mcp_command,
     format_mcp_http_command,
     format_mcp_http_url,
+    format_server_identity,
 )
 
 
@@ -24,6 +25,8 @@ def test_format_client_snippets_include_uv_and_docker_options():
     assert "\"command\": \"uv\"" in snippets["VS Code / Claude Desktop (uv)"]
     assert "\"command\": \"docker\"" in snippets["Docker"]
     assert "--db-path" in snippets["Global PATH Install"]
+    assert "\"lumen-path\"" in snippets["VS Code / Claude Desktop (uv)"]
+    assert "\"name\": \"lumen-path\"" in snippets["Global PATH Install"]
 
 
 def test_format_mcp_http_url_and_command():
@@ -39,10 +42,32 @@ def test_format_mcp_http_url_and_command():
     assert cmd == "lumen mcp-http --db-path /tmp/test-db --host 127.0.0.1 --port 8765 --path /mcp --repo-path /repo/path"
 
 
+def test_format_mcp_http_url_rewrites_wildcard_host_for_clients():
+    url = format_mcp_http_url(host="0.0.0.0", port=8765, path="/mcp")
+    assert url == "http://127.0.0.1:8765/mcp"
+
+
 def test_format_http_client_snippets_use_url():
-    snippets = format_http_client_snippets("http://127.0.0.1:8765/mcp")
+    snippets = format_http_client_snippets(
+        "http://127.0.0.1:8765/mcp",
+        "/tmp/admin-frontend-db",
+        "/repo/admin-frontend",
+    )
     assert "\"type\": \"http\"" in snippets["VS Code / Claude Desktop (HTTP)"]
     assert "http://127.0.0.1:8765/mcp" in snippets["Cursor / Generic MCP (HTTP)"]
+    assert "\"lumen-admin-frontend\"" in snippets["VS Code / Claude Desktop (HTTP)"]
+    assert "\"name\": \"lumen-admin-frontend\"" in snippets["Cursor / Generic MCP (HTTP)"]
+
+
+def test_format_server_identity_prefers_repo_path_name():
+    identity = format_server_identity("/tmp/inventory-service-db", "/repo/inventory-service")
+    assert identity["repo_name"] == "inventory-service"
+    assert identity["server_name"] == "lumen-inventory-service"
+
+
+def test_format_server_identity_falls_back_to_db_name():
+    identity = format_server_identity("/tmp/admin-frontend-db")
+    assert identity["repo_name"] == "admin-frontend"
 
 
 def test_mcp_cli_requires_repo_or_db():

@@ -27,23 +27,24 @@
 #     → http://localhost:8765/mcp
 #
 # Environment variables:
-#   ANTHROPIC_API_KEY   Required for Anthropic provider
+#   ANTHROPIC_API_KEY   Optional; used for Anthropic provider
+#   OPENAI_API_KEY      Optional; used for OpenAI provider
 #   REPO_PATH           Path to the source repo to analyse (pipeline only)
 #   OUTPUT_PATH         Where output is written/read (default: ./output)
+#   DOCKER_IMAGE        Reusable lumen image tag (default: lumen)
 #   MCP_PORT            Host/container port for HTTP MCP server (default: 8765)
+#   DOCS_PORT           Host port for docs server (default: 8081)
 
 services:
 
   pipeline:
-    image: lumen
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${DOCKER_IMAGE:-lumen}
     volumes:
       - ${REPO_PATH:-/tmp}:/repo
       - ${OUTPUT_PATH:-./output}:/workspace/output
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     # host.docker.internal lets the container reach the host machine.
     # On Mac/Windows (Docker Desktop) this is automatic; on Linux it needs
     # the extra_hosts entry below.
@@ -52,37 +53,39 @@ services:
     profiles: [pipeline]
 
   mcp-http:
-    image: lumen
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command:
-      - mcp-http
-      - /repo
-      - --repo-name
-      - ${REPO_NAME:-repo}
-      - --output-dir
-      - /workspace/output
-      - --host
-      - 0.0.0.0
-      - --port
-      - ${MCP_PORT:-8765}
+    image: ${DOCKER_IMAGE:-lumen}
+    entrypoint:
+      - /opt/lumen/scripts/run-mcp-http.sh
     volumes:
-      - ${REPO_PATH:-/tmp}:/repo
       - ${OUTPUT_PATH:-./output}:/workspace/output
+      - ${REPO_PATH:-/tmp}:${REPO_PATH:-/tmp}
+      - ${DB_PATH:-/tmp}:${DB_PATH:-/tmp}
     ports:
       - "${MCP_PORT:-8765}:${MCP_PORT:-8765}"
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - REPO_PATH=${REPO_PATH:-}
+      - REPO_NAME=${REPO_NAME:-}
+      - DB_PATH=${DB_PATH:-}
+      - MCP_PORT=${MCP_PORT:-8765}
+      - MCP_HOST=0.0.0.0
+      - MCP_PATH=/mcp
     extra_hosts:
       - "host.docker.internal:host-gateway"
     profiles: [mcp]
 
   docs:
-    image: python:3.11-slim
-    command: python -m http.server 8080 --directory /site
+    image: ${DOCKER_IMAGE:-lumen}
+    entrypoint:
+      - python
+      - -m
+      - http.server
+      - "8080"
+      - --directory
+      - /site
     ports:
-      - "8081:8080"
+      - "${DOCS_PORT:-8081}:8080"
     volumes:
       - ${OUTPUT_PATH:-./output}/doc-site:/site
     profiles: [docs]
