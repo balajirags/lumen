@@ -4,6 +4,8 @@
 
 **lumen** illuminates opaque codebases. It takes a source code repository and produces
 documentation, architecture diagrams, and migration roadmaps using LLMs and a knowledge graph.
+The graph-first architecture is intended to improve token and cost scaling on medium and
+large repos, and to reduce follow-up analysis cost when the same indexed repo is reused via MCP.
 
 ```
 Source repo → [preflight + indexer] → KuzuDB graph

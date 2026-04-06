@@ -65,15 +65,15 @@ Multi-language repos are indexed in one run when supported language slices are p
 
 The main differentiators are:
 
-1. **Token efficiency** — lumen minimizes raw source stuffing, which directly reduces model cost.
+1. **Token-aware architecture** — lumen minimizes raw source-file stuffing by default, using graph queries and targeted source reads instead. This is most beneficial on medium, large, and repeatedly queried repos.
 2. **Code Property Graph over files or plain AST** — lumen indexes the repo into a graph with structural and relationship-aware facts instead of relying on file-by-file reading or a plain syntax tree.
 3. **Multi-agent analysis** — lumen uses parallel analysts plus a synthesizing architect, closer to stochastic consensus / distributed research than a single monolithic agent pass.
 4. **Model flexibility** — lumen can run with local Ollama models as well as OpenAI and Anthropic models.
 
 In practice, that gives you:
 
-- lower token usage
-- lower analysis cost
+- better token and cost scaling than naive full-repo prompting on medium and large repos
+- lower follow-up analysis cost once a repo has been indexed and reused through MCP
 - better structural reasoning on medium and large repos
 - stronger synthesis through parallel graph-driven investigation
 - local or hosted model choice depending on cost, privacy, and quality needs
@@ -92,7 +92,8 @@ In practice, that gives you:
 
 A **Code Property Graph (CPG)** is a static analysis index that encodes AST, control
 flow, and data flow into a single queryable graph. The LLM agents query this graph
-instead of reading files — extracting structure for a fraction of the token cost:
+instead of reading files. This is intended to scale better than naive full-repo prompting,
+especially on medium and large repos or when the same indexed repo is reused repeatedly:
 
 | What you need to know | File reading | Graph query |
 |---|---|---|
