@@ -50,11 +50,14 @@ class Config:
     agent_prompt: str = _DEFAULTS["agent_prompt"]
     build_script: str = _DEFAULTS["build_script"]
     verbose: bool = False
+    timeout_explicit: bool = False
+    max_turns_explicit: bool = False
 
 
 def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
     """Build a Config by merging defaults ← toml ← CLI flags."""
     merged: dict[str, Any] = dict(_DEFAULTS)
+    explicit_keys: set[str] = set()
 
     # Layer 2: .codedoc.toml
     toml_path = Path.cwd() / ".codedoc.toml"
@@ -64,11 +67,16 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
         for section in ("pipeline", "paths"):
             if section in data:
                 merged.update(data[section])
+                explicit_keys.update(data[section].keys())
 
     # Layer 3: CLI overrides (None values are unset flags — skip them)
     if cli_overrides:
         for k, v in cli_overrides.items():
             if v is not None:
                 merged[k] = v
+                explicit_keys.add(k)
 
-    return Config(**{k: merged[k] for k in Config.__dataclass_fields__ if k in merged})
+    config_kwargs = {k: merged[k] for k in Config.__dataclass_fields__ if k in merged}
+    config_kwargs["timeout_explicit"] = "timeout" in explicit_keys
+    config_kwargs["max_turns_explicit"] = "max_turns" in explicit_keys
+    return Config(**config_kwargs)

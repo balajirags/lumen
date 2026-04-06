@@ -15,6 +15,8 @@ def test_load_config_defaults_and_cli_override(monkeypatch, tmp_path):
     assert cfg.provider == "auto"
     assert cfg.repo_size_check == "warn"
     assert cfg.allow_xlarge is False
+    assert cfg.timeout_explicit is False
+    assert cfg.max_turns_explicit is True
 
 
 def test_load_config_reads_toml(tmp_path, monkeypatch):
@@ -39,3 +41,21 @@ output_dir = "./custom-output"
     assert cfg.output_dir == "./custom-output"
     assert cfg.repo_size_check == "strict"
     assert cfg.allow_xlarge is True
+    assert cfg.max_turns_explicit is True
+    assert cfg.timeout_explicit is False
+
+
+def test_load_config_marks_timeout_explicit_when_set_in_toml(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Path(".codedoc.toml").write_text(
+        """
+[pipeline]
+timeout = 900
+""".strip()
+    )
+
+    cfg = load_config()
+
+    assert cfg.timeout == 900
+    assert cfg.timeout_explicit is True
+    assert cfg.max_turns_explicit is False

@@ -83,6 +83,7 @@ Key defaults (`pipeline/codedoc/config.py`):
 |---|---|
 | `model` | `claude-sonnet-4-6` |
 | `provider` | `auto` |
+| `timeout` | `300` |
 | `max_turns` | 60 |
 | `repo_size_check` | `warn` |
 | `allow_xlarge` | `false` |
@@ -92,6 +93,11 @@ Key defaults (`pipeline/codedoc/config.py`):
 
 Docker runtime overrides `indexer_bin_dir` and `build_script` via `/workspace/.codedoc.toml`
 baked into the image — `load_config()` reads `.codedoc.toml` from CWD at startup.
+Adaptive runtime defaults are applied after preflight when values were not explicitly set:
+- `small` / `medium`: keep `timeout = 300`, `max_turns = 60`
+- `large` / `xlarge`: use `timeout = 3600`
+- full docs pipeline only: `large` / `xlarge` also use `max_turns = 100`
+If `timeout` or `max_turns` is explicitly set in `.codedoc.toml` or via CLI, that setting does not adapt.
 
 ---
 

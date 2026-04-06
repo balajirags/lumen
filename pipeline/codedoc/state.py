@@ -52,6 +52,10 @@ class PipelineState:
     repo_size_check: str = "warn"
     allow_xlarge: bool = False
     verbose: bool = False
+    timeout_explicit: bool = False
+    max_turns_explicit: bool = False
+    timeout_source: str = "default"
+    max_turns_source: str = "default"
     indexer_bin_dir: str = ""
     agent_prompt: str = ""
     build_script: str = ""
@@ -85,6 +89,13 @@ class PipelineState:
                 "input": self.input_tokens,
                 "output": self.output_tokens,
                 "total": self.input_tokens + self.output_tokens,
+            },
+            "runtime": {
+                "timeout": self.timeout,
+                "timeout_source": self.timeout_source,
+                "max_turns": self.max_turns,
+                "max_turns_source": self.max_turns_source,
+                "max_context_tokens": self.max_context_tokens,
             },
             "tool_uses": self.tool_uses,
             "events": self.events,

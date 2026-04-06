@@ -387,11 +387,19 @@ output/doc-site/               ← shared MkDocs Material site (accumulates all 
 
 `pipeline/.codedoc.toml` sets persistent defaults (CLI flags always win):
 
+Runtime defaults are repo-size aware:
+
+- `small` / `medium`: `timeout = 300`, `max_turns = 60`
+- `large` / `xlarge`: `timeout = 3600`
+- full docs pipeline only: `large` / `xlarge` also use `max_turns = 100`
+
+Explicit CLI flags or `.codedoc.toml` values still override those adaptive defaults.
+If you pin `timeout` or `max_turns` in `.codedoc.toml`, that setting will no longer adapt by repo size.
+
 ```toml
 [pipeline]
 model     = "claude-sonnet-4-6"
 provider  = "auto"
-max_turns = 60
 repo_size_check = "warn"
 allow_xlarge = false
 

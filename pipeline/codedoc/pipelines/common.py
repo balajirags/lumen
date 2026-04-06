@@ -31,6 +31,8 @@ def init_state(
     repo_size_check: str = "warn",
     allow_xlarge: bool = False,
     verbose: bool = False,
+    timeout_explicit: bool = False,
+    max_turns_explicit: bool = False,
     indexer_bin_dir: str = "",
     agent_prompt: str = "",
     build_script: str = "",
@@ -49,6 +51,10 @@ def init_state(
         repo_size_check=repo_size_check,
         allow_xlarge=allow_xlarge,
         verbose=verbose,
+        timeout_explicit=timeout_explicit,
+        max_turns_explicit=max_turns_explicit,
+        timeout_source="explicit" if timeout_explicit else "default",
+        max_turns_source="explicit" if max_turns_explicit else "default",
         indexer_bin_dir=indexer_bin_dir,
         agent_prompt=agent_prompt,
         build_script=build_script,
@@ -86,3 +92,30 @@ def should_stop_full_pipeline_for_xlarge_repo(state: PipelineState) -> bool:
         and not state.allow_xlarge
         and str(state.repo_metrics.get("size_band", "")) == "xlarge"
     )
+
+
+def apply_repo_size_runtime_defaults(state: PipelineState) -> PipelineState:
+    """Adjust runtime defaults from repo size when the user did not override them."""
+    size_band = str((state.repo_metrics or {}).get("size_band", ""))
+    if size_band not in {"large", "xlarge"}:
+        state.log(
+            "pipeline",
+            f"Effective runtime settings — timeout={state.timeout}s ({state.timeout_source}), "
+            f"max_turns={state.max_turns} ({state.max_turns_source})",
+        )
+        return state
+
+    if not state.timeout_explicit:
+        state.timeout = 3600
+        state.timeout_source = f"adaptive-{size_band}"
+
+    if state.mode == "full" and not state.max_turns_explicit:
+        state.max_turns = 100
+        state.max_turns_source = f"adaptive-{size_band}"
+
+    state.log(
+        "pipeline",
+        f"Effective runtime settings — timeout={state.timeout}s ({state.timeout_source}), "
+        f"max_turns={state.max_turns} ({state.max_turns_source})",
+    )
+    return state

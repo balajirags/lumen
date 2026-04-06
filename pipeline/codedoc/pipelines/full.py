@@ -7,6 +7,7 @@ from pathlib import Path
 
 from codedoc.preflight import run_preflights
 from codedoc.pipelines.common import (
+    apply_repo_size_runtime_defaults,
     create_run_dir,
     finalize_state,
     init_state,
@@ -30,6 +31,8 @@ def run_pipeline(
     timeout: int = 300,
     repo_size_check: str = "warn",
     allow_xlarge: bool = False,
+    timeout_explicit: bool = False,
+    max_turns_explicit: bool = False,
     verbose: bool = False,
     indexer_bin_dir: str = "",
     agent_prompt: str = "",
@@ -54,6 +57,8 @@ def run_pipeline(
         repo_size_check=repo_size_check,
         allow_xlarge=allow_xlarge,
         verbose=verbose,
+        timeout_explicit=timeout_explicit,
+        max_turns_explicit=max_turns_explicit,
         indexer_bin_dir=indexer_bin_dir,
         agent_prompt=agent_prompt,
         build_script=build_script,
@@ -69,6 +74,7 @@ def run_pipeline(
         state = run_preflights(state)
         if state.status == "failed":
             return state
+        state = apply_repo_size_runtime_defaults(state)
         if state.allow_xlarge and str((state.repo_metrics or {}).get("size_band", "")) == "xlarge":
             state.log(
                 "pipeline",

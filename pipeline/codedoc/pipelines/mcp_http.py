@@ -7,7 +7,13 @@ from pathlib import Path
 
 from codedoc.mcp_server import format_mcp_http_command, format_mcp_http_url
 from codedoc.preflight import run_preflights
-from codedoc.pipelines.common import create_run_dir, finalize_state, init_state, log_pipeline_start
+from codedoc.pipelines.common import (
+    apply_repo_size_runtime_defaults,
+    create_run_dir,
+    finalize_state,
+    init_state,
+    log_pipeline_start,
+)
 from codedoc.stages.indexer import run_indexer
 from codedoc.state import PipelineState
 
@@ -20,6 +26,7 @@ def run_mcp_http_pipeline(
     port: int = 8765,
     path: str = "/mcp",
     timeout: int = 300,
+    timeout_explicit: bool = False,
     repo_size_check: str = "warn",
     verbose: bool = False,
     indexer_bin_dir: str = "",
@@ -37,6 +44,7 @@ def run_mcp_http_pipeline(
         timeout=timeout,
         repo_size_check=repo_size_check,
         verbose=verbose,
+        timeout_explicit=timeout_explicit,
         indexer_bin_dir=indexer_bin_dir,
     )
     log_pipeline_start(state, repo_path=str(repo), run_dir=run_dir, label="MCP HTTP pipeline")
@@ -49,6 +57,7 @@ def run_mcp_http_pipeline(
         state = run_preflights(state)
         if state.status == "failed":
             return state
+        state = apply_repo_size_runtime_defaults(state)
 
         state.log("pipeline", "=== Stage 1: Indexer ===")
         _log.print_stage_header(1, "Indexer")
