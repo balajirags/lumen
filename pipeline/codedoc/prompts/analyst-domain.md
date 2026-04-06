@@ -26,25 +26,22 @@ Skip (write a one-line note instead) if no persistent entity evidence.
 
 One paragraph: summary of domain model.
 
-PlantUML entity diagram:
-```plantuml
-@startuml
-entity RESERVATION {
-  * id : Long <<PK>>
-  --
-  sku : String
-  qty : Integer
-  status : ReservationStatus
-  locationId : Long <<FK>>
-}
-entity LOCATION {
-  * id : Long <<PK>>
-  --
-  name : String
-  type : LocationType
-}
-RESERVATION }o--|| LOCATION : "at"
-@enduml
+Mermaid ER diagram:
+```mermaid
+erDiagram
+  RESERVATION {
+    LONG id PK
+    STRING sku
+    INT qty
+    STRING status
+    LONG locationId FK
+  }
+  LOCATION {
+    LONG id PK
+    STRING name
+    STRING type
+  }
+  LOCATION ||--o{ RESERVATION : stores
 ```
 
 Bounded context ownership table: entity | bounded context | aggregate root (y/n)

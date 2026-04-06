@@ -18,60 +18,66 @@ that contract over the backend-oriented examples below.
 
 One sentence: what this flow accomplishes and why it matters.
 
-```plantuml
-@startuml
-actor User
-participant "ControllerName" as API
-participant "ServiceName" as Svc
-participant "RepositoryName" as Repo
+```mermaid
+sequenceDiagram
+    actor User
+    participant API as ControllerName
+    participant Svc as ServiceName
+    participant Repo as RepositoryName
 
-User -> API: POST /reservations {body}
-API -> Svc: createReservation(request)
-Svc -> Repo: save(reservation)
-Repo --> Svc: reservation
-Svc --> API: ReservationResponse
-API --> User: 201 Created
-@enduml
+    User->>API: POST /reservations
+    API->>Svc: createReservation(request)
+    Svc->>Repo: save(reservation)
+    Repo-->>Svc: reservation
+    Svc-->>API: ReservationResponse
+    API-->>User: 201 Created
 ```
 ```
 
 Rules:
-- `->` for calls, `-->` for returns; `actor` for humans, `participant "Name" as Alias` for systems
+- Use Mermaid `sequenceDiagram`
 - Show HTTP method + full path in the `User -> API` arrow
-- Mark async steps with `note right of Svc: async`
+- Mark async steps with Mermaid `Note right of Svc: async`
 - Prefer mutation flows (create, update, delete, confirm, cancel) over reads
 - Each diagram ≤ 25 lines; total artifact ≤ 150 lines
 
 ### `architecture/c4-context.md`
 One paragraph: name the system, list integration points with evidence.
 
-```plantuml
-@startuml
-!include <C4/C4_Context>
+Use the `write_c4_artifact` tool instead of `write_artifact`.
 
-title System Context — <repo-name>
+Provide:
 
-Person(user, "User", "Primary actor")
-' [Inferred] — upstream caller from exposed API surface
-System_Ext(apiConsumer, "API Consumer", "Upstream caller via REST/HTTP")
-System(system, "<repo-name>", "<one sentence description>")
+- `filename`: `architecture/c4-context.md`
+- `title`: diagram title
+- `summary`: one paragraph introducing the current system context
+- `spec_json`: JSON object like:
 
-SystemDb_Ext(db, "<DB name>", "<technology> — persistence")
-SystemQueue_Ext(queue, "<Broker>", "<technology> — async messaging")
-
-Rel(user, system, "Uses", "REST/HTTP")
-Rel(apiConsumer, system, "Calls", "REST/HTTP")
-Rel(system, db, "Reads / Writes", "JDBC")
-Rel(system, queue, "Publishes / Consumes", "Kafka")
-@enduml
+```json
+{
+  "people": [
+    {"id": "user", "name": "User", "description": "Primary actor"}
+  ],
+  "systems": [
+    {"id": "system", "name": "<repo-name>", "description": "<one sentence description>"}
+  ],
+  "external_systems": [
+    {"id": "db", "name": "<DB name>", "description": "Persistence store", "kind": "database"},
+    {"id": "queue", "name": "<Broker>", "description": "Async messaging", "kind": "queue"}
+  ],
+  "relations": [
+    {"from": "user", "to": "system", "label": "Uses", "technology": "REST/HTTP"},
+    {"from": "system", "to": "db", "label": "Reads / Writes", "technology": "JDBC"}
+  ]
+}
 ```
 
 Rules:
-- Open with `!include <C4/C4_Context>` inside `@startuml` / `@enduml`
-- Upstream callers: `Person` or `System_Ext` nodes; downstream: `SystemDb_Ext`, `SystemQueue_Ext`, `System_Ext`
-- All `Rel()` take protocol as 4th arg: `"REST/HTTP"`, `"JDBC"`, `"Kafka"`, `"Redis"`, `"gRPC"`
-- Mark inferred nodes with `' [Inferred]` comment (PlantUML comment syntax)
-- ≤ 80 lines total
+- Do not write raw PlantUML yourself
+- Upstream callers go in `people`; downstream integrations go in `external_systems`
+- `external_systems.kind` must be one of `system`, `database`, or `queue`
+- `relations` can use `bidirectional: true` when needed
+- Keep the spec compact and evidence-based
 
 ### `current-state/api-spec.yaml` *(conditional)*
 Write only if Turn 1 found HTTP endpoints with clear path + method signatures.

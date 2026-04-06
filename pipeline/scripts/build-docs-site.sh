@@ -16,6 +16,9 @@
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PIPELINE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 # ── Defaults ────────────────────────────────────────────────────────
 OUTPUT_DIR="./output"
 SITE_DIR="./doc-site"
@@ -109,8 +112,123 @@ echo "Step 2/3: Generating index"
   done
 } > "$DOCS_DIR/index.md"
 
+# Normalize markdown structure and PlantUML fences before rendering/build.
+python3 - "$DOCS_DIR" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+docs_dir = Path(sys.argv[1])
+plantuml_pattern = re.compile(r"```plantuml\s*\n(.*?)\n```", re.DOTALL)
+bold_heading_then_list = re.compile(
+    r"(^\*\*[^*\n]+:?\*\*)\n(?=([-*]|\d+\.)\s)",
+    re.MULTILINE,
+)
+
+for md_file in docs_dir.rglob("*.md"):
+    text = md_file.read_text(encoding="utf-8")
+    updated = bold_heading_then_list.sub(r"\1\n\n", text)
+    if "```plantuml" in updated:
+        updated = plantuml_pattern.sub(lambda m: m.group(1).strip() + "\n", updated)
+    if updated == text:
+        continue
+    md_file.write_text(updated, encoding="utf-8")
+PY
+
+HAS_PLANTUML_BLOCKS=false
+if grep -R -q '^@startuml' "$DOCS_DIR"; then
+  HAS_PLANTUML_BLOCKS=true
+fi
+
+if $HAS_PLANTUML_BLOCKS && ! command -v plantuml >/dev/null 2>&1; then
+  echo "ERROR: PlantUML diagrams were found in the generated docs, but no local 'plantuml' executable is available."
+  echo ""
+  echo "To render C4 diagrams correctly, choose one of these paths:"
+  echo "  1. Use Docker pipeline/docs mode, which includes PlantUML in the lumen image."
+  echo "  2. Install PlantUML locally, then rerun make dev-docs."
+  echo ""
+  exit 1
+fi
+
+if $HAS_PLANTUML_BLOCKS; then
+  python3 - "$DOCS_DIR" <<'PY'
+from pathlib import Path
+import hashlib
+import os
+import re
+import subprocess
+import sys
+
+docs_dir = Path(sys.argv[1])
+assets_dir = docs_dir / "assets" / "diagrams"
+assets_dir.mkdir(parents=True, exist_ok=True)
+pattern = re.compile(r"(^|\n)(@startuml.*?@enduml)\s*(?=\n|$)", re.DOTALL)
+had_render_failures = False
+
+for md_file in docs_dir.rglob("*.md"):
+    text = md_file.read_text(encoding="utf-8")
+    if "@startuml" not in text:
+        continue
+
+    replacements = []
+    for idx, match in enumerate(pattern.finditer(text), start=1):
+        block = match.group(2).strip() + "\n"
+        digest = hashlib.sha1(f"{md_file.relative_to(docs_dir)}::{idx}::{block}".encode("utf-8")).hexdigest()[:12]
+        svg_path = assets_dir / f"{md_file.stem}-{idx}-{digest}.svg"
+        result = subprocess.run(
+            ["plantuml", "-tsvg", "-pipe"],
+            input=block,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            had_render_failures = True
+            error = (result.stderr or result.stdout or "Unknown PlantUML error").strip()
+            print(
+                f"WARN: PlantUML render failed for {md_file.relative_to(docs_dir)} block {idx}: {error}",
+                file=sys.stderr,
+            )
+            fallback = (
+                "> Warning: PlantUML rendering failed for this diagram. "
+                "Showing source instead.\n\n```text\n"
+                + block.rstrip()
+                + "\n```\n"
+            )
+            replacements.append((match.span(2), fallback))
+        else:
+            svg_path.write_text(result.stdout, encoding="utf-8")
+            rel_from_md = Path(os.path.relpath(svg_path, md_file.parent))
+            replacements.append((match.span(2), f"![Diagram]({rel_from_md.as_posix()})"))
+
+    if not replacements:
+        continue
+
+    updated = text
+    for (start, end), replacement in reversed(replacements):
+        updated = updated[:start] + replacement + updated[end:]
+    md_file.write_text(updated, encoding="utf-8")
+
+if had_render_failures:
+    print("WARN: One or more PlantUML blocks failed to render; fallback source blocks were embedded.", file=sys.stderr)
+PY
+fi
+
 # ── Step 3: Write mkdocs.yml and build ──────────────────────────────
 echo "Step 3/3: Building MkDocs Material site"
+
+mkdir -p "$DOCS_DIR/assets/javascripts"
+cat > "$DOCS_DIR/assets/javascripts/mermaid-init.js" <<'JS'
+document$.subscribe(function () {
+  if (typeof mermaid !== "undefined") {
+    mermaid.initialize({
+      startOnLoad: true,
+      securityLevel: "loose",
+      theme: "default"
+    });
+  }
+});
+JS
 
 cat > "$STAGING/mkdocs.yml" << YAML
 site_name: "${SITE_TITLE}"
@@ -139,20 +257,19 @@ theme:
     - toc.follow
 plugins:
   - search
-  - build_plantuml:
-      render: "local"
-      bin_path: "plantuml"
-      output_format: "svg"
-      diagram_root: "docs"
-      output_folder: "assets/diagrams"
-      input_folder: "."
-      input_extensions: ""
+extra_javascript:
+  - https://unpkg.com/mermaid@10/dist/mermaid.min.js
+  - assets/javascripts/mermaid-init.js
 markdown_extensions:
   - tables
   - attr_list
   - pymdownx.highlight:
       anchor_linenums: true
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
 YAML
 
 if $SKIP_BUILD; then
@@ -162,7 +279,12 @@ if $SKIP_BUILD; then
 fi
 
 mkdir -p "$(dirname "$SITE_DIR")"
-mkdocs build -f "$STAGING/mkdocs.yml" --site-dir "$(cd "$(dirname "$SITE_DIR")" && pwd)/$(basename "$SITE_DIR")"
+SITE_DIR_ABS="$(cd "$(dirname "$SITE_DIR")" && pwd)/$(basename "$SITE_DIR")"
+if command -v uv >/dev/null 2>&1; then
+  uv --directory "$PIPELINE_DIR" run mkdocs build -f "$STAGING/mkdocs.yml" --site-dir "$SITE_DIR_ABS"
+else
+  mkdocs build -f "$STAGING/mkdocs.yml" --site-dir "$SITE_DIR_ABS"
+fi
 
 echo ""
 echo "Done! Static site at: $SITE_DIR"

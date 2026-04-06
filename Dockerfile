@@ -134,7 +134,9 @@ COPY indexer/parsers/python/                                 /opt/cmg-python-src
 
 # ── Pipeline scripts ──
 COPY pipeline/scripts/                                       /opt/lumen/scripts/
-RUN chmod +x /opt/lumen/scripts/build-docs-site.sh /opt/lumen/scripts/run-mcp-http.sh
+RUN chmod +x /opt/lumen/scripts/build-docs-site.sh \
+      /opt/lumen/scripts/run-mcp-http.sh \
+      /opt/lumen/scripts/run-docs-server.sh
 
 # ── Wrapper scripts + runtime config (single layer) ──
 RUN printf '#!/bin/sh\nexec /opt/jre/bin/java -jar /opt/cmg/code-mem-graph.jar "$@"\n' \

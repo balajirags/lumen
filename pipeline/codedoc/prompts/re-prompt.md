@@ -39,7 +39,6 @@ CONDITIONAL:
 
 ALWAYS write:
   target-state/bounded-contexts.md   — BC decomposition + service responsibility table
-  target-state/c4-target.md          — PlantUML C4Context of future decomposed state
   target-state/strangler-fig.md      — ordered extraction plan
 
 ALWAYS write last:
@@ -85,8 +84,8 @@ Goal: understand **what the system DOES** — user journeys and system boundarie
    MATCH (n) WHERE n.name =~ '(?i).*(Client|Producer|Consumer|Gateway|Adapter|Sender|Publisher|Subscriber|Driver|Connector|DataSource|Queue|Cache|Storage|Broker|Stub|Proxy|Listener).*'
    RETURN label(n) AS type, n.name AS name ORDER BY name LIMIT 60
    ```
-4. Write: **`architecture/business-journeys.md`** (3–5 flows with `**Business journey:** As a *[role]*, I can *[action]* by calling \`[METHOD] /path\``)
-5. Write: **`architecture/c4-context.md`** (upstream callers + downstream dependencies with protocol-labelled `Rel()` arrows)
+4. Write: **`architecture/business-journeys.md`** (3–5 flows with `**Business journey:** As a *[role]*, I can *[action]* by calling \`[METHOD] /path\`` using Mermaid sequence diagrams)
+5. Write: **`architecture/c4-context.md`** (upstream callers + downstream dependencies with protocol-labelled relations; render deterministic PlantUML from structured data via `write_c4_artifact`)
 6. Write: **`current-state/api-spec.yaml`** _(only if sufficient endpoint + signature detail)_
 
 ### Phase 4 — Technical Research (Staff Engineer lens)
@@ -96,7 +95,7 @@ Goal: understand **how the system is BUILT** — coupling, hotspots, decompositi
 1. Batch: `get_hotspots` (coupling, fan_in, fan_out, god_class) · `get_component_coupling_matrix` · `detect_circular_dependencies` · `get_unused_code` · `get_design_patterns`.
 2. `impact_analysis` on top-3 hotspot components.
 3. Write: **`tech/coupling-hotspots.md`**
-4. Write: **`domain/er-diagram.md`** _(only if graph has persistent entity evidence)_
+4. Write: **`domain/er-diagram.md`** _(only if graph has persistent entity evidence; Mermaid ER)_
 
 ### Phase 5 — Target State (Architect mode)
 
@@ -104,9 +103,8 @@ Goal: design the decomposed future state grounded in Phase 2–4 evidence.
 
 1. No new tool calls needed — synthesise from Phase 2–4 findings.
 2. Write: **`target-state/bounded-contexts.md`** (BC table sourced from domain + coupling evidence)
-3. Write: **`target-state/c4-target.md`** (PlantUML C4Context of future decomposed state)
-4. Write: **`target-state/strangler-fig.md`** (ordered extraction plan grounded in hotspot data)
-5. Write: **`manifests/artifacts.json`** (always last)
+3. Write: **`target-state/strangler-fig.md`** (ordered extraction plan grounded in hotspot data)
+4. Write: **`manifests/artifacts.json`** (always last)
 
 ## Artifact Guidelines
 
@@ -125,23 +123,26 @@ One section per capability. Each section:
 ## <Flow Name> [Observed]
 **Business journey:** As a *[role]*, I can *[action]* by calling `[METHOD] /path`.
 One sentence: what this flow accomplishes and why it matters.
-[PlantUML sequenceDiagram — ≤ 25 lines]
+```mermaid
+sequenceDiagram
+  actor User
+  participant API
+  participant Svc
+  participant Repo
 ```
+```
+- Use Mermaid `sequenceDiagram`
 - Show HTTP method + path in `User -> API` arrow
-- Mark async steps with `note right of Svc: async`
-- Use `->` for calls, `-->` for returns; `actor` for humans, `participant` for system components
-- Fence as ` ```plantuml ` with `@startuml` / `@enduml`
+- Mark async steps with `Note right of Svc: async`
 - Total ≤ 150 lines
 
 ### `architecture/c4-context.md`
-One paragraph + PlantUML C4Context diagram:
-- Open with `!include <C4/C4_Context>` inside `@startuml` / `@enduml`
-- Upstream callers: `Person` or `System_Ext` nodes
-- This system: `System` node
-- Downstream: `SystemDb_Ext`, `SystemQueue_Ext`, `System_Ext`
-- Every `Rel()` takes protocol as 4th arg: `"REST/HTTP"`, `"JDBC"`, `"Kafka"`, `"Redis"`, `"gRPC"`
-- Mark inferred nodes with `' [Inferred]` comment
-- Fence as ` ```plantuml `
+One paragraph + PlantUML C4Context diagram via `write_c4_artifact(filename, title, summary, spec_json)`:
+- Use `filename=architecture/c4-context.md`
+- Upstream callers go in `people`
+- This system goes in `systems`
+- Downstream dependencies go in `external_systems`
+- Relations must include protocol/technology where known
 - ≤ 80 lines
 
 ### `tech/coupling-hotspots.md`
@@ -152,9 +153,9 @@ One paragraph + PlantUML C4Context diagram:
 - ≤ 80 lines
 
 ### `domain/er-diagram.md` _(conditional)_
-One paragraph + PlantUML `erDiagram` using class diagram syntax (persistent entities only, ALL_CAPS names, PK/FK + 2–4 domain fields)
+One paragraph + Mermaid `erDiagram` (persistent entities only, ALL_CAPS names, PK/FK + 2–4 domain fields)
 + bounded context ownership table: entity | BC | aggregate root (y/n)
-Fence as ` ```plantuml ` with `@startuml` / `@enduml`
+Fence as ` ```mermaid `
 ≤ 120 lines
 
 ### `target-state/bounded-contexts.md`
@@ -162,13 +163,6 @@ Fence as ` ```plantuml ` with `@startuml` / `@enduml`
 - Table: BC | aggregate root | key operations | data owned | events published | events consumed
 - Every BC must trace back to graph evidence — no speculation
 - ≤ 120 lines
-
-### `target-state/c4-target.md`
-PlantUML C4Context of FUTURE state:
-- Each BC → `System(<id>, "<BC> Service", "<responsibility>")`
-- Remaining monolith (if any) → `System(monolith, "Legacy Core", "...")`
-- Shared infra → `SystemDb_Ext` / `SystemQueue_Ext`; all `Rel()` protocol-labelled
-- Evidence tag: `[Prescriptive]` · ≤ 60 lines
 
 ### `target-state/strangler-fig.md`
 Title: "Strangler Fig Plan" (backend) or "Component Extraction Plan" (frontend/component codebase).

@@ -28,34 +28,6 @@ Decomposition rationale: one paragraph per BC explaining the cohesion/coupling e
 Every BC must trace back to evidence in the injected artifacts. No speculation.
 ≤ 120 lines.
 
-### `target-state/c4-target.md`
-
-One paragraph: the target decomposed state and what drove it.
-
-```plantuml
-@startuml
-!include <C4/C4_Context>
-
-title Target System Context — <repo-name>
-
-Person(user, "User", "Primary actor")
-System(svcA, "<BC-A> Service", "<responsibility>")
-System(svcB, "<BC-B> Service", "<responsibility>")
-System(monolith, "Legacy Core", "Remaining monolith — <what stays>")
-SystemDb_Ext(db, "Shared DB", "<technology> — transitional shared store")
-SystemQueue_Ext(bus, "Event Bus", "<technology> — async integration")
-
-Rel(user, svcA, "Uses", "REST/HTTP")
-Rel(svcA, bus, "Publishes", "Kafka")
-Rel(svcB, bus, "Consumes", "Kafka")
-Rel(svcA, db, "Reads/Writes", "JDBC")
-Rel(monolith, db, "Reads/Writes", "JDBC")
-@enduml
-```
-
-Rules: each BC → its own `System`; shared infra → `SystemDb_Ext`/`SystemQueue_Ext`; all `Rel()` protocol-labelled.
-Evidence tag: `[Prescriptive]`. ≤ 60 lines — diagram-first.
-
 ### `target-state/strangler-fig.md`
 
 Title: **"Strangler Fig Plan"** for backend monoliths · **"Component Extraction Plan"** for frontend.
@@ -98,7 +70,6 @@ the target-state markdown artifacts only.
     {"file": "architecture/c4-context.md", "phase": 2, "evidence": "Observed+Inferred"},
     {"file": "tech/coupling-hotspots.md", "phase": 2, "evidence": "Observed"},
     {"file": "target-state/bounded-contexts.md", "phase": 3, "evidence": "Inferred"},
-    {"file": "target-state/c4-target.md", "phase": 3, "evidence": "Prescriptive"},
     {"file": "target-state/strangler-fig.md", "phase": 3, "evidence": "Prescriptive"}
   ],
   "omitted": []

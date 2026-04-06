@@ -44,10 +44,10 @@ Source repo
     │   └─ Tech Analyst        → coupling hotspots + decomposition signals
     │
     └─ Phase 3: Architect (reads Phase 2 artifacts → writes target state)
-               → bounded context decomposition + target C4 + strangler fig plan
+               → bounded context decomposition + strangler fig plan
     │
     ▼
-[Builder] → MkDocs Material documentation site (PlantUML diagrams)
+[Builder] → MkDocs Material documentation site (Mermaid + deterministic C4 PlantUML for C1 context views)
          → KuzuDB graph (explorable in the UI)
 ```
 
@@ -114,13 +114,12 @@ metadata to read only the exact method body (50–600 tokens), not the whole fil
 | Document | What it covers |
 |---|---|
 | Business Capabilities | All capabilities in the system + business rules and validations per capability |
-| Business Journeys | Key user flows as "As a [role], I can [action]…" + PlantUML sequence diagrams |
-| C4 System Context | Integration map — upstream callers + downstream dependencies + protocols (PlantUML) |
+| Business Journeys | Key user flows as "As a [role], I can [action]…" + Mermaid sequence diagrams |
+| C4 System Context | Integration map — upstream callers + downstream dependencies + protocols (deterministic PlantUML) |
 | Coupling Hotspots | Risk matrix, coupling pairs, dead code candidates, decomposition seam candidates |
-| ER Diagram | Entity relationships and bounded context ownership (PlantUML, backend only) |
+| ER Diagram | Entity relationships and bounded context ownership (Mermaid, backend only) |
 | API Spec | OpenAPI YAML (backend only, when endpoint signatures are available) |
 | Bounded Contexts | Bounded context decomposition grounded in coupling + domain evidence |
-| Target C4 Context | Future decomposed state as PlantUML C4Context diagram |
 | Strangler Fig Plan | Ordered extraction plan with seam identification and routing strategy |
 | Repo Metrics | Preflight LOC / file-count / language-mix assessment with size/risk classification |
 
@@ -200,11 +199,14 @@ That flow:
 
 ### 3. docker-mkdocs
 
-Serve the generated site from the same `lumen` image:
+Rebuild and serve the generated site from the same `lumen` image:
 
 ```bash
 make docker-docs
 ```
+
+This is the supported docs viewer path. It rebuilds the MkDocs site from the existing
+`./output` directory, so you do not need to rerun the pipeline just to refresh docs rendering.
 
 ---
 
@@ -216,7 +218,6 @@ Output lands in `./output/` after every run.
 |---|---|---|
 | MkDocs doc-site (Docker) | http://localhost:8081 | `make docker-docs` |
 | MCP HTTP (Docker) | http://localhost:8765/mcp | `make docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db` |
-| MkDocs doc-site (native) | http://localhost:8081 | `make dev-docs` |
 | Graph UI (Docker) | http://localhost:3002 | `make compose-ui` |
 | Graph UI (dev) | http://localhost:5174 | `make dev-ui` |
 
@@ -356,17 +357,16 @@ output/<repo-name>-<timestamp>/
 └── artifacts/             ← documentation artifacts
     ├── domain/
     │   ├── business-capabilities.md  ← capabilities + business rules per capability
-    │   └── er-diagram.md             ← PlantUML entity diagram (backend only)
+    │   └── er-diagram.md             ← Mermaid ER diagram (backend only)
     ├── architecture/
-    │   ├── business-journeys.md      ← PlantUML sequence diagrams for key flows
-    │   └── c4-context.md             ← PlantUML C4Context (upstream + downstream)
+    │   ├── business-journeys.md      ← Mermaid sequence diagrams for key flows
+    │   └── c4-context.md             ← deterministic PlantUML C4Context (upstream + downstream)
     ├── tech/
     │   └── coupling-hotspots.md      ← hotspot table + dead code + seam candidates
     ├── current-state/
     │   └── api-spec.yaml             ← OpenAPI spec (backend only, conditional)
     ├── target-state/
     │   ├── bounded-contexts.md       ← BC decomposition + service table
-    │   ├── c4-target.md              ← PlantUML C4Context of future decomposed state
     │   └── strangler-fig.md          ← ordered extraction plan
     └── manifests/artifacts.json
 

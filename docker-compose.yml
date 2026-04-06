@@ -78,19 +78,20 @@ services:
   docs:
     image: ${DOCKER_IMAGE:-lumen}
     entrypoint:
-      - python
-      - -m
-      - http.server
-      - "8080"
-      - --directory
-      - /site
+      - /opt/lumen/scripts/run-docs-server.sh
     ports:
       - "${DOCS_PORT:-8081}:8080"
+    environment:
+      - OUTPUT_DIR=/workspace/output
+      - SITE_DIR=/workspace/output/doc-site
+      - SITE_TITLE=lumen Docs
+      - DOCS_PORT=8080
     volumes:
-      - ${OUTPUT_PATH:-./output}/doc-site:/site
+      - ${OUTPUT_PATH:-./output}:/workspace/output
     profiles: [docs]
 
   ui:
+    image: ${DOCKER_UI_IMAGE:-lumen-ui}
     build:
       context: .
       dockerfile: Dockerfile.ui

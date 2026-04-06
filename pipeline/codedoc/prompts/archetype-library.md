@@ -6,4 +6,4 @@ Treat the repository as a library or shared package.
 - Required target-state outputs are API evolution guidance, refactoring seams, and migration guidance.
 - Do not assume HTTP endpoints, persistence, service decomposition, ER models, or strangler-fig plans unless the graph clearly supports them.
 - When recommending target state, focus on modularization, API stability, compatibility boundaries, and extraction of cohesive packages.
-- Keep PlantUML diagrams fenced as ` ```plantuml ` blocks.
+- Use the C4 diagram tool only when a C4 context diagram is required; prefer Mermaid for other diagrams.

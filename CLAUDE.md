@@ -51,6 +51,8 @@ The intended user journey is:
 3. let MCP mode perform indexing
 4. connect an MCP-capable client to `http://127.0.0.1:8765/mcp`
 Repo metrics are otherwise informational; the only hard stop is the full pipeline's `xlarge` guardrail.
+`make docker-docs` is the only supported docs viewer path. It rebuilds the doc-site from
+the existing `./output` directory before serving, so pipeline reruns are not required for docs refreshes.
 
 ### Native install
 
@@ -61,8 +63,6 @@ make install-pipeline  # cd pipeline && uv sync
 # Run the pipeline (ARGS required: specify provider + model)
 make run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
 make run REPO=/path/to/repo ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'
-
-make dev-docs          # builds doc-site + serves at http://localhost:8081
 make dev-ui            # Vite (port 5174) + Express (port 3002) dev server
 ```
 
@@ -166,7 +166,7 @@ Key files:
 - `pipeline/codedoc/prompts/architect.md` — Solution Architect system prompt (writes target-state artifacts; manifest is machine-generated)
 - `pipeline/codedoc/prompts/archetype-*.md` — archetype overlays for `backend-service`, `frontend-app`, and `library`
 - `pipeline/codedoc/prompts/re-prompt.md` — single-agent fallback prompt (monolithic execution path)
-- `pipeline/scripts/build-docs-site.sh` — builds MkDocs Material site with PlantUML; supports multi-repo accumulation
+- `pipeline/scripts/build-docs-site.sh` — builds MkDocs Material site with Mermaid plus deterministic C4 PlantUML for C1 context views; supports multi-repo accumulation
 - `pipeline/.codedoc.toml` — runtime config (`indexer_bin_dir = ../indexer/bin`, `max_turns = 60`, `repo_size_check = "warn"`)
 - `pipeline/pyproject.toml` — package name: `lumen`, entry point: `lumen = "codedoc.cli:main"`, uses `uv`
 
@@ -185,7 +185,6 @@ run_supervisor_agent()
   │
   └─ Phase 3: Architect agent                  ← reads Phase 2 artifacts; write_artifact only
                                                → target-state/bounded-contexts.md
-                                               → target-state/c4-target.md
                                                → target-state/strangler-fig.md
 ```
 
@@ -213,16 +212,15 @@ run_mcp_http_pipeline()
   └─ Prepare HTTP URL + native/Docker/client config snippets
 ```
 
-Artifacts produced (PlantUML diagrams):
+Artifacts produced (Mermaid + deterministic C4 PlantUML for C1 context views):
 ```
 domain/business-capabilities.md   ← capabilities + business rules/validations per capability
-domain/er-diagram.md              ← PlantUML entity diagram + bounded context ownership table [conditional]
-architecture/business-journeys.md ← 3–5 business user journeys with PlantUML sequence diagrams
-architecture/c4-context.md        ← PlantUML C4Context: upstream + downstream + protocols
+domain/er-diagram.md              ← Mermaid ER diagram + bounded context ownership table [conditional]
+architecture/business-journeys.md ← 3–5 business user journeys with Mermaid sequence diagrams
+architecture/c4-context.md        ← deterministic PlantUML C4Context rendered from structured data
 tech/coupling-hotspots.md         ← hotspot table + coupling pairs + dead code + seam candidates
 current-state/api-spec.yaml       ← OpenAPI spec [conditional: backend with endpoint signatures]
 target-state/bounded-contexts.md  ← BC decomposition + service responsibility table
-target-state/c4-target.md         ← PlantUML C4Context of future decomposed state
 target-state/strangler-fig.md     ← ordered extraction plan grounded in hotspot data
 manifests/artifacts.json          ← machine-generated index of all artifacts written
 ```
@@ -307,7 +305,7 @@ Docker: `make compose-ui` → Express serves everything on port 3002
 | Explicit TURN N contracts in user_request | Prescriptive turn sequences prevent analysts going off-script; proven more reliable than open-ended instructions |
 | Architect reads artifact files (not notes) | Architect gets formatted markdown input, not raw research notes; higher quality target-state output |
 | Rich live progress UX in CLI | Indexer and analyst phases should feel active during long runs |
-| PlantUML via mkdocs-build-plantuml-plugin | PlantUML C4 stdlib (`!include <C4/C4_Context>`) gives semantically richer C4 diagrams; renders as SVG at build time |
+| Mermaid for journeys/ER + deterministic PlantUML for current-state C4 C1 context diagrams | Mermaid is simpler and more reliable for non-C4 diagrams; only `architecture/c4-context.md` stays on PlantUML and is rendered by code from structured data |
 | plantuml.jar downloaded in java-builder stage | Java already present for indexer; reuses same JRE; no extra base image needed |
 | No calendar dates in roadmap | Fabricated timelines damage credibility |
 | MkDocs Material instead of Docusaurus | Python-based (~10 MB vs ~200 MB), no npm in pipeline; `mkdocs-material` in pyproject.toml |

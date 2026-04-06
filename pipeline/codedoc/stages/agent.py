@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from codedoc.diagrams import WRITE_C4_ARTIFACT_ANTHROPIC, WRITE_C4_ARTIFACT_OPENAI, write_c4_artifact
 from codedoc.kg_tools import KuzuBackend, ReverseEngineerToolkit
 from codedoc.llm import LLMProvider, ToolCall, ToolDefinition, ToolParam, chat_with_retry, create_provider
 from codedoc.prompts import GRAPH_CONVENTIONS_BASE
@@ -443,13 +444,11 @@ _ARTIFACT_CONTRACTS: dict[str, dict[str, list[str]]] = {
         ],
         "architect_required": [
             "target-state/bounded-contexts.md",
-            "target-state/c4-target.md",
             "target-state/strangler-fig.md",
             "manifests/artifacts.json",
         ],
         "architect_sequence": [
             "target-state/bounded-contexts.md",
-            "target-state/c4-target.md",
             "target-state/strangler-fig.md",
             "manifests/artifacts.json",
         ],
@@ -468,13 +467,11 @@ _ARTIFACT_CONTRACTS: dict[str, dict[str, list[str]]] = {
         "analyst_optional": [],
         "architect_required": [
             "target-state/frontend-boundaries.md",
-            "target-state/c4-target.md",
             "target-state/migration-plan.md",
             "manifests/artifacts.json",
         ],
         "architect_sequence": [
             "target-state/frontend-boundaries.md",
-            "target-state/c4-target.md",
             "target-state/migration-plan.md",
             "manifests/artifacts.json",
         ],
@@ -645,7 +642,7 @@ def _build_analyst_requests(archetype: str) -> dict[str, str]:
                 "TURN 2 — call trace_user_flow on the 3 highest-signal user journeys from Turn 1. "
                 "Prefer routes, screens, actions, or top-level components.\n"
                 "TURN 3 — call write_artifact('architecture/user-journeys.md', content). "
-                "Document 3-5 user journeys grounded in routes/components. If you include diagrams, fence them as ```plantuml blocks.\n"
+                "Document 3-5 user journeys grounded in routes/components. If you include diagrams, fence them as ```mermaid blocks.\n"
                 "TURN 4 — call write_artifact('current-state/data-fetching-and-api-clients.md', content). "
                 "Content: API clients, async data flow, and integration boundaries. "
                 "Do NOT invent auth headers/tokens, retries, polling services, external validation services, or initialization steps without direct evidence.\n"
@@ -704,7 +701,7 @@ def _build_analyst_requests(archetype: str) -> dict[str, str]:
     domain_turn4 = (
         "TURN 4 — call write_artifact('domain/er-diagram.md', content) if persistent entities "
         "were found in Turns 1-2 (look for @Entity, repositories, ORM annotations). "
-        "Content: PlantUML entity diagram + bounded context ownership table. "
+        "Content: Mermaid erDiagram + bounded context ownership table. "
         "If no persistent entities found, write a one-line file: "
         "'_No persistent entities found in graph._'\n"
     )
@@ -715,8 +712,8 @@ def _build_analyst_requests(archetype: str) -> dict[str, str]:
     flows_turn3 = (
         "TURN 3 — call write_artifact('architecture/business-journeys.md', content). "
         "3-5 flows each with: '**Business journey:** As a [role], I can [action] by calling "
-        "[METHOD /path].' followed by a PlantUML sequence diagram fenced as ```plantuml. "
-        "Use -> for calls, --> for returns. Mark async steps with 'note right of X: async'.\n"
+        "[METHOD /path].' followed by a Mermaid sequence diagram fenced as ```mermaid. "
+        "Use sequenceDiagram syntax with participants and arrows.\n"
     )
     tech_turn3 = (
         "TURN 3 — call write_artifact('tech/coupling-hotspots.md', content). "
@@ -749,9 +746,9 @@ def _build_analyst_requests(archetype: str) -> dict[str, str]:
             "RETURN label(n) AS type, n.name AS name LIMIT 40.\n"
             + flows_turn2 +
             flows_turn3 +
-            "TURN 4 — call write_artifact('architecture/c4-context.md', content). "
-            "PlantUML C4Context diagram fenced as ```plantuml with !include <C4/C4_Context>: upstream callers + this "
-            "system + downstream dependencies. All Rel() arrows with protocol as 4th arg.\n"
+            "TURN 4 — call write_c4_artifact('architecture/c4-context.md', title, summary, spec_json). "
+            "Use structured data only. spec_json must contain people, systems, external_systems, and relations arrays. "
+            "external_systems kinds: system, database, queue. relations use from, to, label, technology, bidirectional.\n"
             "TURN 5 — call write_artifact('current-state/api-spec.yaml', content) ONLY if Turn 1 "
             "found HTTP endpoints with clear path + method signatures. Skip this turn otherwise.\n"
             "Do NOT call get_method_source. Stop after Turn 5 (or 4 if skipping api-spec)."
@@ -935,12 +932,11 @@ def _build_architect_prompt(
 def _build_architect_request(archetype: str) -> str:
     if archetype == "frontend-app":
         return (
-            "Write the 3 target-state artifacts in order:\n"
+            "Write the 2 target-state artifacts in order:\n"
             "TURN 1: write_artifact('target-state/frontend-boundaries.md', ...)\n"
-            "TURN 2: write_artifact('target-state/c4-target.md', ...)\n"
-            "TURN 3: write_artifact('target-state/migration-plan.md', ...)\n"
+            "TURN 2: write_artifact('target-state/migration-plan.md', ...)\n"
             "Do NOT write manifests/artifacts.json; the pipeline will generate it.\n"
-            "Do NOT call any graph query tools. Do NOT write backend-only artifacts. Stop after Turn 3."
+            "Do NOT call any graph query tools. Do NOT write backend-only artifacts. Stop after Turn 2."
         )
 
     if archetype == "library":
@@ -954,12 +950,11 @@ def _build_architect_request(archetype: str) -> str:
         )
 
     return (
-        "Write the 3 target-state artifacts in order:\n"
+        "Write the 2 target-state artifacts in order:\n"
         "TURN 1: write_artifact('target-state/bounded-contexts.md', ...)\n"
-        "TURN 2: write_artifact('target-state/c4-target.md', ...)\n"
-        "TURN 3: write_artifact('target-state/strangler-fig.md', ...)\n"
+        "TURN 2: write_artifact('target-state/strangler-fig.md', ...)\n"
         "Do NOT write manifests/artifacts.json; the pipeline will generate it.\n"
-        "Do NOT call any graph query tools. Stop after Turn 3."
+        "Do NOT call any graph query tools. Stop after Turn 2."
     )
 
 
@@ -1086,6 +1081,8 @@ def run_supervisor_agent(
             max_context_tokens=max_context_tokens,
             max_source_reads=0,
             include_write_artifact=True,
+            extra_tools={"write_c4_artifact": lambda **kwargs: write_c4_artifact(artifacts_dir, **kwargs)},
+            extra_tool_defs=[WRITE_C4_ARTIFACT_ANTHROPIC if use_anthropic_format else WRITE_C4_ARTIFACT_OPENAI],
             phase_label=name,
         )
         return name, result
@@ -1153,7 +1150,7 @@ def run_supervisor_agent(
         recovery_request = (
             "You stopped before writing the required target-state artifacts.\n"
             f"Write ONLY these missing artifacts now, in order: {', '.join(missing_target_artifacts)}.\n"
-            "Use write_artifact for each file and stop only after all listed files are written.\n"
+            "Use write_artifact for each listed file.\n"
             "Do NOT call graph query tools. Do NOT write manifests/artifacts.json.\n"
         )
         all_events.append(
