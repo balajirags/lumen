@@ -50,6 +50,10 @@ services:
     # the extra_hosts entry below.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     profiles: [pipeline]
 
   mcp-http:
@@ -73,6 +77,10 @@ services:
       - MCP_PATH=/mcp
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     profiles: [mcp]
 
   docs:
@@ -88,6 +96,10 @@ services:
       - DOCS_PORT=8080
     volumes:
       - ${OUTPUT_PATH:-./output}:/workspace/output
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     profiles: [docs]
 
   ui:
@@ -101,4 +113,8 @@ services:
       - ${OUTPUT_PATH:-./output}:/data
     environment:
       - NODE_ENV=production
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     profiles: [ui]

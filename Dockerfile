@@ -24,7 +24,10 @@
 
 
 # ── Stage 1: Java fat JAR + custom minimal JRE via jlink ─────────────────────
-FROM eclipse-temurin:21-jdk-jammy AS java-builder
+FROM eclipse-temurin:21-jdk-jammy@sha256:f780cc415d168cad9f6a41607092b67fc799f7d4f6237fab6e4f4ff31ee77938 AS java-builder
+
+ARG PLANTUML_VERSION=1.2026.2
+ARG PLANTUML_SHA256=3cdce52133c424dea22425b947ae9d47f2167b0866dfcf99e714d4ea1689975c
 
 WORKDIR /build
 COPY indexer/ .
@@ -32,9 +35,10 @@ COPY indexer/ .
 # Build the fat JAR (Gradle wrapper downloads Gradle on first run)
 RUN ./gradlew shadowJar --no-daemon -q
 
-# Download PlantUML JAR (used by mkdocs-build-plantuml-plugin at doc-build time)
+# Download a pinned PlantUML JAR and verify it before use.
 RUN curl -fsSL -o /plantuml.jar \
-    "https://github.com/plantuml/plantuml/releases/latest/download/plantuml.jar"
+    "https://github.com/plantuml/plantuml/releases/download/v${PLANTUML_VERSION}/plantuml-${PLANTUML_VERSION}.jar" \
+    && echo "${PLANTUML_SHA256}  /plantuml.jar" | sha256sum -c -
 
 # Discover required modules, merge with a known-good baseline, then jlink
 RUN JAR=app/build/libs/code-mem-graph.jar && \
@@ -56,12 +60,19 @@ jdk.unsupported,jdk.crypto.ec" && \
 
 
 # ── Stage 2: Node parser dependencies ────────────────────────────────────────
-FROM node:20-slim AS node-builder
+FROM node:20-slim@sha256:1e85773c98c31d4fe5b545e4cb17379e617b348832fb3738b22a08f68dec30f3 AS node-builder
 
 WORKDIR /build
 COPY indexer/parsers/javascript/ .
 
-RUN npm install --omit=dev --silent \
+RUN npm ci --omit=dev --silent \
+    # Kuzu's postinstall copies the active native addon into kuzujs.node.
+    # The source tree, prebuilt binaries, and build toolchain are not needed at runtime.
+    && rm -rf node_modules/kuzu/kuzu-source \
+              node_modules/kuzu/prebuilt \
+              node_modules/cmake-js \
+              node_modules/node-addon-api \
+              node_modules/node-api-headers \
     && find node_modules -type d \( -name test -o -name tests -o -name __tests__ \
        -o -name example -o -name examples -o -name docs -o -name doc \) \
        -exec rm -rf {} + 2>/dev/null || true \
@@ -70,10 +81,10 @@ RUN npm install --omit=dev --silent \
 
 
 # ── Stage 3: Python dependencies (compile wheels incl. pygraphviz) ───────────
-FROM python:3.11-slim AS python-deps-builder
+FROM python:3.11-slim@sha256:9358444059ed78e2975ada2c189f1c1a3144a5dab6f35bff8c981afb38946634 AS python-deps-builder
 
 # uv — fast Python package installer (replaces pip)
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv@sha256:90bbb3c16635e9627f49eec6539f956d70746c409209041800a0280b93152823 /uv /usr/local/bin/uv
 
 # Build tools needed to compile pygraphviz (python-graphs dependency)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -103,18 +114,27 @@ RUN uv pip install --no-cache-dir --prefix=/deps /opt/lumen-pipeline/ \
 
 # ── Stage 4: Final slim image ─────────────────────────────────────────────────
 # python:3.11-slim matches the builder stage — same glibc, no GLIBC_* errors.
-FROM python:3.11-slim
+FROM python:3.11-slim@sha256:9358444059ed78e2975ada2c189f1c1a3144a5dab6f35bff8c981afb38946634
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HOME=/home/lumen \
+    TMPDIR=/tmp \
+    XDG_CACHE_HOME=/tmp/.cache
 
 # Graphviz runtime libs (needed by pygraphviz at runtime; no -dev headers required)
 RUN apt-get update && apt-get install -y --no-install-recommends \
       graphviz \
     && rm -rf /var/lib/apt/lists/*
 
+RUN groupadd --system --gid 10001 lumen \
+    && useradd --system --uid 10001 --gid 10001 --create-home --home-dir /home/lumen lumen
+
 # ── Python packages (lumen + mkdocs-material + parser deps) ──
 COPY --from=python-deps-builder /deps /usr/local
 
 # ── Node.js binary (for cmg-js parser) ──
-COPY --from=node:20-slim /usr/local/bin/node /usr/local/bin/node
+COPY --from=node-builder /usr/local/bin/node /usr/local/bin/node
 
 # ── Custom Java JRE + fat JAR ──
 COPY --from=java-builder /custom-jre                         /opt/jre
@@ -152,7 +172,11 @@ indexer_bin_dir = "/usr/local/bin"\n\
 build_script    = "/opt/lumen/scripts/build-docs-site.sh"\n\
 ' > /workspace/.codedoc.toml
 
+RUN mkdir -p /workspace/output /tmp/.cache \
+    && chown -R lumen:lumen /workspace /home/lumen /tmp/.cache
+
 WORKDIR /workspace
+USER lumen
 
 ENTRYPOINT ["lumen"]
 CMD ["--help"]
