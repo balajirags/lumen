@@ -35,6 +35,21 @@ COPY indexer/ .
 # Build the fat JAR (Gradle wrapper downloads Gradle on first run)
 RUN ./gradlew shadowJar --no-daemon -q
 
+# The Docker image only needs Linux Kuzu JNI binaries.
+# Removing macOS/Windows/Android payloads cuts hundreds of MB from the fat JAR.
+RUN set -eux; \
+    JAR=app/build/libs/code-mem-graph.jar; \
+    TMPDIR="$(mktemp -d)"; \
+    cd "$TMPDIR"; \
+    jar xf "/build/$JAR"; \
+    rm -f libkuzu_java_native.so_android_arm64 \
+          libkuzu_java_native.so_osx_amd64 \
+          libkuzu_java_native.so_osx_arm64 \
+          libkuzu_java_native.so_windows_amd64; \
+    jar cfm "/build/$JAR.slim" META-INF/MANIFEST.MF .; \
+    mv "/build/$JAR.slim" "/build/$JAR"; \
+    rm -rf "$TMPDIR"
+
 # Download a pinned PlantUML JAR and verify it before use.
 RUN curl -fsSL -o /plantuml.jar \
     "https://github.com/plantuml/plantuml/releases/download/v${PLANTUML_VERSION}/plantuml-${PLANTUML_VERSION}.jar" \
@@ -102,6 +117,11 @@ RUN uv pip install --no-cache-dir --prefix=/deps /opt/lumen-pipeline/ \
     # Strip native libraries (kuzu ~150MB→80MB, tokenizers ~80MB→40MB, etc.)
     && find /deps -name "*.so" -o -name "*.so.*" \
        | xargs -r strip --strip-unneeded 2>/dev/null || true \
+    # Remove packaging tools that are not needed in the final runtime image.
+    && rm -rf /deps/lib/python3.11/site-packages/pip \
+              /deps/lib/python3.11/site-packages/pip-* \
+              /deps/lib/python3.11/site-packages/wheel \
+              /deps/lib/python3.11/site-packages/wheel-* \
     # Remove test directories
     && find /deps -type d \( -name tests -o -name test -o -name testing \) \
        -exec rm -rf {} + 2>/dev/null || true \
