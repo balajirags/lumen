@@ -34,17 +34,20 @@ Source repo
     │         AST + CFG + DFG    call graph, hierarchy, coupling
     │
     ▼
-[Multi-agent pipeline] — Analyst + Architect pattern
+[Multi-agent pipeline] — researcher fan-out + architect
     │
     ├─ Phase 1: Orientation (direct graph call — no LLM)
     │
-    ├─ Phase 2: 3 parallel Analysts (graph queries + write artifacts)
-    │   ├─ Domain Analyst      → business capabilities + ER diagram
-    │   ├─ Flows Analyst       → user journeys + C4 context + API spec
-    │   └─ Tech Analyst        → coupling hotspots + decomposition signals
+    ├─ Phase 2: 3 parallel researchers (graph queries + write artifacts)
+    │   ├─ Domain researcher   → business capabilities + ER diagram
+    │   ├─ Flows researcher    → journeys + C4 context + UI/API interaction views + API spec
+    │   └─ Tech researcher     → coupling hotspots + module/dependency signals
     │
-    └─ Phase 3: Architect (reads Phase 2 artifacts → writes target state)
-               → bounded context decomposition + strangler fig plan
+    ├─ Phase 3: Synthesis / recovery
+    │          deterministic backfill + targeted recovery for missing required artifacts
+    │
+    └─ Phase 4: Architect + summary
+               → target-state plan + executive summary + manifest
     │
     ▼
 [Builder] → MkDocs Material documentation site (Mermaid + deterministic C4 PlantUML for C1 context views)
@@ -83,8 +86,8 @@ In practice, that gives you:
 - **Multi-language indexing per run** — supported Java/Kotlin, JS/TS, and Python slices are all indexed in the same run when present.
 - **Normalized graph metadata** — nodes and edges carry `language`, `kind`, and `normKind` so tooling can reason across language-specific parser outputs more consistently.
 - **Repo metrics guardrail** — a native preflight plugin estimates repo size using LOC, source-file count, and language mix before indexing starts.
-- **Archetype-aware prompting** — the agent now selects `backend-service`, `frontend-app`, or `library` guidance before the analyst phase.
-- **Improved CLI UX** — indexing shows live per-language progress, and the three parallel analysts render as separate live boxes during Phase 2.
+- **Repo-type-aware prompting** — the pipeline classifies a repo once, then carries `primary_repo_type`, capabilities, and an artifact plan through later stages.
+- **Improved CLI UX** — indexing shows live per-language progress, the three parallel researchers render as separate live boxes, and the synthesis / architect / summary phases are shown explicitly.
 - **MCP modes** — `lumen mcp` keeps the stdio flow, and `lumen mcp-http` adds a simpler URL-based MCP server for VS Code, Docker, and cross-workspace use.
 - **Split pipeline modules** — the full docs flow and the MCP flow now live in separate pipeline modules with shared setup/finalization helpers.
 
@@ -114,12 +117,14 @@ metadata to read only the exact method body (50–600 tokens), not the whole fil
 
 | Document | What it covers |
 |---|---|
+| Executive Summary | CXO-facing summary of the repo’s purpose, current state, risks, recommendations, and confidence limits |
 | Business Capabilities | All capabilities in the system + business rules and validations per capability |
 | Business Journeys | Key user flows as "As a [role], I can [action]…" + Mermaid sequence diagrams |
 | C4 System Context | Integration map — upstream callers + downstream dependencies + protocols (deterministic PlantUML) |
 | Coupling Hotspots | Risk matrix, coupling pairs, dead code candidates, decomposition seam candidates |
-| ER Diagram | Entity relationships and bounded context ownership (Mermaid, backend only) |
-| API Spec | OpenAPI YAML (backend only, when endpoint signatures are available) |
+| UI to API Interactions | Which UI routes/components/hooks call which API clients and backend endpoints |
+| ER Diagram | Entity relationships and bounded context ownership (Mermaid, required for backend/fullstack repos) |
+| API Spec | OpenAPI YAML (required for backend/fullstack repos) |
 | Bounded Contexts | Bounded context decomposition grounded in coupling + domain evidence |
 | Strangler Fig Plan | Ordered extraction plan with seam identification and routing strategy |
 | Repo Metrics | Preflight LOC / file-count / language-mix assessment with size/risk classification |
@@ -360,22 +365,29 @@ Use `--print-config` only when you want config output without keeping the MCP se
 
 ```
 output/<repo-name>-<timestamp>/
-├── pipeline.json          ← run metadata, repo metrics, and token usage
+├── pipeline.json          ← run metadata, repo metrics, runtime model/provider, and token usage
 ├── index.kuzu             ← Code Property Graph database (KuzuDB)
 └── artifacts/             ← documentation artifacts
+    ├── summary/
+    │   └── executive-summary.md     ← business-facing summary, risks, recommendations, confidence
     ├── domain/
     │   ├── business-capabilities.md  ← capabilities + business rules per capability
-    │   └── er-diagram.md             ← Mermaid ER diagram (backend only)
+    │   └── er-diagram.md             ← Mermaid ER diagram (required for backend/fullstack repos)
     ├── architecture/
     │   ├── business-journeys.md      ← Mermaid sequence diagrams for key flows
-    │   └── c4-context.md             ← deterministic PlantUML C4Context (upstream + downstream)
+    │   ├── c4-context.md             ← deterministic PlantUML C4Context (upstream + downstream)
+    │   └── route-map.md              ← UI route/screen inventory when frontend route evidence is strong
     ├── tech/
     │   └── coupling-hotspots.md      ← hotspot table + dead code + seam candidates
     ├── current-state/
-    │   └── api-spec.yaml             ← OpenAPI spec (backend only, conditional)
+    │   ├── api-spec.yaml             ← OpenAPI spec (required for backend/fullstack repos)
+    │   ├── ui-to-api-interactions.md ← UI/component to API/client interaction view
+    │   └── module-dependency-map.md  ← dependency and seam summary
     ├── target-state/
-    │   ├── bounded-contexts.md       ← BC decomposition + service table
-    │   └── strangler-fig.md          ← ordered extraction plan
+    │   ├── bounded-contexts.md       ← BC decomposition + service table (backend-service)
+    │   ├── strangler-fig.md          ← ordered extraction plan (backend-service)
+    │   ├── fullstack-boundaries.md   ← frontend/backend seam plan (fullstack-app)
+    │   └── migration-plan.md         ← target-state migration plan
     └── manifests/artifacts.json
 
 output/doc-site/               ← shared MkDocs Material site (accumulates all runs)

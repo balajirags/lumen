@@ -33,13 +33,40 @@ shasum -a 256 lumen-0.1.0-amd64.tar
 
 Transfer the tarball to the target laptop or VM using an approved offline method such as SCP, USB media, or an internal file share.
 
-## 2. Load the image
+## 2. Use a release bundle
+
+If you received a release candidate bundle created by `scripts/create-release-tarball.sh`, unpack it first:
+
+```bash
+tar -xzf lumen-rc-<version>-<arch>.tar.gz
+cd lumen-rc-<version>-<arch>/runtime
+```
+
+The unpacked bundle includes:
+
+- `../images/<image>.tar`
+- `docker-compose.yml`
+- `Makefile`
+- `run-lumen.md`
+- `docker-source.md`
+- `release.txt`
+- `../checksums/SHA256SUMS`
+
+Optional checksum verification:
+
+```bash
+cd ..
+shasum -a 256 -c checksums/SHA256SUMS
+cd runtime
+```
+
+## 3. Load the image
 
 ```bash
 docker load -i ../images/lumen-0.1.0-amd64.tar
 ```
 
-## 3. Verify the image
+## 4. Verify the image
 
 ```bash
 docker images | grep lumen
@@ -49,7 +76,7 @@ Expected result:
 
 - A local `lumen` image should appear in the image list.
 
-## 4. Run the full pipeline
+## 5. Run the full pipeline
 
 ```bash
 export ANTHROPIC_API_KEY=...
@@ -66,7 +93,7 @@ make docker-pipeline REPO=/path/to/repo \
   ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
 ```
 
-## 5. Run MCP mode
+## 6. Run MCP mode
 
 Use an existing DB:
 
@@ -84,7 +111,7 @@ Default MCP URL:
 
 - `http://127.0.0.1:8765/mcp`
 
-## 6. Serve generated docs
+## 7. Serve generated docs
 
 ```bash
 make docker-docs

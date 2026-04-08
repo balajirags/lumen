@@ -180,30 +180,33 @@ Key files:
 - `pipeline/.codedoc.toml` — runtime config (`indexer_bin_dir = ../indexer/bin`, `max_turns = 60`, `repo_size_check = "warn"`)
 - `pipeline/pyproject.toml` — package name: `lumen`, entry point: `lumen = "codedoc.cli:main"`, uses `uv`
 
-Full pipeline architecture (Analyst + Architect pattern):
+Full pipeline architecture (researcher fan-out + architect):
 ```
 run_supervisor_agent()
   ├─ Phase 1: get_architecture_summary()       ← direct graph call, no LLM
   │
-  ├─ Phase 2: 3 parallel Analyst agents        ← each has graph tools + write_artifact
+  ├─ Phase 2: 3 parallel researcher agents     ← each has graph tools + write_artifact
   │   ├─ analyst/domain  (Business Analyst)    → domain/business-capabilities.md
   │   │                                        → domain/er-diagram.md
   │   ├─ analyst/flows   (Integration Arch.)   → architecture/business-journeys.md
   │   │                                        → architecture/c4-context.md
-  │   │                                        → [current-state/api-spec.yaml]
+  │   │                                        → current-state/ui-to-api-interactions.md
+  │   │                                        → current-state/api-spec.yaml
   │   └─ analyst/tech    (Staff Engineer)      → tech/coupling-hotspots.md
+  │                                            → current-state/module-dependency-map.md
   │
-  └─ Phase 3: Architect agent                  ← reads Phase 2 artifacts; write_artifact only
-                                               → target-state/bounded-contexts.md
-                                               → target-state/strangler-fig.md
+  ├─ Phase 3: synthesis / recovery             ← deterministic backfill + targeted recovery
+  │
+  └─ Phase 4: Architect + summary              ← target-state + executive summary + manifest
 ```
 
 Each analyst has its own `KuzuBackend` (connections are not thread-safe).
 Analyst turn contract: explicit TURN 1/2/3/N sequence in `user_request`; `max_source_reads=0`.
-Architect receives Phase 2 artifact content injected into its system prompt (up to 10k chars each).
+Architect receives Phase 2 artifact content injected into its system prompt (up to 20k chars each).
 `manifests/artifacts.json` is machine-written by the pipeline, not the model.
 Before Stage 1, the pipeline may run pluggable native preflights; the default one is repo metrics.
-Agent prompting is archetype-aware: `backend-service`, `frontend-app`, or `library`.
+Pipeline classification is pipeline-owned and normalized into `primary_repo_type`, `capabilities`, and an `artifact_plan`.
+Repo types currently supported in the prompt layer are `backend-service`, `frontend-app`, `fullstack-app`, and `library`.
 For `xlarge` repos, the full docs pipeline stops after preflight and directs the user to MCP mode instead of indexing, unless `--allow-xlarge` is set.
 
 MCP pipeline architecture:
@@ -224,14 +227,20 @@ run_mcp_http_pipeline()
 
 Artifacts produced (Mermaid + deterministic C4 PlantUML for C1 context views):
 ```
+summary/executive-summary.md      ← CXO-facing summary, risks, recommendations, confidence/limitations
 domain/business-capabilities.md   ← capabilities + business rules/validations per capability
-domain/er-diagram.md              ← Mermaid ER diagram + bounded context ownership table [conditional]
+domain/er-diagram.md              ← Mermaid ER diagram + bounded context ownership table [required for backend/fullstack]
 architecture/business-journeys.md ← 3–5 business user journeys with Mermaid sequence diagrams
 architecture/c4-context.md        ← deterministic PlantUML C4Context rendered from structured data
+architecture/route-map.md         ← UI route/screen inventory when frontend route evidence is strong
 tech/coupling-hotspots.md         ← hotspot table + coupling pairs + dead code + seam candidates
-current-state/api-spec.yaml       ← OpenAPI spec [conditional: backend with endpoint signatures]
-target-state/bounded-contexts.md  ← BC decomposition + service responsibility table
-target-state/strangler-fig.md     ← ordered extraction plan grounded in hotspot data
+current-state/ui-to-api-interactions.md ← UI/component to API/client interaction view
+current-state/module-dependency-map.md  ← dependency and seam summary
+current-state/api-spec.yaml       ← OpenAPI spec [required for backend/fullstack]
+target-state/bounded-contexts.md  ← BC decomposition + service responsibility table (backend-service)
+target-state/strangler-fig.md     ← ordered extraction plan grounded in hotspot data (backend-service)
+target-state/fullstack-boundaries.md ← frontend/backend seam plan (fullstack-app)
+target-state/migration-plan.md    ← migration plan (frontend/fullstack/library)
 manifests/artifacts.json          ← machine-generated index of all artifacts written
 ```
 
