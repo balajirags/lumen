@@ -5,54 +5,28 @@ Wraps the existing cmg-* binaries to produce a KuzuDB graph from a repo.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from codedoc.state import PipelineState
 from codedoc import log as _log
-
-
-# File-extension heuristics for language detection
-_LANG_EXTS = {
-    "java": {".java", ".kt", ".kts"},
-    "js": {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"},
-    "python": {".py", ".pyi"},
-}
-
-
-def _count_languages(repo_path: str) -> dict[str, int]:
-    """Return file counts per language for the repo."""
-    counts: dict[str, int] = {name: 0 for name in _LANG_EXTS}
-    for root, _dirs, files in os.walk(repo_path):
-        parts = Path(root).parts
-        if any(p.startswith(".") or p in ("node_modules", "__pycache__", "venv", ".venv", "build", "dist", "target") for p in parts):
-            continue
-        for f in files:
-            ext = Path(f).suffix.lower()
-            for language, extensions in _LANG_EXTS.items():
-                if ext in extensions:
-                    counts[language] += 1
-                    break
-    return counts
+from codedoc.artifact_planner import build_artifact_plan
+from codedoc.language_registry import LANGUAGE_CATEGORY_BY_KEY
+from codedoc.repo_classification import classify_repo
+from codedoc.state import PipelineState
 
 
 def detect_languages(repo_path: str) -> dict[str, int]:
-    """Return all supported languages found in the repo with their file counts."""
-    counts = _count_languages(repo_path)
-    detected = {lang: count for lang, count in counts.items() if count > 0}
+    """Return all supported language categories found in the repo with their file counts."""
+    metrics = classify_repo(repo_path)
+    detected = dict(metrics.get("files_by_category", {}))
     if not detected:
         raise ValueError(
             f"No supported source files found in {repo_path}. "
             "Expected Java/Kotlin, JavaScript/TypeScript, or Python files."
         )
     return detected
-
-
-_LANG_DISPLAY = {"java": "Java/Kotlin", "js": "JavaScript/TypeScript", "python": "Python"}
-
 
 def _stderr_excerpt(stderr: str) -> str:
     lines = stderr.strip().splitlines() if stderr else []
@@ -63,13 +37,6 @@ def _stderr_excerpt(stderr: str) -> str:
     head = "\n".join(lines[:10])
     tail = "\n".join(lines[-10:])
     return f"{head}\n[... {len(lines) - 20} lines omitted ...]\n{tail}"
-
-
-_BINARY_MAP = {
-    "java": "cmg-java",
-    "js": "cmg-js",
-    "python": "cmg-python",
-}
 
 # CLI flag for the KuzuDB path (unified across all binaries)
 _DB_FLAG = "--db-path"
@@ -91,24 +58,42 @@ def run_indexer(state: PipelineState) -> PipelineState:
         raise ValueError(f"Repository directory is empty: {repo}")
 
     state.log(stage, f"Scanning {repo} for source files...")
-    detected = detect_languages(str(repo))
+    classification = classify_repo(str(repo))
+    detected = dict(classification.get("files_by_category", {}))
+    if not detected:
+        raise ValueError(
+            f"No supported source files found in {repo}. "
+            "Expected Java/Kotlin, JavaScript/TypeScript, or Python files."
+        )
     ordered_languages = [lang for lang, _count in sorted(detected.items(), key=lambda item: (-item[1], item[0]))]
+    state.language_categories = ordered_languages
+    state.language_flavors = list(classification.get("language_flavors", []))
+    state.archetype_signals = list(classification.get("archetype_signals", []))
+    state.selected_archetype = str(classification.get("selected_archetype", ""))
+    state.primary_repo_type = str(classification.get("primary_repo_type", state.selected_archetype))
+    state.capabilities = list(classification.get("capabilities", []))
+    state.artifact_plan = build_artifact_plan(state.primary_repo_type or state.selected_archetype, classification)
     state.indexed_languages = ordered_languages
     state.log(
         stage,
-        "Detected languages: " + ", ".join(
-            f"{_LANG_DISPLAY[lang]} ({detected[lang]:,} files)" for lang in ordered_languages
+        "Detected language categories: " + ", ".join(
+            f"{LANGUAGE_CATEGORY_BY_KEY[lang].display_name} ({detected[lang]:,} files)" for lang in ordered_languages
         ),
     )
+    if state.primary_repo_type:
+        state.log(stage, f"Selected primary repo type: {state.primary_repo_type}")
+    if state.capabilities:
+        state.log(stage, f"Detected capabilities: {', '.join(state.capabilities)}")
 
     # index.kuzu/ is the container directory passed as --db-path.
     # All binaries create {source_dir_name}-db inside it (e.g. index.kuzu/repo-db).
     kuzu_dir = Path(state.output_dir).resolve() / "index.kuzu"
     kuzu_dir.mkdir(parents=True, exist_ok=True)
-    _log.start_indexer_progress([_LANG_DISPLAY[lang] for lang in ordered_languages])
+    _log.start_indexer_progress([LANGUAGE_CATEGORY_BY_KEY[lang].display_name for lang in ordered_languages])
     try:
         for language in ordered_languages:
-            binary_name = _BINARY_MAP[language]
+            definition = LANGUAGE_CATEGORY_BY_KEY[language]
+            binary_name = definition.binary_name
             binary = Path(state.indexer_bin_dir) / binary_name
             if not binary.exists():
                 raise FileNotFoundError(
@@ -116,10 +101,12 @@ def run_indexer(state: PipelineState) -> PipelineState:
                     f"Run the install script or check your indexer_bin_dir setting."
                 )
 
-            display = _LANG_DISPLAY[language]
+            display = definition.display_name
             _log.update_indexer_progress(display, "running")
             state.log(stage, f"Running {binary_name} for {display} → {kuzu_dir}/{repo.name}-db")
             cmd = [str(binary), str(repo), _DB_FLAG, str(kuzu_dir)]
+            if definition.cli_language:
+                cmd.extend(["--language", definition.cli_language])
             try:
                 proc = subprocess.run(
                     cmd,
@@ -188,7 +175,7 @@ def run_indexer(state: PipelineState) -> PipelineState:
     state.log(
         stage,
         f"Indexing complete. KuzuDB at {kuzu_path} ({total_size:,} bytes) "
-        f"for {len(state.indexed_languages)} language slice(s).",
+        f"for {len(state.language_categories or state.indexed_languages)} language slice(s).",
     )
     return state
 

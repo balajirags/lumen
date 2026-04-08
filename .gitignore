@@ -15,7 +15,7 @@ pipeline/.tmp/
 indexer/.gradle/
 indexer/build/
 indexer/app/build/
-indexer/bin/
+indexer/bin/based
 indexer/kuzu_db/
 indexer/**/*.class
 
@@ -38,3 +38,7 @@ output/
 .output/
 help.txt
 *.tar
+
+# Native distribution build artefacts
+dist/
+releases/

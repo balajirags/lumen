@@ -67,7 +67,7 @@ public class App implements Callable<Integer> {
     @Option(names = {"--incremental"}, description = "Only re-parse files that have changed since the last run.")
     private boolean incremental;
 
-    @Option(names = {"-l", "--language"}, description = "Source language: java, javascript, python, kotlin (default: auto-detect)")
+    @Option(names = {"-l", "--language"}, description = "Source language: java, javascript, python, kotlin, jvm (default: auto-detect)")
     private String language;
 
     @Override
@@ -117,28 +117,58 @@ public class App implements Callable<Integer> {
         List<Path> classpathEntries = buildClasspath(sourcePath);
 
         // Detect language (CLI override or auto-detect)
-        Language detectedLang;
+        List<Language> parseLanguages = new ArrayList<>();
+        Map<Language, Integer> allLangs = SourceParserFactory.detectAllLanguages(sourcePath);
         if (language != null) {
-            Optional<Language> parsed = SourceParserFactory.parseLanguage(language);
-            if (parsed.isEmpty()) {
-                System.err.println("Error: Unknown language: " + language + ". Supported: java, javascript, python, kotlin");
-                return 1;
+            if ("jvm".equalsIgnoreCase(language.trim())) {
+                if (allLangs.containsKey(Language.JAVA)) {
+                    parseLanguages.add(Language.JAVA);
+                }
+                if (allLangs.containsKey(Language.KOTLIN)) {
+                    parseLanguages.add(Language.KOTLIN);
+                }
+                if (parseLanguages.isEmpty()) {
+                    System.err.println("Error: No Java or Kotlin sources found in " + sourcePath);
+                    return 1;
+                }
+                System.out.printf("Language family: JVM (%s) (specified via --language)%n",
+                        parseLanguages.stream().map(Language::getDisplayName).toList());
+            } else {
+                Optional<Language> parsed = SourceParserFactory.parseLanguage(language);
+                if (parsed.isEmpty()) {
+                    System.err.println("Error: Unknown language: " + language + ". Supported: java, javascript, python, kotlin, jvm");
+                    return 1;
+                }
+                parseLanguages.add(parsed.get());
+                System.out.printf("Language: %s (specified via --language)%n", parsed.get().getDisplayName());
             }
-            detectedLang = parsed.get();
-            System.out.printf("Language: %s (specified via --language)%n", detectedLang.getDisplayName());
         } else {
-            Optional<Language> detected = SourceParserFactory.detectLanguage(sourcePath);
-            if (detected.isEmpty()) {
+            if (allLangs.isEmpty()) {
                 System.err.println("Error: No supported source files found in " + sourcePath);
                 return 1;
             }
-            detectedLang = detected.get();
-            Map<Language, Integer> allLangs = SourceParserFactory.detectAllLanguages(sourcePath);
-            if (allLangs.size() > 1) {
-                System.out.printf("Detected languages: %s (using %s — override with --language)%n",
-                        allLangs, detectedLang.getDisplayName());
+            if (allLangs.containsKey(Language.JAVA) || allLangs.containsKey(Language.KOTLIN)) {
+                if (allLangs.containsKey(Language.JAVA)) {
+                    parseLanguages.add(Language.JAVA);
+                }
+                if (allLangs.containsKey(Language.KOTLIN)) {
+                    parseLanguages.add(Language.KOTLIN);
+                }
+                System.out.printf("Detected JVM languages: %s%n",
+                        parseLanguages.stream().map(Language::getDisplayName).toList());
             } else {
-                System.out.printf("Detected language: %s%n", detectedLang.getDisplayName());
+                Optional<Language> detected = SourceParserFactory.detectLanguage(sourcePath);
+                if (detected.isEmpty()) {
+                    System.err.println("Error: No supported source files found in " + sourcePath);
+                    return 1;
+                }
+                parseLanguages.add(detected.get());
+                if (allLangs.size() > 1) {
+                    System.out.printf("Detected languages: %s (using %s — override with --language)%n",
+                            allLangs, detected.get().getDisplayName());
+                } else {
+                    System.out.printf("Detected language: %s%n", detected.get().getDisplayName());
+                }
             }
         }
 
@@ -156,8 +186,10 @@ public class App implements Callable<Integer> {
         // Parse all modules into a single combined graph
         CodeGraph graph = new CodeGraph();
         for (Path module : modules) {
-            Path sourceRoot = detectSourceRoot(module);
-            System.out.println("Parsing " + detectedLang.getDisplayName() + " sources from: " + sourceRoot.toAbsolutePath());
+            Path sourceRoot = detectSourceRoot(module, parseLanguages);
+            System.out.println("Parsing " +
+                    parseLanguages.stream().map(Language::getDisplayName).toList() +
+                    " sources from: " + sourceRoot.toAbsolutePath());
 
             // For multi-module, also add each module's own classpath
             List<Path> moduleCp = new ArrayList<>(classpathEntries);
@@ -165,16 +197,17 @@ public class App implements Callable<Integer> {
                 moduleCp.addAll(buildModuleClasspath(module));
             }
 
-            // Java gets the full CPG parser; other languages use their structural parser
-            CodeGraph moduleGraph;
-            if (detectedLang == Language.JAVA) {
-                CpgParser cpgParser = new CpgParser(sourceRoot, moduleCp, hashCache);
-                moduleGraph = cpgParser.parseDirectory(sourceRoot);
-            } else {
-                SourceParser parser = SourceParserFactory.createParser(detectedLang, sourceRoot, moduleCp, hashCache, workspaceRoot);
-                moduleGraph = parser.parseDirectory(sourceRoot);
+            for (Language parseLanguage : parseLanguages) {
+                CodeGraph moduleGraph;
+                if (parseLanguage == Language.JAVA) {
+                    CpgParser cpgParser = new CpgParser(sourceRoot, moduleCp, hashCache);
+                    moduleGraph = cpgParser.parseDirectory(sourceRoot);
+                } else {
+                    SourceParser parser = SourceParserFactory.createParser(parseLanguage, sourceRoot, moduleCp, hashCache, workspaceRoot);
+                    moduleGraph = parser.parseDirectory(sourceRoot);
+                }
+                graph.merge(moduleGraph);
             }
-            graph.merge(moduleGraph);
         }
 
         // Save hash cache after successful parse
@@ -215,11 +248,25 @@ public class App implements Callable<Integer> {
      * Detect the Java source root within a project directory.
      * Checks common layouts in order: src/main/java, src, then falls back to the project root.
      */
-    static Path detectSourceRoot(Path projectRoot) {
-        Path[] candidates = {
-                projectRoot.resolve("src/main/java"),
-                projectRoot.resolve("src"),
-        };
+    static Path detectSourceRoot(Path projectRoot, List<Language> languages) {
+        boolean hasJava = languages.contains(Language.JAVA);
+        boolean hasKotlin = languages.contains(Language.KOTLIN);
+
+        if (hasJava && hasKotlin) {
+            Path[] mixedCandidates = {
+                    projectRoot.resolve("src/main"),
+                    projectRoot.resolve("src"),
+            };
+            for (Path candidate : mixedCandidates) {
+                if (Files.isDirectory(candidate)) {
+                    return candidate;
+                }
+            }
+        }
+
+        Path[] candidates = hasKotlin
+                ? new Path[]{projectRoot.resolve("src/main/kotlin"), projectRoot.resolve("src/main"), projectRoot.resolve("src")}
+                : new Path[]{projectRoot.resolve("src/main/java"), projectRoot.resolve("src/main"), projectRoot.resolve("src")};
         for (Path candidate : candidates) {
             if (Files.isDirectory(candidate)) {
                 return candidate;
@@ -242,6 +289,8 @@ public class App implements Callable<Integer> {
                         || Files.exists(child.resolve("build.gradle.kts"))
                         || Files.exists(child.resolve("pom.xml"));
                 boolean hasSrc = Files.isDirectory(child.resolve("src/main/java"))
+                        || Files.isDirectory(child.resolve("src/main/kotlin"))
+                        || Files.isDirectory(child.resolve("src/main"))
                         || Files.isDirectory(child.resolve("src"));
 
                 if (hasOwnBuild && hasSrc) {
@@ -259,7 +308,9 @@ public class App implements Callable<Integer> {
             System.out.printf("Detected multi-module project with %d modules: %s%n",
                     modules.size(), modules.stream().map(p -> p.getFileName().toString()).toList());
             // Also include the root if it has its own sources
-            if (Files.isDirectory(projectRoot.resolve("src/main/java"))) {
+            if (Files.isDirectory(projectRoot.resolve("src/main/java"))
+                    || Files.isDirectory(projectRoot.resolve("src/main/kotlin"))
+                    || Files.isDirectory(projectRoot.resolve("src/main"))) {
                 modules.addFirst(projectRoot);
             }
         }
@@ -488,4 +539,3 @@ public class App implements Callable<Integer> {
         System.exit(exitCode);
     }
 }
-

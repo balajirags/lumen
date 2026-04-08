@@ -13,7 +13,7 @@ def test_detect_languages_mixed_repo(tmp_path):
 
     detected = detect_languages(str(tmp_path))
 
-    assert detected == {"java": 1, "js": 1, "python": 1}
+    assert detected == {"jvm": 1, "js": 1, "python": 1}
 
 
 def test_detect_languages_ignores_generated_dirs(tmp_path):

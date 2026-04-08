@@ -4,11 +4,15 @@ import json
 from pathlib import Path
 
 from codedoc.diagrams import write_c4_artifact
+from codedoc.artifact_planner import build_artifact_plan
 from codedoc.stages.agent import (
-    _select_repo_archetype,
     _backfill_required_artifacts,
+    _build_analyst_system_prompt,
     _build_architect_prompt,
+    _build_architect_request,
     _missing_target_state_artifacts,
+    _required_artifacts,
+    _write_executive_summary,
     _write_machine_manifest,
     validate_artifact_quality,
     validate_artifact_warnings,
@@ -16,32 +20,52 @@ from codedoc.stages.agent import (
 )
 
 
-class FakeBackend:
-    def __init__(self, counts):
-        self.counts = counts
+def test_fullstack_contract_includes_cross_stack_artifacts():
+    required = _required_artifacts("fullstack-app")
 
-    def execute(self, query: str):
-        for key, value in self.counts.items():
-            if key in query:
-                return [{"c": value}]
-        return [{"c": 0}]
+    assert "domain/business-capabilities.md" in required
+    assert "architecture/c4-context.md" in required
+    assert "current-state/api-spec.yaml" in required
+    assert "domain/er-diagram.md" in required
+    assert "current-state/ui-to-api-interactions.md" in required
+    assert "target-state/fullstack-boundaries.md" in required
 
 
-def test_select_repo_archetype_frontend():
-    backend = FakeBackend(
+def test_fullstack_route_map_becomes_conditional_with_weak_frontend_signal():
+    plan = build_artifact_plan(
+        "fullstack-app",
         {
-            "MATCH (n:Component)": 4,
-            "MATCH (n:Hook)": 2,
-            "MATCH ()-[r:RENDERS]": 6,
-            "RestController": 0,
-            "route|endpoint|handler|controller|api|get_|post_|put_|delete_": 0,
-            "MATCH (n:Method)": 0,
-            "MATCH (n:Function)": 10,
-            "MATCH (n:Package)": 0,
-        }
+            "archetype_signal_counts": {"frontend-ui": 1, "backend-api": 5},
+            "size_band": "small",
+        },
     )
 
-    assert _select_repo_archetype(backend) == "frontend-app"
+    route_item = next(item for item in plan["artifacts"] if item["path"] == "architecture/route-map.md")
+
+    assert route_item["class"] == "conditional"
+    assert route_item["required"] is False
+
+
+def test_fullstack_route_map_stays_required_with_strong_frontend_signal():
+    plan = build_artifact_plan(
+        "fullstack-app",
+        {
+            "archetype_signal_counts": {"frontend-ui": 4, "backend-api": 5},
+            "size_band": "small",
+        },
+    )
+
+    route_item = next(item for item in plan["artifacts"] if item["path"] == "architecture/route-map.md")
+
+    assert route_item["class"] == "core"
+    assert route_item["required"] is True
+
+
+def test_backend_contract_treats_api_spec_as_required():
+    required = _required_artifacts("backend-service")
+
+    assert "current-state/api-spec.yaml" in required
+    assert "domain/er-diagram.md" in required
 
 
 def test_validate_artifacts_reports_missing(tmp_path):
@@ -57,9 +81,11 @@ def test_validate_artifacts_reports_missing(tmp_path):
 def test_validate_artifacts_uses_frontend_contract(tmp_path):
     artifacts_dir = tmp_path / "artifacts"
     for rel_path in [
+        "summary/executive-summary.md",
         "architecture/route-map.md",
         "architecture/component-boundaries.md",
         "architecture/user-journeys.md",
+        "current-state/ui-to-api-interactions.md",
         "current-state/state-management.md",
         "current-state/data-fetching-and-api-clients.md",
         "current-state/module-dependency-map.md",
@@ -114,12 +140,49 @@ def test_write_machine_manifest_uses_runtime_repo_name(tmp_path):
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text("ok")
 
-    manifest_path = _write_machine_manifest(str(artifacts_dir), "admin-frontend", "frontend-app")
+    manifest_path = _write_machine_manifest(
+        str(artifacts_dir),
+        "admin-frontend",
+        "frontend-app",
+        repo_metrics={
+            "total_loc": 12_345,
+            "total_source_files": 87,
+            "size_band": "medium",
+            "risk_level": "medium",
+        },
+        input_tokens=111,
+        output_tokens=222,
+    )
     manifest = json.loads(Path(manifest_path).read_text())
 
     assert manifest["repo_name"] == "admin-frontend"
     assert manifest["archetype"] == "frontend-app"
+    assert manifest["repo_metrics"]["loc"] == 12_345
+    assert manifest["tokens"] == {"input": 111, "output": 222, "total": 333}
     assert manifest["artifacts"][-1]["file"] == "target-state/migration-plan.md"
+
+
+def test_write_machine_manifest_deduplicates_omissions(tmp_path):
+    artifacts_dir = tmp_path / "artifacts"
+    full_path = artifacts_dir / "summary" / "executive-summary.md"
+    full_path.parent.mkdir(parents=True, exist_ok=True)
+    full_path.write_text("ok")
+
+    manifest_path = _write_machine_manifest(
+        str(artifacts_dir),
+        "inventory-service",
+        "fullstack-app",
+        artifact_omissions=[
+            {
+                "file": "current-state/api-spec.yaml",
+                "reason": "Conditional artifact omitted because evidence was weak.",
+            }
+        ],
+    )
+    manifest = json.loads(Path(manifest_path).read_text())
+
+    omitted = [item for item in manifest["omitted"] if item["file"] == "current-state/api-spec.yaml"]
+    assert len(omitted) == 1
 
 
 def test_backfill_required_artifacts_frontend_module_dependency_map(tmp_path, monkeypatch):
@@ -130,8 +193,15 @@ def test_backfill_required_artifacts_frontend_module_dependency_map(tmp_path, mo
             pass
 
         def call(self, name: str):
-            assert name == "get_module_dependency_map"
-            return "=== MODULE DEPENDENCY MAP ==="
+            if name == "get_module_dependency_map":
+                return "=== MODULE DEPENDENCY MAP ==="
+            if name == "get_route_map":
+                return "=== ROUTE MAP ==="
+            if name == "get_api_client_summary":
+                return "=== API CLIENT SUMMARY ==="
+            if name == "get_api_endpoints":
+                return "=== API ENDPOINTS ==="
+            raise AssertionError(name)
 
     monkeypatch.setattr("codedoc.stages.agent.KuzuBackend", lambda path: object())
     monkeypatch.setattr("codedoc.stages.agent.ReverseEngineerToolkit", FakeToolkit)
@@ -141,6 +211,39 @@ def test_backfill_required_artifacts_frontend_module_dependency_map(tmp_path, mo
     assert generated
     content = (artifacts_dir / "current-state" / "module-dependency-map.md").read_text()
     assert "MODULE DEPENDENCY MAP" in content
+    ui_api_content = (artifacts_dir / "current-state" / "ui-to-api-interactions.md").read_text()
+    assert "ROUTE MAP" in ui_api_content
+    assert "API CLIENT SUMMARY" in ui_api_content
+    assert "API ENDPOINTS" in ui_api_content
+
+
+def test_backfill_required_artifacts_fullstack_generates_frontend_interaction_views(tmp_path, monkeypatch):
+    artifacts_dir = tmp_path / "artifacts"
+
+    class FakeToolkit:
+        def __init__(self, backend, repo_path=""):
+            pass
+
+        def call(self, name: str):
+            if name == "get_module_dependency_map":
+                return "=== MODULE DEPENDENCY MAP ==="
+            if name == "get_route_map":
+                return "InventoryPage -> ReserveModal"
+            if name == "get_api_client_summary":
+                return "inventoryClient.getItems -> GET /inventory"
+            if name == "get_api_endpoints":
+                return "GET /inventory\nPOST /inventory/reserve"
+            raise AssertionError(name)
+
+    monkeypatch.setattr("codedoc.stages.agent.KuzuBackend", lambda path: object())
+    monkeypatch.setattr("codedoc.stages.agent.ReverseEngineerToolkit", FakeToolkit)
+
+    generated = _backfill_required_artifacts("fake-db", "fake-repo", str(artifacts_dir), "fullstack-app")
+
+    assert len(generated) == 2
+    assert (artifacts_dir / "current-state" / "module-dependency-map.md").exists()
+    assert (artifacts_dir / "current-state" / "ui-to-api-interactions.md").exists()
+    assert "inventoryClient.getItems" in (artifacts_dir / "current-state" / "ui-to-api-interactions.md").read_text()
 
 
 def test_missing_target_state_artifacts_uses_backend_contract(tmp_path):
@@ -166,6 +269,110 @@ def test_build_architect_prompt_does_not_reference_manifest_writing(tmp_path):
 
     assert "`manifests/artifacts.json` is generated by the pipeline. Do not write it yourself." in prompt
     assert "Do NOT stop before writing manifests/artifacts.json." not in prompt
+
+
+def test_flows_prompt_limits_cypher_and_pivots_on_weak_routes():
+    prompt = _build_analyst_system_prompt(
+        "analyst/flows",
+        "/tmp/repo-db",
+        "inventory-service",
+        "orientation",
+        "fullstack-app",
+        repo_metrics={"total_source_files": 79, "total_loc": 4198},
+    )
+
+    assert "If `get_route_map` reports no route-like frontend structures, pivot immediately" in prompt
+    assert "Limit ad hoc `query` / `execute_cypher` use to at most one targeted fallback" in prompt
+
+
+def test_recovery_prompt_gives_api_spec_more_budget(tmp_path, monkeypatch):
+    calls = {}
+
+    class FakeToolkit:
+        def __init__(self, backend, repo_path=""):
+            pass
+
+    def fake_run_loop(**kwargs):
+        calls["max_turns"] = kwargs["max_turns"]
+        calls["user_request"] = kwargs["user_request"]
+        return {"status": "done", "artifacts": [], "events": [], "tool_uses": 0, "input_tokens": 0, "output_tokens": 0}
+
+    monkeypatch.setattr("codedoc.stages.agent.KuzuBackend", lambda path: object())
+    monkeypatch.setattr("codedoc.stages.agent.ReverseEngineerToolkit", FakeToolkit)
+    monkeypatch.setattr("codedoc.stages.agent.run_loop", fake_run_loop)
+
+    from codedoc.stages.agent import _recover_missing_current_state_artifacts
+
+    _recover_missing_current_state_artifacts(
+        provider=object(),
+        kuzu_path="fake-db",
+        repo_path="fake-repo",
+        repo_name="inventory-service",
+        artifacts_dir=str(tmp_path),
+        primary_repo_type="backend-service",
+        orientation_summary="orientation",
+        repo_metrics=None,
+        use_anthropic_format=False,
+        max_context_tokens=120000,
+        verbose=False,
+        missing_paths=["current-state/api-spec.yaml"],
+    )
+
+    assert calls["max_turns"] == 24
+    assert "OpenAPI 3.0 YAML grounded in observed HTTP endpoints" in calls["user_request"]
+
+
+def test_build_architect_request_supports_fullstack():
+    prompt = _build_architect_request("fullstack-app")
+
+    assert "target-state/fullstack-boundaries.md" in prompt
+    assert "target-state/migration-plan.md" in prompt
+
+
+def test_write_executive_summary_is_professional_and_executive_facing(tmp_path):
+    artifacts_dir = tmp_path / "artifacts"
+    for rel_path, content in {
+        "domain/business-capabilities.md": "# Business Capabilities\n\nSupports reservations, stock movement, and policy workflows.",
+        "architecture/c4-context.md": "# C4 Context\n\nInteracts with admin frontend, database, and inventory APIs.",
+        "current-state/module-dependency-map.md": "# Module Dependency Map\n\nFrontend and backend concerns still cross package boundaries.",
+        "tech/coupling-hotspots.md": "# Coupling Hotspots\n\nInventory service and admin frontend are tightly coupled around movement flows.",
+        "current-state/ui-to-api-interactions.md": "# UI to API Interactions\n\nAdministrative inventory screens depend on reservation and movement endpoints.",
+        "target-state/fullstack-boundaries.md": "# Fullstack Boundaries\n\nSplit UI orchestration from inventory domain services.",
+        "target-state/migration-plan.md": "# Migration Plan\n\nStage backend seams before frontend extraction.",
+    }.items():
+        full_path = artifacts_dir / rel_path
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_text(content)
+
+    summary_path = _write_executive_summary(
+        str(artifacts_dir),
+        "inventory-service",
+        "fullstack-app",
+        ["http-api", "ui-routes", "persistence"],
+        ["jvm", "js"],
+        {
+            "size_profile": "small",
+            "artifacts": [
+                {"path": "domain/business-capabilities.md", "class": "core"},
+                {"path": "architecture/c4-context.md", "class": "core"},
+                {"path": "current-state/module-dependency-map.md", "class": "core"},
+                {"path": "tech/coupling-hotspots.md", "class": "core"},
+                {"path": "target-state/fullstack-boundaries.md", "class": "target"},
+                {"path": "target-state/migration-plan.md", "class": "target"},
+            ],
+        },
+        [{"file": "architecture/user-journeys.md", "reason": "weak evidence"}],
+    )
+
+    content = Path(summary_path).read_text()
+    assert "## Executive Overview" in content
+    assert "## Current State" in content
+    assert "## Key Risks" in content
+    assert "## Recommendations" in content
+    assert "## Confidence And Limitations" in content
+    assert "## Artifact Index" not in content
+    assert "Capabilities:" not in content
+    assert "`fullstack-app` repository" not in content
 
 
 def test_write_c4_artifact_renders_deterministic_context_plantuml(tmp_path):

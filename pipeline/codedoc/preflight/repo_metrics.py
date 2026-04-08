@@ -1,16 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
-
-_LANG_EXTS = {
-    "java": {".java", ".kt", ".kts"},
-    "js": {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"},
-    "python": {".py", ".pyi"},
-}
-
-_IGNORED_PARTS = {"node_modules", "__pycache__", "venv", ".venv", "build", "dist", "target"}
+from codedoc.repo_classification import classify_repo
 
 
 @dataclass
@@ -21,50 +13,8 @@ class PreflightResult:
     metadata: dict[str, object]
     should_block: bool = False
 
-
-def _detect_language(path: Path) -> str | None:
-    ext = path.suffix.lower()
-    for language, extensions in _LANG_EXTS.items():
-        if ext in extensions:
-            return language
-    return None
-
-
-def _is_ignored(path: Path) -> bool:
-    return any(part.startswith(".") or part in _IGNORED_PARTS for part in path.parts)
-
-
 def collect_repo_metrics(repo_path: str) -> dict[str, object]:
-    repo = Path(repo_path)
-    files_by_language = {name: 0 for name in _LANG_EXTS}
-    loc_by_language = {name: 0 for name in _LANG_EXTS}
-
-    for path in repo.rglob("*"):
-        if not path.is_file():
-            continue
-        rel = path.relative_to(repo)
-        if _is_ignored(rel.parent):
-            continue
-        language = _detect_language(path)
-        if not language:
-            continue
-        files_by_language[language] += 1
-        try:
-            with path.open("r", encoding="utf-8", errors="ignore") as handle:
-                loc_by_language[language] += sum(1 for line in handle if line.strip())
-        except OSError:
-            continue
-
-    detected_languages = [lang for lang, count in files_by_language.items() if count > 0]
-    total_loc = sum(loc_by_language.values())
-    total_source_files = sum(files_by_language.values())
-    return {
-        "total_loc": total_loc,
-        "total_source_files": total_source_files,
-        "loc_by_language": {k: v for k, v in loc_by_language.items() if v > 0},
-        "files_by_language": {k: v for k, v in files_by_language.items() if v > 0},
-        "detected_languages": detected_languages,
-    }
+    return classify_repo(repo_path)
 
 
 def classify_repo_metrics(
@@ -75,7 +25,7 @@ def classify_repo_metrics(
 ) -> dict[str, object]:
     total_loc = int(metrics.get("total_loc", 0))
     total_source_files = int(metrics.get("total_source_files", 0))
-    detected_languages = list(metrics.get("detected_languages", []))
+    detected_languages = list(metrics.get("detected_language_categories", metrics.get("detected_languages", [])))
 
     if total_loc <= 10_000:
         size_band = "small"

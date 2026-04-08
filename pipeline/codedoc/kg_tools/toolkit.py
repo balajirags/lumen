@@ -611,7 +611,10 @@ class ReverseEngineerToolkit:
                 rows = backend.execute(
                     "MATCH (n) "
                     "WHERE label(n) IN ['Component', 'Function', 'ArrowFunction', 'Module'] "
-                    "AND n.name =~ '(?i).*(route|router|page|screen|layout|view).*' "
+                    "AND ("
+                    "n.name =~ '(?i).*(route|router|page|screen|layout|view|app).*' "
+                    "OR coalesce(n.path, '') =~ '(?i).*(components|pages|screens|views|routes|app).*'"
+                    ") "
                     "OPTIONAL MATCH (owner)-[:CONTAINS]->(n) "
                     "RETURN DISTINCT n.name AS name, label(n) AS type, n.path AS path, "
                     "owner.qualifiedName AS owner "
@@ -626,12 +629,25 @@ class ReverseEngineerToolkit:
             try:
                 rows = backend.execute(
                     "MATCH (m:Module)-[:EXPORTS]->(n) "
-                    "WHERE n.name =~ '(?i).*(route|router|page|screen|layout|view).*' "
+                    "WHERE n.name =~ '(?i).*(route|router|page|screen|layout|view|app).*' "
                     "RETURN m.qualifiedName AS module, n.name AS exported, label(n) AS type "
                     "ORDER BY module, exported LIMIT 40"
                 )
                 if rows:
                     lines.append("\n── Exported Route Entries ──")
+                    lines.append(_format_rows(rows))
+            except Exception:
+                pass
+
+            try:
+                rows = backend.execute(
+                    "MATCH (c:Component) "
+                    "WHERE coalesce(c.path, '') =~ '(?i).*(components|pages|screens|views|app).*' "
+                    "RETURN DISTINCT c.qualifiedName AS component, c.path AS path "
+                    "ORDER BY path, component LIMIT 60"
+                )
+                if rows:
+                    lines.append("\n── Component Surface ──")
                     lines.append(_format_rows(rows))
             except Exception:
                 pass

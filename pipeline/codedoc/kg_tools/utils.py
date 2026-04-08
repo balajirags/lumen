@@ -42,7 +42,7 @@ def _cypher_escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace("'", "\\'")
 
 
-def _format_rows(rows: list[dict], limit: int = 100, max_chars: int = 4000) -> str:
+def _format_rows(rows: list[dict], limit: int = 150, max_chars: int = 8000) -> str:
     """Format query result rows as compact text. Caps output size for token efficiency."""
     if not rows:
         return "No results."

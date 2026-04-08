@@ -7,11 +7,15 @@ Rich auto-degrades to plain text when stdout/stderr is not a TTY.
 
 from __future__ import annotations
 
+from rich.box import SIMPLE_HEAVY
 from rich.console import Console
+from rich.console import Group
 from rich.columns import Columns
 from rich.live import Live
 from rich.panel import Panel
 from rich.rule import Rule
+from rich.spinner import Spinner
+from rich.table import Table
 from rich.text import Text
 
 console = Console(highlight=False)
@@ -32,6 +36,7 @@ _indexer_live: Live | None = None
 _indexer_state: dict[str, str] = {}
 _agent_live: Live | None = None
 _agent_state: dict[str, dict[str, object]] = {}
+_workflow_state: dict[str, dict[str, object]] = {}
 _LUMEN_ASCII = "\n".join([
     " _                              ",
     "| |    _   _ _ __ ___   ___ _ __ ",
@@ -95,22 +100,59 @@ def print_stage_done(n: int, name: str, elapsed: float) -> None:  # noqa: ARG001
     console.print(f"  [green]✓[/green] Stage {n} done  [green]{_fmt_elapsed(elapsed)}[/green]")
 
 
+def _build_loc_breakdown_table(metrics: dict[str, object]) -> Table | None:
+    loc_by_category = metrics.get("loc_by_category")
+    files_by_category = metrics.get("files_by_category")
+    loc_by_language = metrics.get("loc_by_language")
+    files_by_language = metrics.get("files_by_language")
+
+    if isinstance(loc_by_category, dict) and loc_by_category:
+        loc_map = loc_by_category
+        files_map = files_by_category if isinstance(files_by_category, dict) else {}
+    elif isinstance(loc_by_language, dict) and loc_by_language:
+        loc_map = loc_by_language
+        files_map = files_by_language if isinstance(files_by_language, dict) else {}
+    else:
+        return None
+
+    table = Table(box=SIMPLE_HEAVY, expand=True)
+    table.add_column("Category", style="dim")
+    table.add_column("LOC", justify="right")
+    table.add_column("Files", justify="right")
+
+    for key, loc in loc_map.items():
+        table.add_row(str(key), f"{int(loc):,}", f"{int(files_map.get(key, 0) or 0):,}")
+    return table
+
+
 def print_repo_metrics_panel(metrics: dict[str, object], repo_size_check: str) -> None:
-    lines: list[str] = []
-    lines.append(f"[dim]Mode      [/dim]  {repo_size_check}")
-    lines.append(f"[dim]LOC       [/dim]  {metrics.get('total_loc', 0):,}")
-    lines.append(f"[dim]Files     [/dim]  {metrics.get('total_source_files', 0):,}")
-    lines.append(f"[dim]Band      [/dim]  {metrics.get('size_band', 'unknown')}")
-    lines.append(f"[dim]Risk      [/dim]  {metrics.get('risk_level', 'unknown')}")
-    detected = metrics.get("detected_languages", [])
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="dim", no_wrap=True)
+    table.add_column()
+    table.add_row("Mode", str(repo_size_check))
+    table.add_row("LOC", f"{metrics.get('total_loc', 0):,}")
+    table.add_row("Files", f"{metrics.get('total_source_files', 0):,}")
+    table.add_row("Band", str(metrics.get("size_band", "unknown")))
+    table.add_row("Risk", str(metrics.get("risk_level", "unknown")))
+    detected = metrics.get("detected_language_categories", metrics.get("detected_languages", []))
     if detected:
-        lines.append(f"[dim]Languages [/dim]  {', '.join(str(x) for x in detected)}")
+        table.add_row("Languages", ", ".join(str(x) for x in detected))
+    repo_type = metrics.get("primary_repo_type", metrics.get("selected_archetype"))
+    if repo_type:
+        table.add_row("Repo Type", str(repo_type))
+    capabilities = metrics.get("capabilities", [])
+    if capabilities:
+        table.add_row("Capabilities", ", ".join(str(x) for x in capabilities))
+    breakdown = _build_loc_breakdown_table(metrics)
     warning = metrics.get("warning_message")
+    renderables: list[object] = [table]
+    if breakdown is not None:
+        renderables.extend([Text("LOC Breakdown", style="bold"), breakdown])
     if warning:
-        lines.append("")
-        lines.append(f"[yellow]{warning}[/yellow]")
+        renderables.append(Text(str(warning), style="yellow"))
+    renderable = table if len(renderables) == 1 else Group(*renderables)
     console.print()
-    console.print(Panel("\n".join(lines), title="[bold yellow] Repo Metrics [/bold yellow]", border_style="yellow"))
+    console.print(Panel(renderable, title="[bold yellow] Repo Metrics [/bold yellow]", border_style="yellow"))
 
 
 def print_xlarge_mcp_guidance_panel(repo_path: str) -> None:
@@ -152,6 +194,12 @@ def print_progress_line(tag: str, turn: int, max_turns: int, tool_name: str) -> 
     if tag.startswith("analyst/"):
         update_agent_box(tag, status="running", turn=turn, max_turns=max_turns, tool=tool_name)
         return
+    if tag.startswith("architect"):
+        update_workflow_phase("architect", status="running", tool=tool_name, turn=turn, max_turns=max_turns)
+        return
+    if tag.startswith("summary"):
+        update_workflow_phase("summary", status="running", tool=tool_name, turn=turn, max_turns=max_turns)
+        return
     text = Text(style="dim")
     text.append(f"  [{tag}]")
     text.append(f" {turn}/{max_turns}  ")
@@ -161,7 +209,7 @@ def print_progress_line(tag: str, turn: int, max_turns: int, tool_name: str) -> 
 
 def print_researcher_done(name: str, char_count: int) -> None:
     update_agent_box(name, status="done", artifacts=char_count)
-    label = name.replace("researcher/", "").replace("analyst/", "")
+    label = name.replace("researcher/", "").replace("analyst/", "") + " researcher"
     text = Text("  ")
     text.append(label, style="bold green")
     text.append(f"  done — ")
@@ -233,34 +281,70 @@ def stop_indexer_progress() -> None:
     _indexer_state = {}
 
 
+def _status_renderable(status: str):
+    if status == "running":
+        return Spinner("dots", text="running", style="cyan")
+    style = {
+        "pending": "dim",
+        "done": "green",
+        "failed": "red",
+    }.get(status, "dim")
+    return Text(status, style=style)
+
+
 def _render_agent_columns() -> Columns:
     panels: list[Panel] = []
     for name in ("analyst/domain", "analyst/flows", "analyst/tech"):
         info = _agent_state.get(name, {})
-        label = name.replace("analyst/", "")
+        label = name.replace("analyst/", "") + " researcher"
         status = str(info.get("status", "pending"))
         turn = info.get("turn")
         max_turns = info.get("max_turns")
         tool = str(info.get("tool", "waiting"))
         artifacts = info.get("artifacts")
-        body: list[str] = [f"status: {status}"]
+        body: list[object] = [Text("status: "), _status_renderable(status)]
         if turn and max_turns:
-            body.append(f"turn: {turn}/{max_turns}")
-        body.append(f"tool: {tool}")
+            body.append(Text(f"turn: {turn}/{max_turns}", style="dim"))
+        body.append(Text(f"tool: {tool}", style="dim"))
         if artifacts is not None:
-            body.append(f"artifacts: {artifacts}")
+            body.append(Text(f"artifacts: {artifacts}", style="dim"))
         border = {
             "pending": "dim",
             "running": "cyan",
             "done": "green",
             "failed": "red",
         }.get(status, "dim")
-        panels.append(Panel("\n".join(body), title=label, border_style=border))
+        panels.append(Panel(Group(*body), title=label, border_style=border))
     return Columns(panels, equal=True, expand=True)
 
 
+def _render_workflow_panel() -> Panel:
+    table = Table(box=SIMPLE_HEAVY, expand=True)
+    table.add_column("Phase", style="bold")
+    table.add_column("Status")
+    table.add_column("Activity", overflow="fold")
+    table.add_column("Progress", justify="right")
+    for key, label in (
+        ("synthesis", "synthesis"),
+        ("architect", "architect"),
+        ("summary", "summary"),
+    ):
+        info = _workflow_state.get(key, {})
+        status = str(info.get("status", "pending"))
+        tool = str(info.get("tool", "waiting"))
+        turn = info.get("turn")
+        max_turns = info.get("max_turns")
+        progress = f"{turn}/{max_turns}" if turn and max_turns else ""
+        table.add_row(label, _status_renderable(status), tool, progress)
+    return Panel(table, title="Workflow", border_style="magenta")
+
+
+def _render_agent_dashboard():
+    return Group(_render_agent_columns(), _render_workflow_panel())
+
+
 def start_agent_boxes() -> None:
-    global _agent_live, _agent_state
+    global _agent_live, _agent_state, _workflow_state
     if not console.is_terminal:
         return
     _agent_state = {
@@ -268,7 +352,12 @@ def start_agent_boxes() -> None:
         "analyst/flows": {"status": "pending", "tool": "waiting"},
         "analyst/tech": {"status": "pending", "tool": "waiting"},
     }
-    _agent_live = Live(_render_agent_columns(), console=console, refresh_per_second=6, transient=False)
+    _workflow_state = {
+        "synthesis": {"status": "pending", "tool": "waiting"},
+        "architect": {"status": "pending", "tool": "waiting"},
+        "summary": {"status": "pending", "tool": "waiting"},
+    }
+    _agent_live = Live(_render_agent_dashboard(), console=console, refresh_per_second=6, transient=False)
     _agent_live.start()
 
 
@@ -294,15 +383,38 @@ def update_agent_box(
     if artifacts is not None:
         _agent_state[name]["artifacts"] = artifacts
     if _agent_live is not None:
-        _agent_live.update(_render_agent_columns())
+        _agent_live.update(_render_agent_dashboard())
+
+
+def update_workflow_phase(
+    name: str,
+    *,
+    status: str | None = None,
+    tool: str | None = None,
+    turn: int | None = None,
+    max_turns: int | None = None,
+) -> None:
+    if name not in _workflow_state:
+        _workflow_state[name] = {"status": "pending", "tool": "waiting"}
+    if status is not None:
+        _workflow_state[name]["status"] = status
+    if tool is not None:
+        _workflow_state[name]["tool"] = tool
+    if turn is not None:
+        _workflow_state[name]["turn"] = turn
+    if max_turns is not None:
+        _workflow_state[name]["max_turns"] = max_turns
+    if _agent_live is not None:
+        _agent_live.update(_render_agent_dashboard())
 
 
 def stop_agent_boxes() -> None:
-    global _agent_live, _agent_state
+    global _agent_live, _agent_state, _workflow_state
     if _agent_live is not None:
         _agent_live.stop()
     _agent_live = None
     _agent_state = {}
+    _workflow_state = {}
 
 
 # ---------------------------------------------------------------------------

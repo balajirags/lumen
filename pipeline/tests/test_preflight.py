@@ -18,6 +18,9 @@ def test_collect_repo_metrics_counts_loc_and_languages(tmp_path):
     assert metrics["total_loc"] == 4
     assert metrics["files_by_language"] == {"java": 1, "js": 1}
     assert metrics["detected_languages"] == ["java", "js"]
+    assert metrics["files_by_category"] == {"jvm": 1, "js": 1}
+    assert metrics["detected_language_categories"] == ["jvm", "js"]
+    assert metrics["selected_archetype"] == "backend-service"
 
 
 def test_classify_repo_metrics_escalates_risk():
@@ -25,7 +28,7 @@ def test_classify_repo_metrics_escalates_risk():
         {
             "total_loc": 60_000,
             "total_source_files": 1_100,
-            "detected_languages": ["java", "js", "python"],
+            "detected_language_categories": ["jvm", "js", "python"],
         },
         max_turns=60,
         max_context_tokens=120_000,

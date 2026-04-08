@@ -19,6 +19,14 @@ class PipelineState:
     # --- Stage 1 outputs ---
     kuzu_path: str = ""
     indexed_languages: list[str] = field(default_factory=list)
+    language_categories: list[str] = field(default_factory=list)
+    language_flavors: list[str] = field(default_factory=list)
+    archetype_signals: list[str] = field(default_factory=list)
+    selected_archetype: str = ""
+    primary_repo_type: str = ""
+    capabilities: list[str] = field(default_factory=list)
+    artifact_plan: dict[str, Any] | None = None
+    artifact_omissions: list[dict[str, str]] = field(default_factory=list)
 
     # --- Stage 2 outputs ---
     artifacts_dir: str = ""
@@ -79,6 +87,14 @@ class PipelineState:
             "error": self.error,
             "kuzu_path": self.kuzu_path,
             "indexed_languages": self.indexed_languages,
+            "language_categories": self.language_categories,
+            "language_flavors": self.language_flavors,
+            "archetype_signals": self.archetype_signals,
+            "selected_archetype": self.selected_archetype,
+            "primary_repo_type": self.primary_repo_type,
+            "capabilities": self.capabilities,
+            "artifact_plan": self.artifact_plan,
+            "artifact_omissions": self.artifact_omissions,
             "artifacts_dir": self.artifacts_dir,
             "prompt_archetype": self.prompt_archetype,
             "mode": self.mode,
@@ -91,6 +107,9 @@ class PipelineState:
                 "total": self.input_tokens + self.output_tokens,
             },
             "runtime": {
+                "model": self.model,
+                "provider": self.provider,
+                "base_url": self.base_url,
                 "timeout": self.timeout,
                 "timeout_source": self.timeout_source,
                 "max_turns": self.max_turns,

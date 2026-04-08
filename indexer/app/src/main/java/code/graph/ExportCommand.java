@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
 
@@ -59,7 +60,7 @@ public class ExportCommand implements Callable<Integer> {
         // Parse all modules
         CodeGraph graph = new CodeGraph();
         for (Path module : modules) {
-            Path sourceRoot = App.detectSourceRoot(module);
+            Path sourceRoot = App.detectSourceRoot(module, Collections.singletonList(code.graph.parser.SourceParserFactory.Language.JAVA));
             System.err.println("Parsing Java sources from: " + sourceRoot.toAbsolutePath());
 
             List<Path> moduleCp = new ArrayList<>(classpathEntries);
