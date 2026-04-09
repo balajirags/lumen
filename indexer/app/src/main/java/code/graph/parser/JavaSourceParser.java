@@ -637,6 +637,11 @@ public class JavaSourceParser implements SourceParser {
          * Walks the type hierarchy (extends + implements) to find a matching method signature.
          */
         private void detectOverrides(MethodDeclaration decl, String methodId, String containingType) {
+            // Fast path: @Override annotation guarantees an override exists — emit a best-effort
+            // OVERRIDES edge even when full type resolution fails for the parent.
+            boolean hasOverrideAnnotation = decl.getAnnotations().stream()
+                    .anyMatch(a -> "Override".equals(a.getNameAsString()));
+
             try {
                 // Find the class/interface this method belongs to
                 var enclosingType = decl.findAncestor(ClassOrInterfaceDeclaration.class);
@@ -677,8 +682,7 @@ public class JavaSourceParser implements SourceParser {
                                 }
 
                                 graph.addRelationship(new CodeRelationship(
-                                        methodId, parentMethodId, RelationshipType.OVERRIDES)
-                                        .withProperty("parentType", ancestorName));
+                                        methodId, parentMethodId, RelationshipType.OVERRIDES));
                                 return; // Only link to the closest ancestor
                             }
                         }
@@ -687,7 +691,26 @@ public class JavaSourceParser implements SourceParser {
                     }
                 }
             } catch (Exception ignored) {
-                // Type resolution may fail for some classes
+                // Full type resolution failed — fall back to @Override fast path below
+            }
+
+            // Fast-path fallback: if @Override was present but resolution failed,
+            // emit a best-effort OVERRIDES edge to a placeholder parent method
+            if (hasOverrideAnnotation) {
+                String methodName = decl.getNameAsString();
+                String placeholderParentId = "method:unknown." + containingType + "." + methodName;
+                if (!graph.hasNode(placeholderParentId)) {
+                    String unknownTypeId = "type:unknown." + containingType;
+                    ensureTypeNode(unknownTypeId, "unknown." + containingType);
+                    graph.addNode(new CodeNode(placeholderParentId, NodeType.METHOD, methodName,
+                            "unknown." + containingType + "." + methodName)
+                            .withProperty("external", true)
+                            .withProperty("inferred", true));
+                    graph.addRelationship(new CodeRelationship(
+                            unknownTypeId, placeholderParentId, RelationshipType.CONTAINS));
+                }
+                graph.addRelationship(new CodeRelationship(
+                        methodId, placeholderParentId, RelationshipType.OVERRIDES));
             }
         }
 

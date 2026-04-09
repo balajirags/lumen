@@ -303,8 +303,12 @@ public class KuzuGraphStore implements GraphStore {
 
     private static String inferLanguage(NodeType type) {
         return switch (type) {
-            case MODULE, FUNCTION, ARROW_FUNCTION, COMPONENT, HOOK, JSX_ELEMENT -> "javascript";
-            case DECORATOR, GENERATOR, ASYNC_FUNCTION, COMPREHENSION -> "python";
+            // ASYNC_FUNCTION and GENERATOR are shared between JS and Python.
+            // Default to "javascript" here; Python nodes get overridden by the explicit
+            // 'language' property set by parse.py (preferred in save() over this inferred value).
+            case MODULE, FUNCTION, ARROW_FUNCTION, COMPONENT, HOOK, JSX_ELEMENT,
+                 ASYNC_FUNCTION, GENERATOR -> "javascript";
+            case DECORATOR, COMPREHENSION -> "python";
             case DATA_CLASS, SEALED_CLASS, SEALED_INTERFACE, OBJECT_DECL, COMPANION_OBJECT,
                     EXTENSION_FUNCTION, SUSPEND_FUNCTION, PROPERTY, LAMBDA, INIT_BLOCK, TYPE_ALIAS -> "kotlin";
             default -> "java";
@@ -349,6 +353,7 @@ public class KuzuGraphStore implements GraphStore {
     }
 
     private static String formatValue(Object value) {
+        if (value == null) return "null";   // SQL NULL — no quotes, not the string "null"
         if (value instanceof Boolean) return value.toString();
         if (value instanceof Number) return value.toString();
         return "'" + escapeString(String.valueOf(value)) + "'";

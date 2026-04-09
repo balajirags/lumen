@@ -116,11 +116,12 @@ class PythonVisitor(ast.NodeVisitor):
         decorators = [self._get_decorator_name(d) for d in node.decorator_list]
         
         self.graph.add_node(
-            class_id, "CLASS", class_name, 
+            class_id, "CLASS", class_name,
             f"{self.module_name}.{class_name}",
             {
                 "lineNumber": node.lineno,
-                "decorators": decorators
+                "decorators": decorators,
+                "language": "python"
             }
         )
         
@@ -175,8 +176,9 @@ class PythonVisitor(ast.NodeVisitor):
                     "isAsync": is_async,
                     "paramCount": len(node.args.args),
                     "isPrivate": func_name.startswith("_"),
-                    "isProperty": any(self._get_decorator_name(d) == "property" 
-                                     for d in node.decorator_list)
+                    "isProperty": any(self._get_decorator_name(d) == "property"
+                                     for d in node.decorator_list),
+                    "language": "python"
                 }
             )
             
@@ -203,7 +205,8 @@ class PythonVisitor(ast.NodeVisitor):
                     "lineNumber": node.lineno,
                     "isAsync": is_async,
                     "isGenerator": is_generator,
-                    "paramCount": len(node.args.args)
+                    "paramCount": len(node.args.args),
+                    "language": "python"
                 }
             )
             
@@ -642,7 +645,7 @@ def parse_file(file_path: Path, root_dir: Path, graph: CodeGraphBuilder,
     
     # Add module node
     module_id = f"module:{module_name}"
-    graph.add_node(module_id, "MODULE", module_name, module_name)
+    graph.add_node(module_id, "MODULE", module_name, module_name, {"language": "python"})
     graph.add_relationship(module_id, file_id, "SOURCE_FILE")
     graph.internal_modules.add(module_name)
     

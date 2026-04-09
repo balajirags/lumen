@@ -221,23 +221,35 @@ public class DomainDetector {
     }
 
     private String deriveHeuristicLabel(CodeGraph graph, List<String> members) {
-        // Build annotation index for these members
-        Map<String, Integer> annFreq = new HashMap<>();
-        for (CodeRelationship rel : graph.getRelationships()) {
-            if (rel.type() != RelationshipType.HAS_ANNOTATION) continue;
-            if (!members.contains(rel.sourceId())) continue;
-            CodeNode ann = graph.getNode(rel.targetId());
-            if (ann == null) continue;
-            String layer = SPRING_LAYER.get(ann.name());
-            if (layer != null) annFreq.merge(layer, 1, Integer::sum);
+        String language = deriveLanguage(graph, members);
+
+        if ("java".equals(language) || "kotlin".equals(language)) {
+            // Tier 1: Spring stereotype annotation scan
+            Map<String, Integer> annFreq = new HashMap<>();
+            for (CodeRelationship rel : graph.getRelationships()) {
+                if (rel.type() != RelationshipType.HAS_ANNOTATION) continue;
+                if (!members.contains(rel.sourceId())) continue;
+                CodeNode ann = graph.getNode(rel.targetId());
+                if (ann == null) continue;
+                String layer = SPRING_LAYER.get(ann.name());
+                if (layer != null) annFreq.merge(layer, 1, Integer::sum);
+            }
+            if (!annFreq.isEmpty()) {
+                return annFreq.entrySet().stream()
+                        .max(Map.Entry.comparingByValue())
+                        .map(Map.Entry::getKey)
+                        .orElse("Mixed");
+            }
+            // Tier 2 (Java/Kotlin fallback): infer from package segment of member qualified names
+            boolean hasModel = members.stream().map(graph::getNode).filter(Objects::nonNull)
+                    .anyMatch(n -> {
+                        String qn = n.qualifiedName() != null ? n.qualifiedName() : "";
+                        return qn.contains(".model.") || qn.contains(".entity.") || qn.contains(".dto.");
+                    });
+            return hasModel ? "Model" : "Mixed";
         }
-        if (!annFreq.isEmpty()) {
-            return annFreq.entrySet().stream()
-                    .max(Map.Entry.comparingByValue())
-                    .map(Map.Entry::getKey)
-                    .orElse("Mixed");
-        }
-        // JS/TS fallback: by node type majority
+
+        // JS/TS/Python: node-type majority voting
         long componentCount = members.stream()
                 .map(graph::getNode).filter(Objects::nonNull)
                 .filter(n -> n.type() == NodeType.COMPONENT).count();
@@ -247,8 +259,8 @@ public class DomainDetector {
         long moduleCount = members.stream()
                 .map(graph::getNode).filter(Objects::nonNull)
                 .filter(n -> n.type() == NodeType.MODULE).count();
-        if (componentCount >= asyncCount && componentCount >= moduleCount) return "UI";
-        if (asyncCount >= componentCount && asyncCount >= moduleCount) return "DataLayer";
+        if (componentCount > 0 && componentCount >= asyncCount && componentCount >= moduleCount) return "UI";
+        if (asyncCount > componentCount && asyncCount >= moduleCount) return "DataLayer";
         if (moduleCount > 0) return "Module";
         return "Mixed";
     }

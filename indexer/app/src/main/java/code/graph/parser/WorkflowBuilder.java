@@ -209,9 +209,13 @@ public class WorkflowBuilder {
 
         String entryName    = entryNode.name();
         String terminalName = terminalNode.name();
-        String workflowId   = "workflow:" + entryName + "→" + terminalName + ":" + path.size();
 
-        // Deduplicate: if a workflow with same entry+terminal+steps already exists, skip
+        // Use qualified names + path hash for the ID to avoid collisions between:
+        // (a) same short name in different classes, and (b) different paths of same length
+        String entryQName    = entryNode.qualifiedName() != null ? entryNode.qualifiedName() : entryNode.id();
+        String terminalQName = terminalNode.qualifiedName() != null ? terminalNode.qualifiedName() : terminalNode.id();
+        String workflowId = "workflow:" + entryQName + "→" + terminalQName + ":" + path.hashCode();
+
         if (graph.hasNode(workflowId)) return;
 
         String displayName = toDisplayName(entryName) + " → " + toDisplayName(terminalName);
@@ -225,7 +229,13 @@ public class WorkflowBuilder {
                 .withProperty("language", language);
         graph.addNode(workflowNode);
 
+        // Emit WORKFLOW_STEP edges — deduplicate (nodeId, step) pairs to prevent duplicate edges
+        // that can occur when multiple BFS branches converge on the same node
+        Set<String> emittedSteps = new HashSet<>();
         for (int i = 0; i < path.size(); i++) {
+            String stepKey = path.get(i) + ":" + (i + 1);
+            if (emittedSteps.contains(stepKey)) continue;
+            emittedSteps.add(stepKey);
             graph.addRelationship(
                     new CodeRelationship(path.get(i), workflowId, RelationshipType.WORKFLOW_STEP)
                             .withProperty("step", (long) (i + 1)));

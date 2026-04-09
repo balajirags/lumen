@@ -446,8 +446,9 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
     });
     
     // Add module node
+    const fileLang = getLanguage(filePath);
     const moduleId = `module:${moduleName}`;
-    graph.addNode(moduleId, 'MODULE', moduleName, moduleName);
+    graph.addNode(moduleId, 'MODULE', moduleName, moduleName, { language: fileLang });
     graph.addRelationship(moduleId, fileId, 'SOURCE_FILE');
     graph.internalModules.add(moduleName);
 
@@ -481,6 +482,7 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
         moduleId,
         moduleName,
         filePath: relativePath,
+        fileLanguage: fileLang,   // e.g. 'JavaScript', 'TypeScript', 'JSX'
         currentClass: null,
         currentFunction: null,
         functionStack: [],
@@ -559,7 +561,8 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
                     `${state.moduleName}.${className}`, {
                         lineNumber: node.loc?.start?.line,
                         isReactComponent: isComponent,
-                        path: state.filePath
+                        path: state.filePath,
+                        language: state.fileLanguage
                     });
                 
                 graph.addRelationship(state.moduleId, classId, 'CONTAINS');
@@ -597,7 +600,8 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
                     isAsync: node.async,
                     isStatic: node.static,
                     isGetter: node.kind === 'get',
-                    isSetter: node.kind === 'set'
+                    isSetter: node.kind === 'set',
+                    language: state.fileLanguage
                 });
                 
                 graph.addRelationship(parentClass, methodId, 'CONTAINS');
@@ -632,7 +636,8 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
                     isAsync: node.async,
                     isGenerator: node.generator,
                     paramCount: node.params.length,
-                    path: state.filePath
+                    path: state.filePath,
+                    language: state.fileLanguage
                 });
 
                 graph.addRelationship(state.moduleId, funcId, 'CONTAINS');
@@ -673,7 +678,8 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
                 lineNumber: node.loc?.start?.line,
                 isAsync: node.init.async,
                 isArrow: node.init.type === 'ArrowFunctionExpression',
-                path: state.filePath
+                path: state.filePath,
+                language: state.fileLanguage
             });
 
             graph.addRelationship(state.moduleId, funcId, 'CONTAINS');
