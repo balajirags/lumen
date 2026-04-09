@@ -423,6 +423,7 @@ def run_loop(
 # ---------------------------------------------------------------------------
 
 _PHASE_PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
+_EXECUTIVE_SUMMARY_PROMPT = _PHASE_PROMPTS_DIR / "executive-summary.md"
 
 
 _ANALYST_PROMPT_FILES: dict[str, str] = {
@@ -585,6 +586,7 @@ def _write_executive_summary(
     artifact_plan: dict[str, Any],
     artifact_omissions: list[dict[str, str]],
 ) -> str:
+    """Deterministic fallback summary writer used if the dedicated summary phase fails."""
     root = Path(artifacts_dir)
     summary_path = root / "summary" / "executive-summary.md"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
@@ -717,6 +719,168 @@ def _write_executive_summary(
 
     summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return str(summary_path)
+
+
+def _artifact_excerpt(root: Path, rel_path: str, limit: int = 2_400) -> str:
+    full_path = root / rel_path
+    if not full_path.exists():
+        return ""
+    try:
+        content = full_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    if len(content) <= limit:
+        return content
+    return content[:limit].rstrip() + "\n...[truncated]"
+
+
+def _build_executive_summary_evidence(
+    artifacts_dir: str,
+    repo_name: str,
+    primary_repo_type: str,
+    capabilities: list[str],
+    language_categories: list[str],
+    artifact_plan: dict[str, Any],
+    artifact_omissions: list[dict[str, str]],
+    repo_metrics: dict[str, Any] | None,
+) -> str:
+    root = Path(artifacts_dir)
+    artifact_items = artifact_plan.get("artifacts", [])
+    target_state_files = [str(item["path"]) for item in artifact_items if item["class"] == "target"]
+    evidence_paths = [
+        "domain/business-capabilities.md",
+        "architecture/c4-context.md",
+        "architecture/business-journeys.md",
+        "architecture/route-map.md",
+        "current-state/ui-to-api-interactions.md",
+        "current-state/module-dependency-map.md",
+        "current-state/api-spec.yaml",
+        "domain/er-diagram.md",
+        "tech/coupling-hotspots.md",
+        *target_state_files,
+    ]
+    seen: set[str] = set()
+    evidence_sections: list[str] = []
+    for rel_path in evidence_paths:
+        if rel_path in seen:
+            continue
+        seen.add(rel_path)
+        excerpt = _artifact_excerpt(root, rel_path)
+        if not excerpt:
+            continue
+        evidence_sections.append(f"### {rel_path}\n{excerpt}")
+
+    omission_lines = (
+        "\n".join(f"- {item['file']}: {item['reason']}" for item in artifact_omissions)
+        if artifact_omissions
+        else "- None"
+    )
+    metrics = repo_metrics or {}
+    lines = [
+        "# Executive Summary Evidence Pack",
+        "",
+        "## Repo Profile",
+        f"- Repo name: {repo_name}",
+        f"- Primary repo type: {primary_repo_type}",
+        f"- Language categories: {', '.join(language_categories) if language_categories else 'unknown'}",
+        f"- Capabilities: {', '.join(capabilities) if capabilities else 'not confidently classified'}",
+        "",
+        "## Repo Metrics",
+        f"- LOC: {int(metrics.get('total_loc', 0) or 0):,}",
+        f"- Source files: {int(metrics.get('total_source_files', 0) or 0):,}",
+        f"- Size band: {metrics.get('size_band', 'unknown')}",
+        f"- Risk level: {metrics.get('risk_level', 'unknown')}",
+        "",
+        "## Planned Target-State Artifacts",
+        *([f"- {path}" for path in target_state_files] or ["- None"]),
+        "",
+        "## Omitted Or Weak-Evidence Supporting Views",
+        omission_lines,
+        "",
+        "## Key Artifact Evidence",
+        "",
+    ]
+    lines.extend(evidence_sections or ["No artifact evidence was available."])
+    return "\n".join(lines)
+
+
+def _run_executive_summary_phase(
+    provider: LLMProvider,
+    artifacts_dir: str,
+    repo_name: str,
+    primary_repo_type: str,
+    capabilities: list[str],
+    language_categories: list[str],
+    artifact_plan: dict[str, Any],
+    artifact_omissions: list[dict[str, str]],
+    repo_metrics: dict[str, Any] | None,
+) -> dict[str, Any]:
+    system_prompt = _load_prompt_file(
+        _EXECUTIVE_SUMMARY_PROMPT,
+        "Write a leadership-facing executive summary in Markdown.",
+    )
+    evidence_pack = _build_executive_summary_evidence(
+        artifacts_dir,
+        repo_name,
+        primary_repo_type,
+        capabilities,
+        language_categories,
+        artifact_plan,
+        artifact_omissions,
+        repo_metrics,
+    )
+    user_request = (
+        "Produce `summary/executive-summary.md` from the evidence pack below.\n\n"
+        "Requirements:\n"
+        "- leadership-facing\n"
+        "- strong synthesis and prioritization\n"
+        "- recommendations must be concrete and evidence-based\n"
+        "- no artifact index\n"
+        "- return Markdown only\n\n"
+        f"{evidence_pack}"
+    )
+
+    try:
+        response = chat_with_retry(
+            provider,
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_request},
+            ],
+            tools=None,
+            tool_choice="auto",
+        )
+        content = (response.content or "").strip()
+        if not content:
+            raise RuntimeError("empty executive summary response")
+
+        summary_path = Path(artifacts_dir) / "summary" / "executive-summary.md"
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary_path.write_text(content.rstrip() + "\n", encoding="utf-8")
+        return {
+            "status": "done",
+            "path": str(summary_path),
+            "events": ["[supervisor] executive summary generated via dedicated leadership brief prompt"],
+            "input_tokens": response.input_tokens,
+            "output_tokens": response.output_tokens,
+        }
+    except Exception as exc:
+        summary_path = _write_executive_summary(
+            artifacts_dir,
+            repo_name,
+            primary_repo_type,
+            capabilities,
+            language_categories,
+            artifact_plan,
+            artifact_omissions,
+        )
+        return {
+            "status": "fallback",
+            "path": summary_path,
+            "events": [f"[supervisor] executive summary fallback used — {type(exc).__name__}: {exc}"],
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
 
 
 def _recover_missing_current_state_artifacts(
@@ -1043,6 +1207,7 @@ def run_supervisor_agent(
     total_input_tokens = 0
     total_output_tokens = 0
     total_tool_uses = 0
+    phase_tokens: dict[str, dict[str, int]] = {}
     selected_repo_archetype = repo_archetype or str((repo_metrics or {}).get("selected_archetype", "")) or "backend-service"
     plan = artifact_plan or build_artifact_plan(selected_repo_archetype, repo_metrics)
 
@@ -1074,6 +1239,7 @@ def run_supervisor_agent(
             "prompt_archetype": selected_repo_archetype,
             "artifact_plan": plan,
             "artifact_omissions": [],
+            "phase_tokens": phase_tokens,
         }
 
     # ------------------------------------------------------------------
@@ -1274,12 +1440,14 @@ def run_supervisor_agent(
             "prompt_archetype": selected_repo_archetype,
             "artifact_plan": plan,
             "artifact_omissions": [],
+            "phase_tokens": phase_tokens,
         }
     _log.update_workflow_phase("architect", status="done", tool="target-state complete")
 
     artifact_omissions = _conditional_artifact_omissions(artifacts_dir, plan)
     _log.update_workflow_phase("summary", status="running", tool="executive summary")
-    summary_path = _write_executive_summary(
+    summary_result = _run_executive_summary_phase(
+        provider,
         artifacts_dir,
         repo_name,
         plan.get("primary_repo_type", selected_repo_archetype),
@@ -1287,8 +1455,18 @@ def run_supervisor_agent(
         list((repo_metrics or {}).get("detected_language_categories", [])),
         plan,
         artifact_omissions,
+        repo_metrics,
     )
+    summary_path = summary_result["path"]
+    total_input_tokens += summary_result["input_tokens"]
+    total_output_tokens += summary_result["output_tokens"]
+    phase_tokens["summary"] = {
+        "input": summary_result["input_tokens"],
+        "output": summary_result["output_tokens"],
+        "total": summary_result["input_tokens"] + summary_result["output_tokens"],
+    }
     all_artifacts.append(summary_path)
+    all_events.extend(summary_result["events"])
     all_events.append(f"[supervisor] executive summary generated — {summary_path}")
 
     manifest_path = _write_machine_manifest(
@@ -1328,6 +1506,7 @@ def run_supervisor_agent(
         "prompt_archetype": selected_repo_archetype,
         "artifact_plan": plan,
         "artifact_omissions": artifact_omissions,
+        "phase_tokens": phase_tokens,
     }
 
 
@@ -1413,6 +1592,7 @@ def run_agent(state) -> Any:
         ps.input_tokens = result["input_tokens"]
         ps.output_tokens = result["output_tokens"]
         ps.tool_uses = result["tool_uses"]
+        ps.phase_tokens = result.get("phase_tokens", {})
         ps.prompt_archetype = result.get("prompt_archetype", selected_archetype)
         ps.primary_repo_type = primary_repo_type or ps.prompt_archetype
         ps.artifact_plan = result.get("artifact_plan", artifact_plan)
@@ -1488,6 +1668,7 @@ def run_agent(state) -> Any:
             "primary_repo_type": primary_repo_type or result.get("prompt_archetype", ""),
             "artifact_plan": active_plan,
             "artifact_omissions": result.get("artifact_omissions", []),
+            "phase_tokens": result.get("phase_tokens", {}),
         }
 
 

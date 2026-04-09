@@ -10,8 +10,10 @@ from codedoc.stages.agent import (
     _build_analyst_system_prompt,
     _build_architect_prompt,
     _build_architect_request,
+    _build_executive_summary_evidence,
     _missing_target_state_artifacts,
     _required_artifacts,
+    _run_executive_summary_phase,
     _write_executive_summary,
     _write_machine_manifest,
     validate_artifact_quality,
@@ -373,6 +375,77 @@ def test_write_executive_summary_is_professional_and_executive_facing(tmp_path):
     assert "## Artifact Index" not in content
     assert "Capabilities:" not in content
     assert "`fullstack-app` repository" not in content
+
+
+def test_build_executive_summary_evidence_includes_metrics_and_omissions(tmp_path):
+    artifacts_dir = tmp_path / "artifacts"
+    for rel_path, content in {
+        "domain/business-capabilities.md": "Supports inventory reservations.",
+        "architecture/c4-context.md": "Used by admin tooling and upstream services.",
+        "tech/coupling-hotspots.md": "Reservation and movement concerns are tightly coupled.",
+        "target-state/migration-plan.md": "Sequence extraction around inventory seams.",
+    }.items():
+        full_path = artifacts_dir / rel_path
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_text(content)
+
+    evidence = _build_executive_summary_evidence(
+        str(artifacts_dir),
+        "inventory-service",
+        "backend-service",
+        ["http-api", "persistence"],
+        ["jvm"],
+        {
+            "artifacts": [
+                {"path": "domain/business-capabilities.md", "class": "core"},
+                {"path": "target-state/migration-plan.md", "class": "target"},
+            ]
+        },
+        [{"file": "architecture/user-journeys.md", "reason": "weak evidence"}],
+        {"total_loc": 1234, "total_source_files": 12, "size_band": "small", "risk_level": "medium"},
+    )
+
+    assert "Repo name: inventory-service" in evidence
+    assert "LOC: 1,234" in evidence
+    assert "architecture/user-journeys.md: weak evidence" in evidence
+    assert "### domain/business-capabilities.md" in evidence
+
+
+def test_run_executive_summary_phase_uses_dedicated_prompt_and_records_tokens(tmp_path):
+    artifacts_dir = tmp_path / "artifacts"
+    (artifacts_dir / "domain").mkdir(parents=True, exist_ok=True)
+    (artifacts_dir / "domain" / "business-capabilities.md").write_text("Supports reservations and movement workflows.")
+
+    class FakeProvider:
+        def chat(self, messages, tools=None, tool_choice="auto"):
+            from codedoc.llm import LLMResponse
+
+            assert tools is None
+            assert "leadership" in messages[0]["content"].lower()
+            assert "Executive Summary Evidence Pack" in messages[1]["content"]
+            return LLMResponse(
+                content="# Executive Summary\n\n## Executive Overview\n\nLeadership brief.\n\n## Current State Assessment\n\nStable.\n\n## Material Risks\n\n- Risk.\n\n## Strategic Recommendations\n\n- Act.\n\n## Execution Priorities\n\n- Now.\n\n## Confidence And Limitations\n\n- Moderate.\n",
+                input_tokens=321,
+                output_tokens=123,
+            )
+
+    result = _run_executive_summary_phase(
+        FakeProvider(),
+        str(artifacts_dir),
+        "inventory-service",
+        "backend-service",
+        ["http-api"],
+        ["jvm"],
+        {"artifacts": [{"path": "domain/business-capabilities.md", "class": "core"}]},
+        [],
+        {"total_loc": 100, "total_source_files": 2, "size_band": "small", "risk_level": "low"},
+    )
+
+    content = Path(result["path"]).read_text()
+    assert result["status"] == "done"
+    assert result["input_tokens"] == 321
+    assert result["output_tokens"] == 123
+    assert "## Strategic Recommendations" in content
 
 
 def test_write_c4_artifact_renders_deterministic_context_plantuml(tmp_path):

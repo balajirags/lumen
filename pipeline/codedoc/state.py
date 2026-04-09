@@ -49,6 +49,7 @@ class PipelineState:
     input_tokens: int = 0
     output_tokens: int = 0
     tool_uses: int = 0
+    phase_tokens: dict[str, dict[str, int]] = field(default_factory=dict)
 
     # --- Runtime config (not persisted in pipeline.json) ---
     model: str = "claude-sonnet-4-6"
@@ -106,6 +107,7 @@ class PipelineState:
                 "output": self.output_tokens,
                 "total": self.input_tokens + self.output_tokens,
             },
+            "phase_tokens": self.phase_tokens,
             "runtime": {
                 "model": self.model,
                 "provider": self.provider,

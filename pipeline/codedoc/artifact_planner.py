@@ -27,14 +27,15 @@ ARTIFACT_DEFINITIONS: dict[str, ArtifactDefinition] = {
     "summary/executive-summary.md": ArtifactDefinition(
         path="summary/executive-summary.md",
         artifact_class="core",
-        summary_profile="compact",
-        purpose="Stakeholder-facing repo brief with purpose, pain points, and recommended next actions.",
+        summary_profile="standard",
+        purpose="Leadership-facing synthesis of repo purpose, operating posture, material risks, and recommended next actions.",
         required_sections=(
-            "Repository Overview",
-            "What This Repo Does",
-            "Pain Points And Tech Debt",
-            "Recommendations",
-            "Known Gaps",
+            "Executive Overview",
+            "Current State Assessment",
+            "Material Risks",
+            "Strategic Recommendations",
+            "Execution Priorities",
+            "Confidence And Limitations",
         ),
     ),
     "domain/business-capabilities.md": ArtifactDefinition(
