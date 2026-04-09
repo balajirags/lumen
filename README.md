@@ -137,29 +137,29 @@ Plus a **visual graph explorer** (the UI) for ad-hoc Cypher queries on the CPG.
 
 ```bash
 git clone <repo-url> lumen && cd lumen
-make docker-build
+make lumen-docker-build
 export ANTHROPIC_API_KEY=...
 # or: export OPENAI_API_KEY=...
 ```
 
-### 1. docker-pipeline
+### 1. lumen-docker-run
 
 ```bash
-make docker-pipeline REPO=/path/to/your/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
+make lumen-docker-run REPO=/path/to/your/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
 ```
 
-If preflight classifies the repo as `xlarge`, `docker-pipeline` stops before indexing and
+If preflight classifies the repo as `xlarge`, `lumen-docker-run` stops before indexing and
 walks you to MCP mode instead. In that case, continue with:
 
 ```bash
-make docker-mcp REPO=/path/to/your/repo
+make lumen-docker-mcp REPO=/path/to/your/repo
 ```
 
 Step by step for `xlarge` repos:
 
-1. Run `make docker-pipeline ...` as usual.
-2. If Lumen stops after preflight, do not rerun `docker-pipeline`.
-3. Start MCP mode with `make docker-mcp REPO=/path/to/your/repo`.
+1. Run `make lumen-docker-run ...` as usual.
+2. If Lumen stops after preflight, do not rerun `lumen-docker-run`.
+3. Start MCP mode with `make lumen-docker-mcp REPO=/path/to/your/repo`.
 4. Let MCP mode perform indexing and expose `http://127.0.0.1:8765/mcp`.
 5. Connect your LLM client to that MCP URL and ask focused questions.
 
@@ -169,7 +169,7 @@ Repo metrics are otherwise informational. The hard stop is only the full pipelin
 If you explicitly want to force the full docs pipeline anyway, use:
 
 ```bash
-make docker-pipeline REPO=/path/to/your/repo \
+make lumen-docker-run REPO=/path/to/your/repo \
   ARGS='--allow-xlarge --provider anthropic --model claude-sonnet-4-6'
 ```
 
@@ -182,17 +182,17 @@ Inside Docker, `localhost` is the container — not your machine. Use
 # Mac/Windows: host.docker.internal is automatic
 # Linux: docker-compose.yml already sets extra_hosts
 
-make docker-pipeline REPO=/path/to/repo \
+make lumen-docker-run REPO=/path/to/repo \
   ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
 ```
 
-### 2. docker-mcp
+### 2. lumen-docker-mcp
 
 If the pipeline output is good enough, stop there. If you want to keep asking questions over MCP,
 reuse the same `lumen` image against the DB from that pipeline run:
 
 ```bash
-make docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
+make lumen-docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
 ```
 
 `PORT` defaults to `8765`.
@@ -200,7 +200,7 @@ make docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
 If you do not already have pipeline output, this also works:
 
 ```bash
-make docker-mcp REPO=/path/to/repo
+make lumen-docker-mcp REPO=/path/to/repo
 ```
 
 That flow:
@@ -210,12 +210,12 @@ That flow:
 3. exposes a local HTTP MCP server on `http://127.0.0.1:8765/mcp`
 
 
-### 3. docker-mkdocs
+### 3. lumen-docker-docs
 
 Rebuild and serve the generated site from the same `lumen` image:
 
 ```bash
-make docker-docs
+make lumen-docker-docs
 ```
 
 This is the supported docs viewer path. It rebuilds the MkDocs site from the existing
@@ -229,16 +229,16 @@ Output lands in `./output/` after every run.
 
 | Service | URL | Command |
 |---|---|---|
-| MkDocs doc-site (Docker) | http://localhost:8081 | `make docker-docs` |
-| MCP HTTP (Docker) | http://localhost:8765/mcp | `make docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db` |
-| Graph UI (Docker) | http://localhost:3002 | `make compose-ui` |
-| Graph UI (dev) | http://localhost:5174 | `make dev-ui` |
+| MkDocs doc-site (Docker) | http://localhost:8081 | `make lumen-docker-docs` |
+| MCP HTTP (Docker) | http://localhost:8765/mcp | `make lumen-docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db` |
+| Graph UI (Docker) | http://localhost:3002 | `make lumen-docker-ui` |
+| Graph UI (dev) | http://localhost:5174 | `make lumen-dev-ui` |
 
 ### Doc-site
 
 ```bash
 # Docker
-make docker-docs     # → http://localhost:8081
+make lumen-docker-docs     # → http://localhost:8081
 ```
 
 The doc-site **accumulates** across runs — every repo you analyse appears as a top-level
@@ -247,7 +247,7 @@ tab in the navigation. Run against multiple repos and browse them all at once.
 ### Graph UI
 
 ```bash
-make compose-ui
+make lumen-docker-ui
 # → http://localhost:3002
 # Connect → DB type: KuzuDB, DB path: /data/<repo>-<timestamp>/index.kuzu
 ```
@@ -270,7 +270,7 @@ Install and configure:
 ```bash
 export ANTHROPIC_API_KEY=...
 # or: export OPENAI_API_KEY=...
-make install            # builds indexer + installs pipeline via uv
+make lumen-install            # builds indexer + installs pipeline via uv
 ```
 
 ### 2. Run with `lumen`
@@ -292,15 +292,15 @@ uv run lumen run /path/to/repo --provider openai --model gpt-4o
 Equivalent `make` wrapper:
 
 ```bash
-make run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
-make run REPO=/path/to/repo ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'
-make run REPO=/path/to/repo ARGS='--provider openai --model gpt-4o'
+make lumen-run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
+make lumen-run REPO=/path/to/repo ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'
+make lumen-run REPO=/path/to/repo ARGS='--provider openai --model gpt-4o'
 ```
 
 Graph UI in dev mode:
 
 ```bash
-make dev-ui    # Vite → http://localhost:5174  |  Express → http://localhost:3002
+make lumen-dev-ui    # Vite → http://localhost:5174  |  Express → http://localhost:3002
 ```
 
 ---
@@ -352,11 +352,11 @@ lumen mcp-http [REPO_PATH] [OPTIONS]
 Docker convenience:
 
 ```bash
-make docker-pipeline REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
-make docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
-make docker-docs
+make lumen-docker-run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
+make lumen-docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
+make lumen-docker-docs
 ```
-Both `make mcp-http` and `make docker-mcp` already print the config before starting the server.
+`make lumen-mcp` prints the config before starting the server.
 Use `--print-config` only when you want config output without keeping the MCP server running.
 
 ---

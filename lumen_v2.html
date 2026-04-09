@@ -1358,7 +1358,7 @@ img, .image-container {
                 <div class="mode-tag">→ <span class="url">http://127.0.0.1:8765/mcp</span></div>
             </div>
             <div class="mode-card mode-ui reveal-scale">
-                <div class="mode-cmd">make compose-ui</div>
+                <div class="mode-cmd">make lumen-docker-ui</div>
                 <div class="mode-name">Graph visualization UI</div>
                 <div class="mode-desc">React 19 + Sigma.js explorer with three-panel layout: query panel, graph canvas, node detail. Supports KuzuDB and Neo4j backends.</div>
                 <div class="mode-tag">→ <span class="url">http://localhost:3002</span></div>
@@ -1367,7 +1367,7 @@ img, .image-container {
     </div>
 
     <div class="chrome-bottom">
-        <div class="folio">xlarge repos: docker-pipeline stops at preflight → use docker-mcp instead</div>
+        <div class="folio">xlarge repos: lumen-docker-run stops at preflight → use lumen-docker-mcp instead</div>
         <div class="progress-segs">
             <div class="seg on"></div>
             <div class="seg on"></div>
@@ -1580,13 +1580,13 @@ img, .image-container {
                 <div class="tl-comment"># build the pipeline image once</div>
                 <div class="tl-cmd">
                     <span class="dollar">$</span>
-                    <span class="cmd">git clone &lt;repo&gt; lumen &amp;&amp; cd lumen &amp;&amp; make docker-build</span>
+                    <span class="cmd">git clone &lt;repo&gt; lumen &amp;&amp; cd lumen &amp;&amp; make lumen-docker-build</span>
                 </div>
                 <div class="tl-blank"></div>
                 <div class="tl-comment"># run full docs pipeline (3 analysts + architect → MkDocs site)</div>
                 <div class="tl-cmd">
                     <span class="dollar">$</span>
-                    <span class="cmd">make docker-pipeline</span>
+                    <span class="cmd">make lumen-docker-run</span>
                     <span class="flag">REPO=</span><span class="str">/path/to/repo</span>
                     <span class="flag">ARGS=</span><span class="str">'--provider anthropic --model claude-sonnet-4-6'</span>
                 </div>
@@ -1599,19 +1599,19 @@ img, .image-container {
                 <div class="tl-comment"># xlarge repo? skip docs pipeline and use MCP mode instead</div>
                 <div class="tl-cmd">
                     <span class="dollar">$</span>
-                    <span class="cmd">make docker-mcp</span>
+                    <span class="cmd">make lumen-docker-mcp</span>
                     <span class="flag">REPO=</span><span class="str">/path/to/repo</span>
                 </div>
                 <div class="tl-out purple">› MCP HTTP server → http://127.0.0.1:8765/mcp</div>
                 <div class="tl-blank"></div>
                 <div class="tl-cmd">
                     <span class="dollar">$</span>
-                    <span class="cmd">make docker-docs</span>
+                    <span class="cmd">make lumen-docker-docs</span>
                     <span class="tl-comment">&nbsp; # serve docs → http://localhost:8081</span>
                 </div>
                 <div class="tl-cmd">
                     <span class="dollar">$</span>
-                    <span class="cmd">make compose-ui</span>
+                    <span class="cmd">make lumen-docker-ui</span>
                     <span class="tl-comment">&nbsp;&nbsp; # graph explorer → http://localhost:3002</span>
                 </div>
             </div>
@@ -1619,7 +1619,7 @@ img, .image-container {
         <div class="s8-footnote reveal">
             <span><span class="green">Docker</span> (recommended — zero prerequisites)</span>
             <span class="dot-sep">·</span>
-            <span>Native: <span class="green">make install &amp;&amp; make run</span></span>
+            <span>Native: <span class="green">make lumen-install &amp;&amp; make lumen-run</span></span>
             <span class="dot-sep">·</span>
             <span>Ollama: <span class="green">--provider ollama --model qwen2.5:32b</span></span>
         </div>
@@ -1666,7 +1666,7 @@ img, .image-container {
         <div class="close-cta reveal">
             <div class="cta-tag">
                 <span class="icon">▸</span>
-                <span>make docker-pipeline REPO=...</span>
+                <span>make lumen-docker-run REPO=...</span>
             </div>
             <div class="cta-tag">
                 <span class="icon">◈</span>

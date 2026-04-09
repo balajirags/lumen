@@ -30,43 +30,43 @@ This is a monorepo containing three sub-projects:
 ### Docker (recommended — no local prerequisites)
 
 ```bash
-make docker-build                        # builds lumen pipeline image
-make docker-pipeline REPO=/path/to/repo \
+make lumen-docker-build                  # builds lumen pipeline image
+make lumen-docker-run REPO=/path/to/repo \
   ARGS="--provider anthropic --model claude-sonnet-4-6"
 
 # Ollama (local model — host.docker.internal bridges container → host)
-make docker-pipeline REPO=/path/to/repo \
+make lumen-docker-run REPO=/path/to/repo \
   ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
 
-make docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
-make docker-docs
+make lumen-docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
+make lumen-docker-docs
 
-make docker-docs     # serve generated doc-site → http://localhost:8081
-make compose-ui      # graph visualization UI  → http://localhost:3002
+make lumen-docker-docs  # serve generated doc-site → http://localhost:8081
+make lumen-docker-ui    # graph visualization UI  → http://localhost:3002
 ```
 
-For `xlarge` repos, `docker-pipeline` intentionally stops after preflight and recommends
-`make docker-mcp REPO=/path/to/repo` so MCP mode can perform indexing and support focused questions.
+For `xlarge` repos, `lumen-docker-run` intentionally stops after preflight and recommends
+`make lumen-docker-mcp REPO=/path/to/repo` so MCP mode can perform indexing and support focused questions.
 The intended user journey is:
-1. run `make docker-pipeline ...`
-2. if Lumen stops after preflight for an `xlarge` repo, switch to `make docker-mcp REPO=/path/to/repo`
+1. run `make lumen-docker-run ...`
+2. if Lumen stops after preflight for an `xlarge` repo, switch to `make lumen-docker-mcp REPO=/path/to/repo`
 3. let MCP mode perform indexing
 4. connect an MCP-capable client to `http://127.0.0.1:8765/mcp`
 Repo metrics are otherwise informational; the only hard stop is the full pipeline's `xlarge` guardrail.
 Set `--allow-xlarge` if you explicitly want to continue the full docs pipeline anyway.
-`make docker-docs` is the only supported docs viewer path. It rebuilds the doc-site from
+`make lumen-docker-docs` is the only supported docs viewer path. It rebuilds the doc-site from
 the existing `./output` directory before serving, so pipeline reruns are not required for docs refreshes.
 
 ### Native install
 
 ```bash
-make install-indexer   # runs indexer/install.sh — requires Java 21, Node 18, Python 3
-make install-pipeline  # cd pipeline && uv sync
+make lumen-install-indexer   # runs indexer/install.sh — requires Java 21, Node 18, Python 3
+make lumen-install-pipeline  # cd pipeline && uv sync
 
 # Run the pipeline (ARGS required: specify provider + model)
-make run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
-make run REPO=/path/to/repo ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'
-make dev-ui            # Vite (port 5174) + Express (port 3002) dev server
+make lumen-run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
+make lumen-run REPO=/path/to/repo ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'
+make lumen-dev-ui      # Vite (port 5174) + Express (port 3002) dev server
 ```
 
 Set provider credentials via environment variables such as `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
@@ -107,7 +107,8 @@ If `timeout` or `max_turns` is explicitly set in `.codedoc.toml` or via CLI, tha
 |---|---|
 | `Dockerfile` | Multi-stage pipeline image: jlink JRE + PyInstaller binaries + Node JS parser |
 | `Dockerfile.ui` | Multi-stage UI image: Vite build + tsx Express server |
-| `docker-compose.yml` | Four profiles: `pipeline`, `mcp`, `docs`, `ui` using the same `lumen` image for pipeline, MCP, and docs |
+| `docker-compose.yml` | UI-only compose path (`compose-ui`) |
+| `scripts/lumen-docker-*.sh` | Script-backed Docker entrypoints for pipeline, MCP, docs, image load, and release bundling |
 
 ### Dockerfile (pipeline) — 4 stages
 
@@ -132,20 +133,21 @@ on aarch64 where `python:3.11-slim` requires GLIBC_2.38 but `node:20-slim` only 
 `ui/server/index.ts` serves `dist/` as static files when `NODE_ENV=production`, so the
 single Express process on port 3001 handles both API routes and the React app.
 
-### docker-compose.yml profiles
+### Docker entrypoints
 
 | Profile | Command | URL |
 |---|---|---|
-| `pipeline` | `make docker-pipeline REPO=... ARGS='...'` | — (writes to `./output/`) |
-| `mcp` | `make docker-mcp DB=...` | http://localhost:8765/mcp |
-| `docs` | `make docker-docs` | http://localhost:8081 |
-| `ui` | `make compose-ui` | http://localhost:3002 |
+| `run` | `make lumen-docker-run REPO=... ARGS='...'` | — (writes to `./output/`) |
+| `mcp` | `make lumen-docker-mcp DB=...` | http://localhost:8765/mcp |
+| `docs` | `make lumen-docker-docs` | http://localhost:8081 |
+| `ui` | `make lumen-docker-ui` | http://localhost:3002 |
 
-`pipeline`, `mcp-http`, and `docs` all use the same `DOCKER_IMAGE` runtime.
-`pipeline` service has `extra_hosts: host.docker.internal:host-gateway` for Ollama on Linux.
-On Mac/Windows Docker Desktop, `host.docker.internal` is available automatically.
-`mcp-http` prefers serving an existing DB via `DB_PATH`, and falls back to repo indexing when only `REPO_PATH` is set.
-`docs` now serves `output/doc-site` from the same `lumen` image instead of a separate generic Python image.
+`pipeline`, `mcp`, and `docs` are now script-backed `docker run` entrypoints invoked from the Makefile.
+They all use the same `DOCKER_IMAGE` runtime.
+The scripts add `host.docker.internal:host-gateway` so Ollama-on-host works on Linux; on Mac/Windows Docker Desktop, `host.docker.internal` is available automatically.
+`lumen-docker-mcp` prefers serving an existing DB via `DB`, and falls back to repo indexing when `REPO` is provided.
+`lumen-docker-docs` serves `output/doc-site` from the same `lumen` image instead of a separate generic Python image.
+`lumen-docker-ui` remains the only Compose-backed path.
 Normal MCP commands already print config snippets before serving; `--print-config` is only for config-only output.
 
 ---
@@ -281,7 +283,7 @@ Key files:
 - `ui/vite.config.ts` — in dev mode proxies `/api` → port 3001
 
 Dev: `cd ui && npm run dev` (Vite port 5174 + Express port 3002)
-Docker: `make compose-ui` → Express serves everything on port 3002
+Docker: `make lumen-docker-ui` → Express serves everything on port 3002
 
 ---
 
@@ -329,7 +331,7 @@ Docker: `make compose-ui` → Express serves everything on port 3002
 | plantuml.jar downloaded in java-builder stage | Java already present for indexer; reuses same JRE; no extra base image needed |
 | No calendar dates in roadmap | Fabricated timelines damage credibility |
 | MkDocs Material instead of Docusaurus | Python-based (~10 MB vs ~200 MB), no npm in pipeline; `mkdocs-material` in pyproject.toml |
-| `uv` instead of `pip` | Faster installs, reproducible lockfile (`uv.lock`); `make install-pipeline` runs `uv sync` |
+| `uv` instead of `pip` | Faster installs, reproducible lockfile (`uv.lock`); `make lumen-install-pipeline` runs `uv sync` |
 | `--repo-name` CLI flag | Docker mounts repo at `/repo` so `Path("/repo").name = "repo"`; flag lets caller override |
 | Output dir `<repo>-<timestamp>` | Allows multiple runs of the same repo side-by-side without overwriting |
 | Multi-repo doc-site | `build-docs-site.sh` iterates `output/*/artifacts/` — accumulates all runs in one site |

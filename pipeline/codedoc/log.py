@@ -162,13 +162,13 @@ def print_xlarge_mcp_guidance_panel(repo_path: str) -> None:
         "",
         "[bold]What to do next[/bold]",
         "1. Start MCP mode. It will handle indexing and expose the graph tools:",
-        f"   make docker-mcp REPO={repo_path}",
+        f"   make lumen-docker-mcp REPO={repo_path}",
         "2. Wait for the MCP HTTP URL to appear in the terminal.",
         "3. Connect your LLM client to that MCP server.",
         "4. Ask focused questions against the indexed graph.",
         "",
         "[bold]Native alternative[/bold]",
-        f"   cd pipeline && uv run lumen mcp-http {repo_path}",
+        f"   make lumen-mcp REPO={repo_path}",
     ]
     console.print()
     console.print(

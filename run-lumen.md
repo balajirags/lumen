@@ -5,9 +5,8 @@ This guide explains how to run Lumen on a laptop or VM where pulling images from
 ## Prerequisites
 
 - Docker installed and running
-- Docker Compose available
 - A prebuilt Lumen image archive such as `lumen-0.1.0-amd64.tar` or `lumen-0.1.0-arm64.tar`
-- This runtime bundle, including `Makefile` and `docker-compose.yml`
+- This runtime bundle, including `Makefile` and `scripts/lumen-docker-*.sh`
 - API credentials if using hosted providers such as Anthropic or OpenAI
 
 Important:
@@ -21,7 +20,7 @@ Important:
 Run these steps on a machine that is allowed to build the image:
 
 ```bash
-make docker-build
+make lumen-docker-build
 docker save lumen:latest -o lumen-0.1.0-amd64.tar
 ```
 
@@ -35,7 +34,7 @@ Transfer the tarball to the target laptop or VM using an approved offline method
 
 ## 2. Use a release bundle
 
-If you received a release candidate bundle created by `scripts/create-release-tarball.sh`, unpack it first:
+If you received a release candidate bundle created by `scripts/lumen-docker-release.sh`, unpack it first:
 
 ```bash
 tar -xzf lumen-rc-<version>-<arch>.tar.gz
@@ -45,10 +44,13 @@ cd lumen-rc-<version>-<arch>/runtime
 The unpacked bundle includes:
 
 - `../images/<image>.tar`
-- `docker-compose.yml`
 - `Makefile`
 - `run-lumen.md`
 - `docker-source.md`
+- `scripts/lumen-docker-load.sh`
+- `scripts/lumen-docker-run.sh`
+- `scripts/lumen-docker-mcp.sh`
+- `scripts/lumen-docker-docs.sh`
 - `release.txt`
 - `../checksums/SHA256SUMS`
 
@@ -63,7 +65,7 @@ cd runtime
 ## 3. Load the image
 
 ```bash
-docker load -i ../images/lumen-0.1.0-amd64.tar
+./scripts/lumen-docker-load.sh ../images/lumen-0.1.0-amd64.tar
 ```
 
 ## 4. Verify the image
@@ -82,14 +84,14 @@ Expected result:
 export ANTHROPIC_API_KEY=...
 # or: export OPENAI_API_KEY=...
 
-make docker-pipeline REPO=/path/to/repo \
+make lumen-docker-run REPO=/path/to/repo \
   ARGS='--provider anthropic --model claude-sonnet-4-6'
 ```
 
 For a local Ollama model:
 
 ```bash
-make docker-pipeline REPO=/path/to/repo \
+make lumen-docker-run REPO=/path/to/repo \
   ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
 ```
 
@@ -98,13 +100,13 @@ make docker-pipeline REPO=/path/to/repo \
 Use an existing DB:
 
 ```bash
-make docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
+make lumen-docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
 ```
 
 Or index a repo and serve MCP directly:
 
 ```bash
-make docker-mcp REPO=/path/to/repo
+make lumen-docker-mcp REPO=/path/to/repo
 ```
 
 Default MCP URL:
@@ -114,7 +116,7 @@ Default MCP URL:
 ## 7. Serve generated docs
 
 ```bash
-make docker-docs
+make lumen-docker-docs
 ```
 
 Default docs URL:
