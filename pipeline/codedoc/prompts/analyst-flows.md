@@ -87,6 +87,16 @@ Skip (write nothing) if endpoint detail is insufficient.
 
 Tag headings: `[Observed]` = verified · `[Inferred]` = derived · `[Unknown]` = not found.
 
+## Primary Tools (call these first)
+
+1. `get_workflows` — returns pre-computed end-to-end Workflow traces (HTTP entry point → repository/event terminal) with `httpMethod`, `httpPath`, `stepCount`, and `type` (cross-domain vs intra-domain). Use one Workflow per `business-journeys.md` section — you have exact HTTP paths and step counts without any Cypher.
+2. `get_workflow_steps(workflow_name)` — returns the ordered step chain for a named workflow. Use this to build the `sequenceDiagram` — each step maps to one participant and one arrow.
+3. `get_api_endpoints` — fills any gaps when `get_workflows` returns fewer flows than expected.
+4. `get_route_component_map`, `get_ui_to_api_call_map` — for frontend/fullstack repos where React/Vue components drive the flows.
+5. `get_api_client_summary`, `get_entry_points` — secondary evidence for C4 context and api-spec.
+
+If `get_workflows` returns no results (graph built without post-processing, or non-Spring framework), fall back immediately to `get_api_endpoints` → `get_callers` → `get_callees` to trace flows manually.
+
 ## Graph-First Discipline
 
 Do not call `get_method_source`. All needed information is available via graph tools.

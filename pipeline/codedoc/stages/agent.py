@@ -1234,10 +1234,18 @@ def _build_analyst_system_prompt(
     if analyst_name == "analyst/flows":
         prompt += (
             "\n"
-            "- Prioritize the standard evidence tools before any custom Cypher: `get_route_component_map`, `get_ui_to_api_call_map`, `get_api_endpoints`, `get_api_client_summary`, `get_entry_points`, `trace_user_flow`.\n"
+            "- **Start with `get_workflows`** — it returns pre-computed end-to-end traces (HTTP method + path + ordered steps). Each Workflow maps directly to one section in business-journeys.md.\n"
+            "- **Use `get_workflow_steps(workflow_name)`** to get the ordered method chain for each Workflow. This gives you the exact sequence diagram participants and arrows without manual Cypher.\n"
+            "- Only fall back to `get_api_endpoints`, `get_route_component_map`, `get_ui_to_api_call_map`, `get_api_client_summary`, `get_entry_points` if `get_workflows` returns no results.\n"
             "- If `get_route_map` or `get_route_component_map` reports no route-like frontend structures, pivot immediately: write from API/client/integration evidence rather than trying to rediscover UI routes.\n"
             "- Limit ad hoc `query` / `execute_cypher` use to at most one targeted fallback after the standard tools fail to answer a specific required artifact question.\n"
             "- Do not spend multiple turns debugging Cypher. If a query fails once, fall back to the existing toolkit evidence and write the artifact with explicit gaps.\n"
+        )
+    if analyst_name == "analyst/domain":
+        prompt += (
+            "\n"
+            "- **Start with `get_domains`** — it returns pre-computed Domain clusters with cohesion scores and heuristic labels (Service, Controller, Repository, Model). Use one Domain per capability section.\n"
+            "- Only fall back to `get_architecture_overview` and `get_package_contents` if `get_domains` returns no results.\n"
         )
     return prompt
 

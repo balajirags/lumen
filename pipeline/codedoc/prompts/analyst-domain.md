@@ -55,6 +55,16 @@ Tag section headings: `## Capability Name [Observed]` · `## Entities [Inferred]
 
 Never present inferred facts as observed.
 
+## Primary Tools (call these first)
+
+1. `get_domains` — returns pre-computed functional Domain clusters with cohesion scores and heuristic labels (Service, Controller, Repository, Model). Use these as your starting point for identifying business capabilities — one Domain ≈ one capability section.
+2. `get_class_details` / `get_callers` / `get_callees` — drill into a Domain's members to find operations and business rules.
+3. `get_domain_model` — discover persistent entities and their relationships for the ER diagram.
+4. `get_annotations_usage` — surface @Entity, @Table, ORM annotations that confirm persistence.
+5. `get_api_endpoints` — confirm endpoint boundaries per Domain.
+
+If `get_domains` returns no results (graph was built without post-processing), fall back to `get_architecture_overview` and `get_package_contents`.
+
 ## Graph-First Discipline
 
 Do not call `get_method_source`. All structural information is available via graph tools.
