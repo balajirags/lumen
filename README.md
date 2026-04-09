@@ -221,13 +221,14 @@ This is the supported docs viewer path. It rebuilds the MkDocs site from the exi
 ### Release candidate bundle
 
 ```bash
-scripts/lumen-docker-release.sh
+TAG=v0.1.0 scripts/lumen-docker-release.sh
 ```
 
 Current behavior:
 
-- looks for the local image `lumen:latest`
-- if the image is missing, runs `make lumen-docker-build`
+- always packages the local image `lumen:latest`
+- if that image is missing, runs `make lumen-docker-build`
+- if `TAG` is provided, it is used only for release bundle naming
 - creates a bundle under `releases/`
 - packages the Docker image tar, runtime scripts, checksums, and a final `.tar.gz`
 

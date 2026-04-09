@@ -4,10 +4,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOCKER_IMAGE="${DOCKER_IMAGE:-lumen}"
+RELEASE_DIR="${RELEASE_DIR:-${ROOT_DIR}/releases}"
+TAG="${TAG:-}"
 DOCKER_TAG="${DOCKER_TAG:-latest}"
 IMAGE_REF="${DOCKER_IMAGE}:${DOCKER_TAG}"
-RELEASE_DIR="${RELEASE_DIR:-${ROOT_DIR}/releases}"
-VERSION="${VERSION:-$(date +%Y%m%d-%H%M%S)}"
+VERSION="${VERSION:-${TAG:-$(date +%Y%m%d-%H%M%S)}}"
 ARCH="${ARCH:-$(uname -m)}"
 RC_NAME="${RC_NAME:-${DOCKER_IMAGE}-rc-${VERSION}-${ARCH}}"
 RC_DIR="${RELEASE_DIR}/${RC_NAME}"

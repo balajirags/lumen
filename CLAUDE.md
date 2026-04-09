@@ -242,7 +242,9 @@ Current indexing behavior:
 
 Release packaging:
 - `scripts/lumen-docker-release.sh` packages the current local Docker image into `releases/`
-- if the image is missing, it runs `make lumen-docker-build`
+- it always packages `lumen:latest`
+- if that image is missing, it runs `make lumen-docker-build`
+- `TAG` is only used for release bundle naming
 - it does not create git tags automatically
 
 ---
