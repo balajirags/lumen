@@ -32,6 +32,23 @@ _STAGE_STYLES: dict[str, str] = {
     "researcher":  "cyan",
 }
 
+# Distinct accent color per analyst — used in live boxes, done lines, tool table
+_ANALYST_COLORS: dict[str, str] = {
+    "analyst/domain": "blue",
+    "analyst/flows":  "cyan",
+    "analyst/tech":   "yellow",
+}
+
+def _analyst_color(name: str) -> str:
+    return _ANALYST_COLORS.get(name, "white")
+
+# Emoji icon per stage number
+_STAGE_ICONS: dict[int, str] = {
+    1: "📦",
+    2: "🤖",
+    3: "🏗 ",
+}
+
 _indexer_live: Live | None = None
 _indexer_state: dict[str, str] = {}
 _agent_live: Live | None = None
@@ -111,12 +128,14 @@ def print_pipeline_start(repo: str, output_dir: str) -> None:  # noqa: ARG001
 
 
 def print_stage_header(n: int, name: str) -> None:
+    icon = _STAGE_ICONS.get(n, "▸")
     console.print()
-    console.print(Rule(f"Stage {n}: {name}", style="cyan", align="left"))
+    console.print(Rule(f"{icon} Stage {n}: {name}", style="cyan", align="left"))
 
 
 def print_stage_done(n: int, name: str, elapsed: float) -> None:  # noqa: ARG001
-    console.print(f"  [green]✓[/green] Stage {n} done  [green]{_fmt_elapsed(elapsed)}[/green]")
+    icon = _STAGE_ICONS.get(n, "▸")
+    console.print(f"  [green]✓[/green] {icon} Stage {n} done  [green]{_fmt_elapsed(elapsed)}[/green]")
 
 
 def _build_loc_breakdown_table(metrics: dict[str, object]) -> Table | None:
@@ -228,11 +247,13 @@ def print_progress_line(tag: str, turn: int, max_turns: int, tool_name: str) -> 
 
 def print_researcher_done(name: str, char_count: int) -> None:
     update_agent_box(name, status="done", artifacts=char_count)
-    label = name.replace("researcher/", "").replace("analyst/", "") + " researcher"
+    short = name.replace("researcher/", "").replace("analyst/", "")
+    accent = _analyst_color(name)
     text = Text("  ")
-    text.append(label, style="bold green")
-    text.append(f"  done — ")
-    text.append(f"{char_count:,} chars", style="dim")
+    text.append(f"✓ {short}", style=f"bold {accent}")
+    text.append("  researcher done  ", style="dim")
+    text.append(f"{char_count:,}", style="bold")
+    text.append(" chars", style="dim")
     console.print(text)
 
 
@@ -304,12 +325,18 @@ def print_supervisor_summary(
     tool_uses: int,
 ) -> None:
     total = input_tokens + output_tokens
-    console.print(
-        f"  [dim]artifacts :[/dim] {artifacts}\n"
-        f"  [dim]tokens    :[/dim] {input_tokens:,} in / {output_tokens:,} out  "
-        f"[dim]({total:,} total)[/dim]\n"
-        f"  [dim]tool uses :[/dim] {tool_uses}"
+    grid = Table.grid(padding=(0, 3))
+    grid.add_column(style="dim", no_wrap=True)
+    grid.add_column()
+    grid.add_row("artifacts", f"[bold]{artifacts}[/bold]")
+    grid.add_row(
+        "tokens",
+        f"{input_tokens:,} in / {output_tokens:,} out"
+        + (f"  [dim]({total:,} total)[/dim]" if total else ""),
     )
+    grid.add_row("tool calls", str(tool_uses))
+    console.print()
+    console.print(Panel(grid, title="[bold] Run Summary [/bold]", border_style="dim", padding=(0, 1)))
 
 
 def _render_indexer_panel() -> Panel:
@@ -355,13 +382,13 @@ def stop_indexer_progress() -> None:
 
 def _status_renderable(status: str):
     if status == "running":
-        return Spinner("dots", text="running", style="cyan")
-    style = {
-        "pending": "dim",
-        "done": "green",
-        "failed": "red",
-    }.get(status, "dim")
-    return Text(status, style=style)
+        return Spinner("dots", text=" running", style="cyan")
+    char, style = {
+        "pending": ("⊙", "dim"),
+        "done":    ("✓", "green"),
+        "failed":  ("✗", "red"),
+    }.get(status, ("·", "dim"))
+    return Text(f"{char} {status}", style=style)
 
 
 def _render_agent_columns() -> Columns:
@@ -374,19 +401,27 @@ def _render_agent_columns() -> Columns:
         max_turns = info.get("max_turns")
         tool = str(info.get("tool", "waiting"))
         artifacts = info.get("artifacts")
+        accent = _analyst_color(name)
         body: list[object] = [Text("status: "), _status_renderable(status)]
         if turn and max_turns:
             body.append(Text(f"turn: {turn}/{max_turns}", style="dim"))
-        body.append(Text(f"tool: {tool}", style="dim"))
+        # Active tool shown in accent color when running, dim otherwise
+        tool_style = f"bold {accent}" if status == "running" else "dim"
+        body.append(Text(f"tool: {tool}", style=tool_style))
         if artifacts is not None:
             body.append(Text(f"artifacts: {artifacts}", style="dim"))
-        border = {
+        # Border and title both use the researcher's accent when running
+        border = accent if status == "running" else {
             "pending": "dim",
-            "running": "cyan",
             "done": "green",
             "failed": "red",
         }.get(status, "dim")
-        panels.append(Panel(Group(*body), title=label, border_style=border))
+        title_style = f"bold {accent}" if status == "running" else "bold"
+        panels.append(Panel(
+            Group(*body),
+            title=f"[{title_style}]{label}[/{title_style}]",
+            border_style=border,
+        ))
     return Columns(panels, equal=True, expand=True)
 
 
