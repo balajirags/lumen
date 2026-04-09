@@ -917,6 +917,7 @@ class ReverseEngineerToolkit:
         def get_route_component_map() -> str:
             """Map route/page/layout entries to owning modules and rendered components."""
             lines = ["=== ROUTE COMPONENT MAP ===\n"]
+            found_rows = False
 
             try:
                 rows = backend.execute(
@@ -932,6 +933,7 @@ class ReverseEngineerToolkit:
                     "ORDER BY path, entry LIMIT 80"
                 )
                 if rows:
+                    found_rows = True
                     lines.append("── Route / Page Entries ──")
                     lines.append(_format_rows(rows))
             except Exception as e:
@@ -946,10 +948,47 @@ class ReverseEngineerToolkit:
                     "ORDER BY entry, child_component LIMIT 120"
                 )
                 if rows:
+                    found_rows = True
                     lines.append("\n── Route To Component Edges ──")
                     lines.append(_format_rows(rows))
             except Exception:
                 pass
+
+            if not found_rows:
+                try:
+                    rows = backend.execute(
+                        "MATCH (entry) "
+                        "WHERE label(entry) IN ['Component', 'Function', 'ArrowFunction', 'Module'] "
+                        "AND ("
+                        "entry.name =~ '(?i).*(app|root|shell|main).*' "
+                        "OR coalesce(entry.path, '') =~ '(?i).*(components|src/|admin-frontend|frontend).*'"
+                        ") "
+                        "OPTIONAL MATCH (owner)-[:CONTAINS]->(entry) "
+                        "RETURN DISTINCT entry.qualifiedName AS entry, label(entry) AS entry_type, entry.path AS path, "
+                        "owner.qualifiedName AS owner "
+                        "ORDER BY entry_type DESC, path, entry LIMIT 40"
+                    )
+                    if rows:
+                        found_rows = True
+                        lines.append("\n── UI Entry Surfaces (SPA Fallback) ──")
+                        lines.append(_format_rows(rows))
+                except Exception:
+                    pass
+
+                try:
+                    rows = backend.execute(
+                        "MATCH (entry)-[r:RENDERS]->(child:Component) "
+                        "WHERE entry.name =~ '(?i).*(app|root|shell|main).*' "
+                        "OR coalesce(entry.path, '') =~ '(?i).*(components|src/|admin-frontend|frontend).*' "
+                        "RETURN entry.qualifiedName AS entry, child.qualifiedName AS child_component, r.lineNumber AS line "
+                        "ORDER BY entry, child_component LIMIT 120"
+                    )
+                    if rows:
+                        found_rows = True
+                        lines.append("\n── UI Entry To Component Edges (SPA Fallback) ──")
+                        lines.append(_format_rows(rows))
+                except Exception:
+                    pass
 
             return "\n".join(lines) if len(lines) > 1 else "No route-to-component map detected."
 
@@ -1000,18 +1039,19 @@ class ReverseEngineerToolkit:
         def get_ui_to_api_call_map() -> str:
             """Map UI components/routes/hooks to API client calls and likely backend endpoints."""
             lines = ["=== UI TO API CALL MAP ===\n"]
+            found_rows = False
 
             try:
                 ui_client_rows = backend.execute(
                     "MATCH (ui)-[r:CALLS]->(target) "
-                    "WHERE label(ui) IN ['Component', 'Hook', 'Function', 'ArrowFunction'] "
+                    "WHERE label(ui) IN ['Component', 'Hook', 'Function', 'ArrowFunction', 'AsyncFunction'] "
                     "AND (label(ui) = 'Component' "
                     "OR ui.name =~ '(?i).*(route|router|page|screen|layout|view).*' "
                     "OR coalesce(ui.path, '') =~ '(?i).*(components|pages|screens|views|routes|app/|src/app).*') "
                     "AND (target.name =~ '(?i).*(client|api|fetch|axios|gateway|service|query|request|get|post|put|delete).*' "
                     "OR coalesce(target.qualifiedName, '') =~ '(?i).*(client|api|fetch|axios|gateway|service|query|request|get|post|put|delete).*') "
                     "RETURN DISTINCT ui.qualifiedName AS ui, label(ui) AS ui_type, ui.path AS ui_path, "
-                    "target.qualifiedName AS client, target.path AS client_path, r.lineNumber AS line "
+                    "target.qualifiedName AS client, label(target) AS client_type, target.path AS client_path, r.lineNumber AS line "
                     "ORDER BY ui, client LIMIT 160"
                 )
             except Exception as e:
@@ -1029,6 +1069,7 @@ class ReverseEngineerToolkit:
                 endpoint_rows = []
 
             if ui_client_rows:
+                found_rows = True
                 lines.append("── UI To Client Calls ──")
                 mapped_rows: list[dict[str, Any]] = []
                 for row in ui_client_rows:
@@ -1049,12 +1090,49 @@ class ReverseEngineerToolkit:
                         }
                     )
                 lines.append(_format_rows(mapped_rows))
+            else:
+                try:
+                    import_rows = backend.execute(
+                        "MATCH (ui:Module)-[r:IMPORTS]->(target:Module) "
+                        "WHERE (coalesce(ui.path, '') =~ '(?i).*(components|pages|screens|views|routes|app/|src/app|admin-frontend|frontend).*' "
+                        "OR ui.qualifiedName =~ '(?i).*(components|pages|screens|views|routes|app|admin-frontend|frontend).*') "
+                        "AND (target.name =~ '(?i).*(client|api|fetch|axios|gateway|service|query|request).*' "
+                        "OR coalesce(target.qualifiedName, '') =~ '(?i).*(client|api|fetch|axios|gateway|service|query|request).*') "
+                        "RETURN DISTINCT ui.qualifiedName AS ui, 'Module' AS ui_type, ui.path AS ui_path, "
+                        "target.qualifiedName AS client, 'Module' AS client_type, target.path AS client_path, r.localName AS line "
+                        "ORDER BY ui, client LIMIT 160"
+                    )
+                except Exception:
+                    import_rows = []
+
+                if import_rows:
+                    found_rows = True
+                    lines.append("── UI Module Imports To API Modules (Fallback) ──")
+                    mapped_rows = []
+                    for row in import_rows:
+                        client_name = str(row.get("client", "") or "")
+                        client_tokens = _name_tokens(client_name)
+                        matched = []
+                        for endpoint in endpoint_rows:
+                            endpoint_name = str(endpoint.get("endpoint", "") or endpoint.get("endpoint_name", "") or "")
+                            if client_tokens and client_tokens.intersection(_name_tokens(endpoint_name)):
+                                matched.append(endpoint_name)
+                        mapped_rows.append(
+                            {
+                                "ui": row.get("ui"),
+                                "ui_type": row.get("ui_type"),
+                                "client": client_name,
+                                "line": row.get("line"),
+                                "probable_endpoints": matched[:3] or ["no direct endpoint match"],
+                            }
+                        )
+                    lines.append(_format_rows(mapped_rows))
 
             if endpoint_rows:
                 lines.append("\n── Backend Endpoint Candidates ──")
                 lines.append(_format_rows(endpoint_rows))
 
-            return "\n".join(lines) if len(lines) > 1 else "No UI-to-API call map detected."
+            return "\n".join(lines) if found_rows or endpoint_rows else "No UI-to-API call map detected."
 
         # ------------------------------------------------------------------ #
         # get_frontend_architecture_summary

@@ -15,6 +15,7 @@ def test_language_registry_drives_suffix_resolution():
 
 def test_archetype_registry_resolves_fullstack_from_signals():
     assert resolve_archetype({"frontend-ui": 3, "backend-api": 2, "library": 0}, ["js"]) == "fullstack-app"
+    assert resolve_archetype({"frontend-ui": 3, "backend-api": 1, "library": 0}, ["js"]) == "frontend-app"
     assert archetype_definition("fullstack-app").guidance_file == "archetype-fullstack-app.md"
 
 
@@ -63,3 +64,30 @@ def test_classify_repo_js_library_defaults_to_library(tmp_path):
 
     assert metrics["detected_language_categories"] == ["js"]
     assert metrics["selected_archetype"] == "library"
+
+
+def test_classify_repo_js_docs_api_names_do_not_imply_backend_api(tmp_path):
+    (tmp_path / "docs" / "chapters" / "api").mkdir(parents=True)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "docs" / "chapters" / "api" / "Overview.tsx").write_text("export function Overview(){ return null }")
+    (tmp_path / "src" / "server-to-client.ts").write_text("export const serverToClient = () => 'docs';")
+    (tmp_path / "src" / "App.tsx").write_text("export function App(){ return null }")
+    (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"react": "^19.0.0"}}))
+
+    metrics = classify_repo(str(tmp_path))
+
+    assert metrics["selected_archetype"] == "frontend-app"
+    assert "backend-api" not in metrics["archetype_signals"]
+    assert "http-api" not in metrics["capabilities"]
+
+
+def test_js_frontend_with_weak_backend_signal_does_not_get_http_api():
+    metrics = {
+        "detected_language_categories": ["js"],
+        "archetype_signals": ["frontend-ui", "backend-api"],
+        "archetype_signal_counts": {"frontend-ui": 8, "backend-api": 1},
+    }
+
+    from codedoc.artifact_planner import infer_capabilities
+
+    assert infer_capabilities("frontend-app", metrics) == ["js-runtime", "ui-routes"]

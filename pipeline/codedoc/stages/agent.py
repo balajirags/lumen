@@ -990,14 +990,30 @@ def _backfill_required_artifacts(kuzu_path: str, repo_path: str, artifacts_dir: 
     route_target = root / "architecture" / "route-map.md"
     if archetype in {"frontend-app", "fullstack-app"} and not route_target.exists():
         route_summary = toolkit.call("get_route_component_map")
-        content = (
-            "# Route Map\n\n"
-            "## Route And Page Surface [Observed]\n\n"
-            "The following route/page/layout view was generated directly from the knowledge graph.\n\n"
-            "```text\n"
-            f"{route_summary}\n"
-            "```\n"
-        )
+        if "UI Entry Surfaces (SPA Fallback)" in route_summary:
+            intro = (
+                "# Route Map\n\n"
+                "## UI Entry Surface [Observed]\n\n"
+                "This frontend does not expose a strong router/page graph. The current-state view is therefore centered on the SPA entry modules and top-level rendered components captured in the graph.\n\n"
+                "## Entry Modules And Root Components [Observed]\n\n"
+                "```text\n"
+                f"{route_summary}\n"
+                "```\n\n"
+                "## Interpretation [Inferred]\n\n"
+                "- Treat the listed App/main modules as UI entry surfaces rather than URL routes.\n"
+                "- Treat the rendered child components as the primary feature shells or tabs exposed by the SPA.\n"
+                "- If a separate routing layer exists, it is not strongly represented in the current graph and should be documented as a follow-up gap.\n"
+            )
+            content = intro
+        else:
+            content = (
+                "# Route Map\n\n"
+                "## Route And Page Surface [Observed]\n\n"
+                "The following route/page/layout view was generated directly from the knowledge graph.\n\n"
+                "```text\n"
+                f"{route_summary}\n"
+                "```\n"
+            )
         _write_artifact(artifacts_dir, "architecture/route-map.md", content)
         generated.append(str(route_target))
 
@@ -1067,28 +1083,50 @@ def _backfill_required_artifacts(kuzu_path: str, repo_path: str, artifacts_dir: 
         client_summary = toolkit.call("get_api_client_summary")
         endpoint_summary = toolkit.call("get_ui_to_api_call_map")
         source_confirmation = _controlled_frontend_source_confirmation(toolkit, endpoint_summary)
-        content = (
-            "# UI to API Interactions\n\n"
-            "## Route And Component Surface [Observed]\n\n"
-            "The following route and UI entry-point summary was generated directly from the knowledge graph.\n\n"
-            "```text\n"
-            f"{route_summary}\n"
-            "```\n\n"
-            "## API Clients And Fetch Layers [Observed]\n\n"
-            "The following client-side API usage summary was generated directly from the knowledge graph.\n\n"
-            "```text\n"
-            f"{client_summary}\n"
-            "```\n\n"
-            "## UI To Client To Endpoint Map [Observed]\n\n"
-            "The following UI/client/endpoint summary was generated directly from the knowledge graph.\n\n"
-            "```text\n"
-            f"{endpoint_summary}\n"
-            "```\n\n"
-            "## Interaction Notes [Observed]\n\n"
-            "- Use the route/component section as the UI entry view.\n"
-            "- Use the API client section to identify fetch wrappers, query hooks, or service modules.\n"
-            "- Use the call map section to trace observed UI-to-client edges and probable endpoint matches.\n"
-        )
+        if "UI Module Imports To API Modules (Fallback)" in endpoint_summary:
+            content = (
+                "# UI to API Interactions\n\n"
+                "## UI Entry Surface [Observed]\n\n"
+                "The current graph does not prove direct component-to-endpoint call chains, but it does show the frontend entry modules and their imported API modules.\n\n"
+                "```text\n"
+                f"{route_summary}\n"
+                "```\n\n"
+                "## API Modules And Fetch Layers [Observed]\n\n"
+                "```text\n"
+                f"{client_summary}\n"
+                "```\n\n"
+                "## UI Module To API Module Links [Observed]\n\n"
+                "```text\n"
+                f"{endpoint_summary}\n"
+                "```\n\n"
+                "## Interpretation [Inferred]\n\n"
+                "- Treat the imported API modules as the current frontend-to-backend integration seam.\n"
+                "- Treat endpoint matches in this view as probable unless the graph shows a direct call path.\n"
+                "- Use this artifact to identify which UI entry surfaces depend on which API wrapper modules before refining endpoint-level mappings.\n"
+            )
+        else:
+            content = (
+                "# UI to API Interactions\n\n"
+                "## Route And Component Surface [Observed]\n\n"
+                "The following route and UI entry-point summary was generated directly from the knowledge graph.\n\n"
+                "```text\n"
+                f"{route_summary}\n"
+                "```\n\n"
+                "## API Clients And Fetch Layers [Observed]\n\n"
+                "The following client-side API usage summary was generated directly from the knowledge graph.\n\n"
+                "```text\n"
+                f"{client_summary}\n"
+                "```\n\n"
+                "## UI To Client To Endpoint Map [Observed]\n\n"
+                "The following UI/client/endpoint summary was generated directly from the knowledge graph.\n\n"
+                "```text\n"
+                f"{endpoint_summary}\n"
+                "```\n\n"
+                "## Interaction Notes [Observed]\n\n"
+                "- Use the route/component section as the UI entry view.\n"
+                "- Use the API client section to identify fetch wrappers, query hooks, or service modules.\n"
+                "- Use the call map section to trace observed UI-to-client edges and probable endpoint matches.\n"
+            )
         if source_confirmation:
             content += (
                 "\n## Targeted Source Confirmation [Direct Code]\n\n"

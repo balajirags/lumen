@@ -80,3 +80,59 @@ def test_get_frontend_architecture_summary_uses_frontend_specific_tools():
     assert "COMPONENT TREE" in result
     assert "STATE OWNERSHIP MAP" in result
     assert "UI TO API CALL MAP" in result
+
+
+class FallbackFrontendBackend:
+    def execute(self, query: str):
+        if "MATCH (entry)" in query and "app|root|shell|main" in query:
+            return [
+                {
+                    "entry": "admin-frontend.src.App.App",
+                    "entry_type": "Component",
+                    "path": "admin-frontend/src/App.jsx",
+                    "owner": "admin-frontend.src.App",
+                }
+            ]
+        if "MATCH (entry)-[r:RENDERS]->(child:Component)" in query and "app|root|shell|main" in query:
+            return [
+                {
+                    "entry": "admin-frontend.src.App.App",
+                    "child_component": "admin-frontend.src.components.Reservations.Reservations",
+                    "line": 42,
+                }
+            ]
+        if "MATCH (ui:Module)-[r:IMPORTS]->(target:Module)" in query:
+            return [
+                {
+                    "ui": "admin-frontend.src.App",
+                    "ui_type": "Module",
+                    "ui_path": "admin-frontend/src/App.jsx",
+                    "client": "admin-frontend.src.api",
+                    "client_type": "Module",
+                    "client_path": "admin-frontend/src/api.js",
+                    "line": "fetchLocations",
+                }
+            ]
+        if "MATCH (n) WHERE n.normKind = 'Entrypoint'" in query:
+            return [{"endpoint": "InventoryController.getLocations", "endpoint_name": "getLocations", "endpoint_type": "Method"}]
+        return []
+
+
+def test_get_route_component_map_falls_back_to_spa_entry_surfaces():
+    toolkit = ReverseEngineerToolkit(FallbackFrontendBackend(), repo_path=".")
+
+    result = toolkit.call("get_route_component_map")
+
+    assert "UI Entry Surfaces (SPA Fallback)" in result
+    assert "admin-frontend.src.App.App" in result
+    assert "UI Entry To Component Edges (SPA Fallback)" in result
+
+
+def test_get_ui_to_api_call_map_falls_back_to_ui_module_imports():
+    toolkit = ReverseEngineerToolkit(FallbackFrontendBackend(), repo_path=".")
+
+    result = toolkit.call("get_ui_to_api_call_map")
+
+    assert "UI Module Imports To API Modules (Fallback)" in result
+    assert "admin-frontend.src.App" in result
+    assert "admin-frontend.src.api" in result

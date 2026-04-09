@@ -315,7 +315,10 @@ def infer_capabilities(primary_repo_type: str, repo_metrics: dict[str, Any] | No
     metrics = repo_metrics or {}
     categories = set(metrics.get("detected_language_categories", []))
     signals = set(metrics.get("archetype_signals", []))
+    signal_counts = dict(metrics.get("archetype_signal_counts", {}))
     capabilities: list[str] = []
+    js_only = categories == {"js"}
+    strong_backend_signal = signal_counts.get("backend-api", 0) >= (2 if js_only else 1)
 
     if "jvm" in categories or "python" in categories:
         capabilities.append("backend-runtime")
@@ -323,7 +326,7 @@ def infer_capabilities(primary_repo_type: str, repo_metrics: dict[str, Any] | No
         capabilities.append("js-runtime")
     if "frontend-ui" in signals:
         capabilities.append("ui-routes")
-    if "backend-api" in signals:
+    if strong_backend_signal:
         capabilities.append("http-api")
     if primary_repo_type in {"backend-service", "fullstack-app"}:
         capabilities.append("persistence")

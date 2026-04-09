@@ -238,13 +238,14 @@ ARCHETYPES: dict[str, ArchetypeDefinition] = {
                 "Execute in 5 turns.\n"
                 "TURN 1 — batch in one response: get_route_component_map, get_ui_to_api_call_map, get_api_endpoints, get_api_client_summary, get_external_dependencies, get_entry_points.\n"
                 "TURN 2 — call trace_user_flow on up to 3 highest-signal end-to-end journeys from Turn 1. "
-                "Prefer journeys that cross UI route, API, and persistence/integration boundaries. If Turn 1 reports no route-like frontend structures, skip trace_user_flow and pivot to the strongest API/client evidence already gathered.\n"
+                "Prefer journeys that cross UI route, API, and persistence/integration boundaries. If Turn 1 reports no route-like frontend structures, or if the UI-to-API map is only the `UI Module Imports To API Modules (Fallback)` view, skip trace_user_flow and pivot to the strongest API/client evidence already gathered.\n"
                 "TURN 3 — call write_c4_artifact('architecture/c4-context.md', title, summary, spec_json). "
                 "Use structured data only. spec_json must contain people, systems, external_systems, and relations arrays.\n"
                 "TURN 4 — call write_artifact('architecture/user-journeys.md', content). "
                 "Document 3-5 end-to-end journeys grounded in routes/components and backend entry points. If UI route evidence is weak, write integration journeys from API entry points and note the frontend gap explicitly.\n"
                 "TURN 5 — call write_artifact('current-state/ui-to-api-interactions.md', content). "
                 "Content: which routes/components/hooks call which API clients and backend endpoints, plus async boundaries and integration seams. Use the direct UI-to-client call map before any inferred endpoint stitching. "
+                "If the strongest frontend evidence is `UI Module Imports To API Modules (Fallback)`, anchor the document on those module-level import paths and name the backend endpoint mapping as probable or unresolved rather than replacing the document with controller-centric backend analysis. "
                 "For backend APIs present in the repo, current-state/api-spec.yaml is mandatory and may be completed in recovery if needed.\n"
                 "Do NOT call get_method_source. Avoid ad hoc execute_cypher unless a required artifact is blocked after the standard tools above. Stop after Turn 5."
             ),
@@ -349,11 +350,15 @@ def archetype_definition(archetype: str) -> ArchetypeDefinition:
 
 
 def resolve_archetype(signal_counts: dict[str, int], detected_language_categories: list[str]) -> str:
-    if signal_counts.get("frontend-ui", 0) > 0 and signal_counts.get("backend-api", 0) > 0:
+    js_only = set(detected_language_categories) == {"js"}
+    backend_present = signal_counts.get("backend-api", 0) >= (2 if js_only else 1)
+    frontend_present = signal_counts.get("frontend-ui", 0) > 0
+
+    if frontend_present and backend_present:
         return "fullstack-app"
-    if signal_counts.get("frontend-ui", 0) > 0:
+    if frontend_present:
         return "frontend-app"
-    if signal_counts.get("backend-api", 0) > 0:
+    if backend_present:
         return "backend-service"
     if signal_counts.get("library", 0) > 0:
         return "library"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from codedoc.archetype_registry import resolve_archetype
@@ -36,8 +37,28 @@ BACKEND_DEP_MARKERS = {
 }
 
 FRONTEND_PATH_MARKERS = {"app", "components", "frontend", "hooks", "pages", "screens", "ui", "views", "web"}
-BACKEND_PATH_MARKERS = {"api", "backend", "controller", "controllers", "handler", "handlers", "route", "routes", "server"}
+BACKEND_PATH_MARKERS = {"backend", "controller", "controllers", "handler", "handlers", "server", "servers", "middleware"}
 LIBRARY_PATH_MARKERS = {"lib", "libs", "sdk", "shared"}
+
+JS_HTTP_API_PATTERNS = (
+    re.compile(r"\bexpress\s*\("),
+    re.compile(r"\bexpress\.Router\s*\("),
+    re.compile(r"\brouter\.(get|post|put|delete|patch|use)\s*\("),
+    re.compile(r"\bapp\.(get|post|put|delete|patch|use|listen)\s*\("),
+    re.compile(r"\bfastify\s*\("),
+    re.compile(r"\bkoa\s*\("),
+    re.compile(r"\bcreateServer\s*\("),
+    re.compile(r"\bhttp\.createServer\s*\("),
+    re.compile(r"@\s*Controller\b"),
+    re.compile(r"@\s*(Get|Post|Put|Delete|Patch)\b"),
+)
+
+JS_API_ROUTE_PATH_PATTERNS = (
+    re.compile(r"(^|/)pages/api/"),
+    re.compile(r"(^|/)app/api/"),
+    re.compile(r"(^|/)src/pages/api/"),
+    re.compile(r"(^|/)src/app/api/"),
+)
 
 
 def is_ignored_path(path: Path) -> bool:
@@ -99,6 +120,32 @@ def _scan_repo_markers(repo: Path) -> tuple[int, int, int]:
     return frontend, backend, library
 
 
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return ""
+
+
+def _js_backend_api_signal(rel: Path, stem: str, content: str) -> int:
+    rel_str = rel.as_posix().lower()
+    score = 0
+
+    if any(pattern.search(rel_str) for pattern in JS_API_ROUTE_PATH_PATTERNS):
+        score += 3
+
+    if stem in {"server", "controller", "handler"}:
+        score += 1
+
+    if any(pattern.search(content) for pattern in JS_HTTP_API_PATTERNS):
+        score += 3
+
+    if "listen(" in content and ("express" in content or "fastify" in content):
+        score += 1
+
+    return score
+
+
 def classify_repo(repo_path: str) -> dict[str, object]:
     repo = Path(repo_path)
 
@@ -124,11 +171,10 @@ def classify_repo(repo_path: str) -> dict[str, object]:
             if definition.key == "python" and flavor != "python":
                 continue
             flavor_counts[flavor] = flavor_counts.get(flavor, 0) + 1
-        try:
-            with path.open("r", encoding="utf-8", errors="ignore") as handle:
-                loc_by_category[definition.key] += sum(1 for line in handle if line.strip())
-        except OSError:
+        content = _read_text(path)
+        if not content:
             continue
+        loc_by_category[definition.key] += sum(1 for line in content.splitlines() if line.strip())
 
         rel_parts = {part.lower() for part in rel.parts}
         stem = path.stem.lower()
@@ -137,8 +183,7 @@ def classify_repo(repo_path: str) -> dict[str, object]:
         if definition.key == "js":
             if suffix in {".jsx", ".tsx"} or rel_parts & FRONTEND_PATH_MARKERS or stem in {"app", "layout", "page"}:
                 signal_counts["frontend-ui"] += 1
-            if rel_parts & BACKEND_PATH_MARKERS or stem in {"server", "handler", "controller", "router"}:
-                signal_counts["backend-api"] += 1
+            signal_counts["backend-api"] += _js_backend_api_signal(rel, stem, content)
         elif definition.key == "python":
             if rel_parts & BACKEND_PATH_MARKERS or stem in {"app", "asgi", "wsgi", "manage"}:
                 signal_counts["backend-api"] += 1
@@ -157,6 +202,7 @@ def classify_repo(repo_path: str) -> dict[str, object]:
     capabilities = infer_capabilities(selected_archetype, {
         "detected_language_categories": detected_language_categories,
         "archetype_signals": [name for name in ("frontend-ui", "backend-api", "library") if signal_counts[name] > 0],
+        "archetype_signal_counts": signal_counts,
     })
     archetype_signals = [name for name in ("frontend-ui", "backend-api", "library") if signal_counts[name] > 0]
 
