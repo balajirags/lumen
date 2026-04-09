@@ -16,6 +16,26 @@ from codedoc.kg_tools.utils import (
 from codedoc.kg_tools.registry import ToolRegistry
 
 
+_NAME_TOKEN_BLACKLIST = {
+    "api", "app", "client", "component", "context", "controller", "data", "default",
+    "fetch", "function", "get", "handler", "hook", "http", "index", "layout", "module",
+    "page", "post", "provider", "query", "request", "route", "router", "screen", "service",
+    "state", "store", "tsx", "ts", "ui", "use", "view",
+}
+
+
+def _name_tokens(value: str) -> set[str]:
+    if not value:
+        return set()
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", value)
+    parts = re.split(r"[^A-Za-z0-9]+", spaced)
+    return {
+        part.lower()
+        for part in parts
+        if len(part) >= 3 and part.lower() not in _NAME_TOKEN_BLACKLIST
+    }
+
+
 # ── Reverse Engineering Toolkit ─────────────────────────────────────────────
 
 
@@ -612,8 +632,8 @@ class ReverseEngineerToolkit:
                     "MATCH (n) "
                     "WHERE label(n) IN ['Component', 'Function', 'ArrowFunction', 'Module'] "
                     "AND ("
-                    "n.name =~ '(?i).*(route|router|page|screen|layout|view|app).*' "
-                    "OR coalesce(n.path, '') =~ '(?i).*(components|pages|screens|views|routes|app).*'"
+                    "n.name =~ '(?i).*(route|router|page|screen|layout|view).*' "
+                    "OR coalesce(n.path, '') =~ '(?i).*(pages|screens|views|routes|app/|src/app).*'"
                     ") "
                     "OPTIONAL MATCH (owner)-[:CONTAINS]->(n) "
                     "RETURN DISTINCT n.name AS name, label(n) AS type, n.path AS path, "
@@ -629,7 +649,7 @@ class ReverseEngineerToolkit:
             try:
                 rows = backend.execute(
                     "MATCH (m:Module)-[:EXPORTS]->(n) "
-                    "WHERE n.name =~ '(?i).*(route|router|page|screen|layout|view|app).*' "
+                    "WHERE n.name =~ '(?i).*(route|router|page|screen|layout|view).*' "
                     "RETURN m.qualifiedName AS module, n.name AS exported, label(n) AS type "
                     "ORDER BY module, exported LIMIT 40"
                 )
@@ -642,7 +662,7 @@ class ReverseEngineerToolkit:
             try:
                 rows = backend.execute(
                     "MATCH (c:Component) "
-                    "WHERE coalesce(c.path, '') =~ '(?i).*(components|pages|screens|views|app).*' "
+                    "WHERE coalesce(c.path, '') =~ '(?i).*(components|pages|screens|views|routes|app/|src/app).*' "
                     "RETURN DISTINCT c.qualifiedName AS component, c.path AS path "
                     "ORDER BY path, component LIMIT 60"
                 )
@@ -690,6 +710,18 @@ class ReverseEngineerToolkit:
             except Exception:
                 pass
 
+            try:
+                rows = backend.execute(
+                    "MATCH (a)-[:PROP_DEPENDENCY]->(b) "
+                    "RETURN a.qualifiedName AS owner, b.qualifiedName AS dependency "
+                    "ORDER BY owner, dependency LIMIT 80"
+                )
+                if rows:
+                    lines.append("\n── Prop Dependencies ──")
+                    lines.append(_format_rows(rows))
+            except Exception:
+                pass
+
             return "\n".join(lines) if len(lines) > 1 else "No component/render boundaries detected."
 
         # ------------------------------------------------------------------ #
@@ -714,6 +746,18 @@ class ReverseEngineerToolkit:
 
             try:
                 rows = backend.execute(
+                    "MATCH (consumer)-[r:USES_HOOK]->(h:Hook) "
+                    "RETURN consumer.qualifiedName AS consumer, h.qualifiedName AS hook, r.lineNumber AS line "
+                    "ORDER BY consumer, hook LIMIT 80"
+                )
+                if rows:
+                    lines.append("\n── Hook Consumers ──")
+                    lines.append(_format_rows(rows))
+            except Exception:
+                pass
+
+            try:
+                rows = backend.execute(
                     "MATCH (n) "
                     "WHERE label(n) IN ['Component', 'Module', 'Function'] "
                     "AND n.name =~ '(?i).*(store|context|provider|state|query|cache|reducer).*' "
@@ -722,6 +766,20 @@ class ReverseEngineerToolkit:
                 )
                 if rows:
                     lines.append("\n── Store / Context Candidates ──")
+                    lines.append(_format_rows(rows))
+            except Exception:
+                pass
+
+            try:
+                rows = backend.execute(
+                    "MATCH (consumer)-[:CALLS|IMPORTS]->(state) "
+                    "WHERE state.name =~ '(?i).*(store|context|provider|state|query|cache|reducer).*' "
+                    "RETURN DISTINCT consumer.qualifiedName AS consumer, label(consumer) AS consumer_type, "
+                    "state.qualifiedName AS state_target, label(state) AS state_type "
+                    "ORDER BY consumer, state_target LIMIT 80"
+                )
+                if rows:
+                    lines.append("\n── State Consumers ──")
                     lines.append(_format_rows(rows))
             except Exception:
                 pass
@@ -763,7 +821,254 @@ class ReverseEngineerToolkit:
             except Exception:
                 pass
 
+            try:
+                rows = backend.execute(
+                    "MATCH (caller)-[r:CALLS]->(target) "
+                    "WHERE target.name =~ '(?i).*(client|api|fetch|axios|gateway|service|query|request).*' "
+                    "OR coalesce(target.qualifiedName, '') =~ '(?i).*(client|api|fetch|axios|gateway|service|query|request).*' "
+                    "RETURN DISTINCT caller.qualifiedName AS caller, label(caller) AS caller_type, "
+                    "target.qualifiedName AS target, r.lineNumber AS line "
+                    "ORDER BY caller, target LIMIT 80"
+                )
+                if rows:
+                    lines.append("\n── Call Sites Into API Clients ──")
+                    lines.append(_format_rows(rows))
+            except Exception:
+                pass
+
             return "\n".join(lines) if len(lines) > 1 else "No API client structures detected."
+
+        # ------------------------------------------------------------------ #
+        # get_component_tree
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_component_tree() -> str:
+            """Summarize component roots and render hierarchy for React-style frontends."""
+            lines = ["=== COMPONENT TREE ===\n"]
+
+            try:
+                rows = backend.execute(
+                    "MATCH (c:Component) "
+                    "WHERE NOT EXISTS { MATCH ()-[:RENDERS]->(c) } "
+                    "RETURN DISTINCT c.qualifiedName AS root, c.path AS path "
+                    "ORDER BY path, root LIMIT 40"
+                )
+                if rows:
+                    lines.append("── Root Components ──")
+                    lines.append(_format_rows(rows))
+            except Exception as e:
+                lines.append(f"  (root component scan error: {e})")
+
+            try:
+                rows = backend.execute(
+                    "MATCH (a)-[r:RENDERS]->(b:Component) "
+                    "RETURN a.qualifiedName AS parent, b.qualifiedName AS child, r.lineNumber AS line "
+                    "ORDER BY parent, child LIMIT 120"
+                )
+                if rows:
+                    lines.append("\n── Render Tree Edges ──")
+                    lines.append(_format_rows(rows))
+            except Exception:
+                pass
+
+            return "\n".join(lines) if len(lines) > 1 else "No component tree detected."
+
+        # ------------------------------------------------------------------ #
+        # get_hook_usage_graph
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_hook_usage_graph() -> str:
+            """Summarize which components and hooks depend on which hooks and async client calls."""
+            lines = ["=== HOOK USAGE GRAPH ===\n"]
+
+            try:
+                rows = backend.execute(
+                    "MATCH (consumer)-[r:USES_HOOK]->(h:Hook) "
+                    "RETURN consumer.qualifiedName AS consumer, label(consumer) AS consumer_type, "
+                    "h.qualifiedName AS hook, r.lineNumber AS line "
+                    "ORDER BY consumer, hook LIMIT 120"
+                )
+                if rows:
+                    lines.append("── Hook Dependencies ──")
+                    lines.append(_format_rows(rows))
+            except Exception as e:
+                lines.append(f"  (hook dependency error: {e})")
+
+            try:
+                rows = backend.execute(
+                    "MATCH (h:Hook)-[r:CALLS]->(target) "
+                    "WHERE target.name =~ '(?i).*(client|api|fetch|axios|gateway|service|query|request).*' "
+                    "OR coalesce(target.qualifiedName, '') =~ '(?i).*(client|api|fetch|axios|gateway|service|query|request).*' "
+                    "RETURN h.qualifiedName AS hook, target.qualifiedName AS target, r.lineNumber AS line "
+                    "ORDER BY hook, target LIMIT 80"
+                )
+                if rows:
+                    lines.append("\n── Hook Calls Into API Clients ──")
+                    lines.append(_format_rows(rows))
+            except Exception:
+                pass
+
+            return "\n".join(lines) if len(lines) > 1 else "No hook usage graph detected."
+
+        # ------------------------------------------------------------------ #
+        # get_route_component_map
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_route_component_map() -> str:
+            """Map route/page/layout entries to owning modules and rendered components."""
+            lines = ["=== ROUTE COMPONENT MAP ===\n"]
+
+            try:
+                rows = backend.execute(
+                    "MATCH (entry) "
+                    "WHERE label(entry) IN ['Component', 'Function', 'ArrowFunction', 'Module'] "
+                    "AND ("
+                    "entry.name =~ '(?i).*(route|router|page|screen|layout|view).*' "
+                    "OR coalesce(entry.path, '') =~ '(?i).*(pages|screens|views|routes|app/|src/app).*'"
+                    ") "
+                    "OPTIONAL MATCH (owner)-[:CONTAINS]->(entry) "
+                    "RETURN DISTINCT entry.qualifiedName AS entry, label(entry) AS entry_type, entry.path AS path, "
+                    "owner.qualifiedName AS owner "
+                    "ORDER BY path, entry LIMIT 80"
+                )
+                if rows:
+                    lines.append("── Route / Page Entries ──")
+                    lines.append(_format_rows(rows))
+            except Exception as e:
+                lines.append(f"  (route entry error: {e})")
+
+            try:
+                rows = backend.execute(
+                    "MATCH (entry)-[r:RENDERS]->(child:Component) "
+                    "WHERE (entry.name =~ '(?i).*(route|router|page|screen|layout|view).*' "
+                    "OR coalesce(entry.path, '') =~ '(?i).*(pages|screens|views|routes|app/|src/app).*') "
+                    "RETURN entry.qualifiedName AS entry, child.qualifiedName AS child_component, r.lineNumber AS line "
+                    "ORDER BY entry, child_component LIMIT 120"
+                )
+                if rows:
+                    lines.append("\n── Route To Component Edges ──")
+                    lines.append(_format_rows(rows))
+            except Exception:
+                pass
+
+            return "\n".join(lines) if len(lines) > 1 else "No route-to-component map detected."
+
+        # ------------------------------------------------------------------ #
+        # get_state_ownership_map
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_state_ownership_map() -> str:
+            """Summarize state owners and their consuming components/hooks."""
+            lines = ["=== STATE OWNERSHIP MAP ===\n"]
+
+            try:
+                rows = backend.execute(
+                    "MATCH (state) "
+                    "WHERE label(state) IN ['Hook', 'Component', 'Module', 'Function'] "
+                    "AND (label(state) = 'Hook' "
+                    "OR state.name =~ '(?i).*(store|context|provider|state|query|cache|reducer).*') "
+                    "RETURN DISTINCT state.qualifiedName AS state_owner, label(state) AS state_type, state.path AS path "
+                    "ORDER BY state_type, state_owner LIMIT 80"
+                )
+                if rows:
+                    lines.append("── State Owners ──")
+                    lines.append(_format_rows(rows))
+            except Exception as e:
+                lines.append(f"  (state owner error: {e})")
+
+            try:
+                rows = backend.execute(
+                    "MATCH (consumer)-[:USES_HOOK|CALLS|IMPORTS]->(state) "
+                    "WHERE label(state) = 'Hook' "
+                    "OR state.name =~ '(?i).*(store|context|provider|state|query|cache|reducer).*' "
+                    "RETURN DISTINCT consumer.qualifiedName AS consumer, label(consumer) AS consumer_type, "
+                    "state.qualifiedName AS state_owner, label(state) AS state_type "
+                    "ORDER BY consumer, state_owner LIMIT 120"
+                )
+                if rows:
+                    lines.append("\n── Consumers ──")
+                    lines.append(_format_rows(rows))
+            except Exception:
+                pass
+
+            return "\n".join(lines) if len(lines) > 1 else "No state ownership map detected."
+
+        # ------------------------------------------------------------------ #
+        # get_ui_to_api_call_map
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_ui_to_api_call_map() -> str:
+            """Map UI components/routes/hooks to API client calls and likely backend endpoints."""
+            lines = ["=== UI TO API CALL MAP ===\n"]
+
+            try:
+                ui_client_rows = backend.execute(
+                    "MATCH (ui)-[r:CALLS]->(target) "
+                    "WHERE label(ui) IN ['Component', 'Hook', 'Function', 'ArrowFunction'] "
+                    "AND (label(ui) = 'Component' "
+                    "OR ui.name =~ '(?i).*(route|router|page|screen|layout|view).*' "
+                    "OR coalesce(ui.path, '') =~ '(?i).*(components|pages|screens|views|routes|app/|src/app).*') "
+                    "AND (target.name =~ '(?i).*(client|api|fetch|axios|gateway|service|query|request|get|post|put|delete).*' "
+                    "OR coalesce(target.qualifiedName, '') =~ '(?i).*(client|api|fetch|axios|gateway|service|query|request|get|post|put|delete).*') "
+                    "RETURN DISTINCT ui.qualifiedName AS ui, label(ui) AS ui_type, ui.path AS ui_path, "
+                    "target.qualifiedName AS client, target.path AS client_path, r.lineNumber AS line "
+                    "ORDER BY ui, client LIMIT 160"
+                )
+            except Exception as e:
+                return f"UI/API map error: {e}"
+
+            endpoint_rows: list[dict[str, Any]] = []
+            try:
+                endpoint_rows = backend.execute(
+                    "MATCH (n) WHERE n.normKind = 'Entrypoint' "
+                    "AND n.name =~ '(?i).*(route|endpoint|handler|controller|api|get_|post_|put_|delete_).*' "
+                    "RETURN DISTINCT n.qualifiedName AS endpoint, n.name AS endpoint_name, label(n) AS endpoint_type "
+                    "ORDER BY endpoint LIMIT 80"
+                )
+            except Exception:
+                endpoint_rows = []
+
+            if ui_client_rows:
+                lines.append("── UI To Client Calls ──")
+                mapped_rows: list[dict[str, Any]] = []
+                for row in ui_client_rows:
+                    client_name = str(row.get("client", "") or "")
+                    client_tokens = _name_tokens(client_name)
+                    matched: list[str] = []
+                    for endpoint in endpoint_rows:
+                        endpoint_name = str(endpoint.get("endpoint", "") or endpoint.get("endpoint_name", "") or "")
+                        if client_tokens and client_tokens.intersection(_name_tokens(endpoint_name)):
+                            matched.append(endpoint_name)
+                    mapped_rows.append(
+                        {
+                            "ui": row.get("ui"),
+                            "ui_type": row.get("ui_type"),
+                            "client": client_name,
+                            "line": row.get("line"),
+                            "probable_endpoints": matched[:3] or ["no direct endpoint match"],
+                        }
+                    )
+                lines.append(_format_rows(mapped_rows))
+
+            if endpoint_rows:
+                lines.append("\n── Backend Endpoint Candidates ──")
+                lines.append(_format_rows(endpoint_rows))
+
+            return "\n".join(lines) if len(lines) > 1 else "No UI-to-API call map detected."
+
+        # ------------------------------------------------------------------ #
+        # get_frontend_architecture_summary
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_frontend_architecture_summary() -> str:
+            """Return a combined frontend architecture summary using the dedicated frontend tools."""
+            parts = [
+                get_route_component_map(),
+                get_component_tree(),
+                get_state_ownership_map(),
+                get_ui_to_api_call_map(),
+            ]
+            return "\n\n".join(part for part in parts if part and "No " not in part[:30]) or "No frontend architecture summary detected."
 
         # ------------------------------------------------------------------ #
         # get_public_api_surface
@@ -1930,7 +2235,8 @@ class ReverseEngineerToolkit:
                 (
                     f"MATCH (m)-[:SOURCE_FILE]->(f:File) "
                     f"WHERE (label(m) = 'Method' OR label(m) = 'Function' OR "
-                    f"       label(m) = 'Constructor' OR label(m) = 'ArrowFunction') "
+                    f"       label(m) = 'Constructor' OR label(m) = 'ArrowFunction' OR "
+                    f"       label(m) = 'Component' OR label(m) = 'Hook' OR label(m) = 'AsyncFunction') "
                     f"AND (m.name = '{esc}' OR m.qualifiedName = '{esc}') "
                     f"RETURN f.path AS path, m.lineNumber AS start_line, "
                     f"m.endLineNumber AS end_line, m.qualifiedName AS qualified_name "
@@ -1939,7 +2245,8 @@ class ReverseEngineerToolkit:
                 # Fallback: path property directly on the node
                 (
                     f"MATCH (m) WHERE (label(m) = 'Method' OR label(m) = 'Function' OR "
-                    f"                 label(m) = 'Constructor' OR label(m) = 'ArrowFunction') "
+                    f"                 label(m) = 'Constructor' OR label(m) = 'ArrowFunction' OR "
+                    f"                 label(m) = 'Component' OR label(m) = 'Hook' OR label(m) = 'AsyncFunction') "
                     f"AND (m.name = '{esc}' OR m.qualifiedName = '{esc}') "
                     f"AND m.path IS NOT NULL "
                     f"RETURN m.path AS path, m.lineNumber AS start_line, "

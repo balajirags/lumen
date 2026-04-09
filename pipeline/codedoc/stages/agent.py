@@ -936,21 +936,126 @@ def _recover_missing_current_state_artifacts(
     )
 
 
+def _controlled_frontend_source_confirmation(
+    toolkit: ReverseEngineerToolkit,
+    ui_api_map: str,
+    *,
+    max_reads: int = 3,
+) -> str:
+    """Confirm unresolved UI/API mappings with a tiny targeted source-read budget."""
+    if max_reads <= 0:
+        return ""
+    unresolved = "no direct endpoint match" in ui_api_map.lower()
+    if not unresolved:
+        return ""
+
+    candidates: list[str] = []
+    for line in ui_api_map.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        for key in ("ui", "client"):
+            value = str(row.get(key, "") or "").strip()
+            if value and value not in candidates:
+                candidates.append(value)
+
+    sections: list[str] = []
+    for candidate in candidates[:max_reads]:
+        snippet = toolkit.call("get_method_source", method_name=candidate)
+        lowered = snippet.lower()
+        if (
+            not snippet
+            or "not found in graph" in lowered
+            or "no file path" in lowered
+            or "cannot extract" in lowered
+            or "file not found" in lowered
+            or "read error" in lowered
+        ):
+            continue
+        sections.append(f"### {candidate}\n```text\n{snippet}\n```")
+
+    return "\n\n".join(sections)
+
+
 def _backfill_required_artifacts(kuzu_path: str, repo_path: str, artifacts_dir: str, archetype: str) -> list[str]:
     generated: list[str] = []
     root = Path(artifacts_dir)
     backend = KuzuBackend(kuzu_path)
     toolkit = ReverseEngineerToolkit(backend, repo_path=repo_path)
 
+    route_target = root / "architecture" / "route-map.md"
+    if archetype in {"frontend-app", "fullstack-app"} and not route_target.exists():
+        route_summary = toolkit.call("get_route_component_map")
+        content = (
+            "# Route Map\n\n"
+            "## Route And Page Surface [Observed]\n\n"
+            "The following route/page/layout view was generated directly from the knowledge graph.\n\n"
+            "```text\n"
+            f"{route_summary}\n"
+            "```\n"
+        )
+        _write_artifact(artifacts_dir, "architecture/route-map.md", content)
+        generated.append(str(route_target))
+
+    component_target = root / "architecture" / "component-boundaries.md"
+    if archetype in {"frontend-app", "fullstack-app"} and not component_target.exists():
+        component_tree = toolkit.call("get_component_tree")
+        boundaries = toolkit.call("get_component_boundary_map")
+        content = (
+            "# Component Boundaries\n\n"
+            "## Component Tree [Observed]\n\n"
+            "```text\n"
+            f"{component_tree}\n"
+            "```\n\n"
+            "## Boundary Summary [Observed]\n\n"
+            "```text\n"
+            f"{boundaries}\n"
+            "```\n"
+        )
+        _write_artifact(artifacts_dir, "architecture/component-boundaries.md", content)
+        generated.append(str(component_target))
+
+    state_target = root / "current-state" / "state-management.md"
+    if archetype in {"frontend-app", "fullstack-app"} and not state_target.exists():
+        ownership = toolkit.call("get_state_ownership_map")
+        hooks = toolkit.call("get_hook_usage_graph")
+        summary = toolkit.call("get_state_management_summary")
+        content = (
+            "# State Management\n\n"
+            "## State Ownership [Observed]\n\n"
+            "```text\n"
+            f"{ownership}\n"
+            "```\n\n"
+            "## Hook And Consumer Graph [Observed]\n\n"
+            "```text\n"
+            f"{hooks}\n"
+            "```\n\n"
+            "## Store And Context Summary [Observed]\n\n"
+            "```text\n"
+            f"{summary}\n"
+            "```\n"
+        )
+        _write_artifact(artifacts_dir, "current-state/state-management.md", content)
+        generated.append(str(state_target))
+
     module_target = root / "current-state" / "module-dependency-map.md"
     if archetype in {"frontend-app", "fullstack-app"} and not module_target.exists():
         summary = toolkit.call("get_module_dependency_map")
+        frontend_summary = toolkit.call("get_frontend_architecture_summary")
         content = (
             "# Module Dependency Map\n\n"
             "## Observed Dependency Summary [Observed]\n\n"
             "The following summary was generated directly from the knowledge graph.\n\n"
             "```text\n"
             f"{summary}\n"
+            "```\n\n"
+            "## Frontend Architecture Summary [Observed]\n\n"
+            "```text\n"
+            f"{frontend_summary}\n"
             "```\n"
         )
         _write_artifact(artifacts_dir, "current-state/module-dependency-map.md", content)
@@ -958,9 +1063,10 @@ def _backfill_required_artifacts(kuzu_path: str, repo_path: str, artifacts_dir: 
 
     ui_api_target = root / "current-state" / "ui-to-api-interactions.md"
     if archetype in {"frontend-app", "fullstack-app"} and not ui_api_target.exists():
-        route_summary = toolkit.call("get_route_map")
+        route_summary = toolkit.call("get_route_component_map")
         client_summary = toolkit.call("get_api_client_summary")
-        endpoint_summary = toolkit.call("get_api_endpoints")
+        endpoint_summary = toolkit.call("get_ui_to_api_call_map")
+        source_confirmation = _controlled_frontend_source_confirmation(toolkit, endpoint_summary)
         content = (
             "# UI to API Interactions\n\n"
             "## Route And Component Surface [Observed]\n\n"
@@ -973,17 +1079,22 @@ def _backfill_required_artifacts(kuzu_path: str, repo_path: str, artifacts_dir: 
             "```text\n"
             f"{client_summary}\n"
             "```\n\n"
-            "## Backend Endpoints [Observed]\n\n"
-            "The following backend/API endpoint summary was generated directly from the knowledge graph.\n\n"
+            "## UI To Client To Endpoint Map [Observed]\n\n"
+            "The following UI/client/endpoint summary was generated directly from the knowledge graph.\n\n"
             "```text\n"
             f"{endpoint_summary}\n"
             "```\n\n"
-            "## Interaction Notes [Inferred]\n\n"
-            "- Use the route and component surface as the UI entry view.\n"
-            "- Use the API client summary to identify fetch wrappers, query hooks, or service modules.\n"
-            "- Use the backend endpoint summary to map probable UI-to-API interaction seams.\n"
-            "- Where direct one-to-one mappings are not explicit in the graph, treat the relationship as a likely integration boundary rather than a confirmed call path.\n"
+            "## Interaction Notes [Observed]\n\n"
+            "- Use the route/component section as the UI entry view.\n"
+            "- Use the API client section to identify fetch wrappers, query hooks, or service modules.\n"
+            "- Use the call map section to trace observed UI-to-client edges and probable endpoint matches.\n"
         )
+        if source_confirmation:
+            content += (
+                "\n## Targeted Source Confirmation [Direct Code]\n\n"
+                "The graph alone did not fully resolve all UI-to-endpoint mappings, so the following targeted source snippets were read to confirm the most relevant call paths.\n\n"
+                f"{source_confirmation}\n"
+            )
         _write_artifact(artifacts_dir, "current-state/ui-to-api-interactions.md", content)
         generated.append(str(ui_api_target))
 
@@ -1085,8 +1196,8 @@ def _build_analyst_system_prompt(
     if analyst_name == "analyst/flows":
         prompt += (
             "\n"
-            "- Prioritize the standard evidence tools before any custom Cypher: `get_route_map`, `get_api_endpoints`, `get_api_client_summary`, `get_entry_points`, `trace_user_flow`.\n"
-            "- If `get_route_map` reports no route-like frontend structures, pivot immediately: write from API/client/integration evidence rather than trying to rediscover UI routes.\n"
+            "- Prioritize the standard evidence tools before any custom Cypher: `get_route_component_map`, `get_ui_to_api_call_map`, `get_api_endpoints`, `get_api_client_summary`, `get_entry_points`, `trace_user_flow`.\n"
+            "- If `get_route_map` or `get_route_component_map` reports no route-like frontend structures, pivot immediately: write from API/client/integration evidence rather than trying to rediscover UI routes.\n"
             "- Limit ad hoc `query` / `execute_cypher` use to at most one targeted fallback after the standard tools fail to answer a specific required artifact question.\n"
             "- Do not spend multiple turns debugging Cypher. If a query fails once, fall back to the existing toolkit evidence and write the artifact with explicit gaps.\n"
         )

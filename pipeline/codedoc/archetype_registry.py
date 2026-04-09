@@ -147,8 +147,8 @@ ARCHETYPES: dict[str, ArchetypeDefinition] = {
         analyst_requests={
             "analyst/domain": (
                 "Execute in 4 turns.\n"
-                "TURN 1 — batch in one response: get_schema, get_route_map, get_state_management_summary.\n"
-                "TURN 2 — batch in one response: get_component_boundary_map, get_entry_points, get_external_dependencies.\n"
+                "TURN 1 — batch in one response: get_schema, get_route_component_map, get_state_ownership_map.\n"
+                "TURN 2 — batch in one response: get_component_tree, get_component_boundary_map, get_hook_usage_graph, get_entry_points, get_external_dependencies.\n"
                 "TURN 3 — call write_artifact('architecture/route-map.md', content). "
                 "Content: route/screen table, owners, entry components, and notable guarded routes grounded in graph evidence.\n"
                 "TURN 4 — call write_artifact('current-state/state-management.md', content). "
@@ -158,13 +158,13 @@ ARCHETYPES: dict[str, ArchetypeDefinition] = {
             ),
             "analyst/flows": (
                 "Execute in 5 turns.\n"
-                "TURN 1 — batch in one response: get_route_map, get_api_client_summary, get_external_dependencies, get_entry_points.\n"
+                "TURN 1 — batch in one response: get_route_component_map, get_ui_to_api_call_map, get_api_client_summary, get_external_dependencies, get_entry_points.\n"
                 "TURN 2 — call trace_user_flow on up to 3 highest-signal user journeys from Turn 1. "
                 "Prefer routes, screens, actions, or top-level components. If Turn 1 reports no route-like frontend structures, skip trace_user_flow and pivot to the strongest client-side/API evidence instead.\n"
                 "TURN 3 — call write_artifact('architecture/user-journeys.md', content). "
                 "Document 3-5 user journeys grounded in routes/components. If you include diagrams, fence them as ```mermaid blocks.\n"
                 "TURN 4 — call write_artifact('current-state/ui-to-api-interactions.md', content). "
-                "Content: which routes/components/hooks call which API clients and endpoints, plus notable coupling points. "
+                "Content: which routes/components/hooks call which API clients and endpoints, plus notable coupling points. Use the direct UI-to-client call map before any inferred endpoint stitching. "
                 "Do NOT invent auth headers/tokens, retries, polling services, external validation services, or initialization steps without direct evidence.\n"
                 "TURN 5 — call write_artifact('architecture/component-boundaries.md', content). "
                 "Content: top-level screens, shared layout, reusable UI, feature modules, and cross-feature coupling.\n"
@@ -172,7 +172,7 @@ ARCHETYPES: dict[str, ArchetypeDefinition] = {
             ),
             "analyst/tech": (
                 "Execute in 4 turns.\n"
-                "TURN 1 — batch in one response: get_module_dependency_map, get_component_coupling_matrix, get_hotspots(coupling), "
+                "TURN 1 — batch in one response: get_frontend_architecture_summary, get_module_dependency_map, get_component_coupling_matrix, get_hotspots(coupling), "
                 "detect_circular_dependencies, get_unused_code.\n"
                 "TURN 2 — call impact_analysis on the top 3 modules/components from Turn 1.\n"
                 "TURN 3 — call write_artifact('current-state/module-dependency-map.md', content). "
@@ -236,7 +236,7 @@ ARCHETYPES: dict[str, ArchetypeDefinition] = {
             ),
             "analyst/flows": (
                 "Execute in 5 turns.\n"
-                "TURN 1 — batch in one response: get_route_map, get_api_endpoints, get_api_client_summary, get_external_dependencies, get_entry_points.\n"
+                "TURN 1 — batch in one response: get_route_component_map, get_ui_to_api_call_map, get_api_endpoints, get_api_client_summary, get_external_dependencies, get_entry_points.\n"
                 "TURN 2 — call trace_user_flow on up to 3 highest-signal end-to-end journeys from Turn 1. "
                 "Prefer journeys that cross UI route, API, and persistence/integration boundaries. If Turn 1 reports no route-like frontend structures, skip trace_user_flow and pivot to the strongest API/client evidence already gathered.\n"
                 "TURN 3 — call write_c4_artifact('architecture/c4-context.md', title, summary, spec_json). "
@@ -244,13 +244,13 @@ ARCHETYPES: dict[str, ArchetypeDefinition] = {
                 "TURN 4 — call write_artifact('architecture/user-journeys.md', content). "
                 "Document 3-5 end-to-end journeys grounded in routes/components and backend entry points. If UI route evidence is weak, write integration journeys from API entry points and note the frontend gap explicitly.\n"
                 "TURN 5 — call write_artifact('current-state/ui-to-api-interactions.md', content). "
-                "Content: which routes/components/hooks call which API clients and backend endpoints, plus async boundaries and integration seams. "
+                "Content: which routes/components/hooks call which API clients and backend endpoints, plus async boundaries and integration seams. Use the direct UI-to-client call map before any inferred endpoint stitching. "
                 "For backend APIs present in the repo, current-state/api-spec.yaml is mandatory and may be completed in recovery if needed.\n"
                 "Do NOT call get_method_source. Avoid ad hoc execute_cypher unless a required artifact is blocked after the standard tools above. Stop after Turn 5."
             ),
             "analyst/tech": (
                 "Execute in 4 turns.\n"
-                "TURN 1 — batch in one response: get_module_dependency_map, get_component_coupling_matrix, get_hotspots(coupling), "
+                "TURN 1 — batch in one response: get_frontend_architecture_summary, get_state_ownership_map, get_module_dependency_map, get_component_coupling_matrix, get_hotspots(coupling), "
                 "detect_circular_dependencies, get_unused_code.\n"
                 "TURN 2 — call impact_analysis on the top 3 cross-boundary modules/components from Turn 1.\n"
                 "TURN 3 — call write_artifact('current-state/state-management.md', content). "

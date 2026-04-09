@@ -483,6 +483,7 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
         filePath: relativePath,
         currentClass: null,
         currentFunction: null,
+        functionStack: [],
         exports: new Set(),
         imports: new Map() // localName -> { source, importedName }
     };
@@ -599,10 +600,11 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
                 });
                 
                 graph.addRelationship(parentClass, methodId, 'CONTAINS');
+                state.functionStack.push(state.currentFunction);
                 state.currentFunction = methodId;
             },
             exit() {
-                state.currentFunction = null;
+                state.currentFunction = state.functionStack.pop() || null;
             }
         },
 
@@ -637,10 +639,11 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
                     graph.addRelationship(state.moduleId, funcId, 'EXPORTS');
                 }
                 
+                state.functionStack.push(state.currentFunction);
                 state.currentFunction = funcId;
             },
             exit() {
-                state.currentFunction = null;
+                state.currentFunction = state.functionStack.pop() || null;
             }
         },
 
@@ -676,30 +679,78 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
             }
         },
 
+        ArrowFunctionExpression: {
+            enter(nodePath) {
+                const parent = nodePath.parent;
+                if (parent?.type !== 'VariableDeclarator' || parent.id?.type !== 'Identifier') return;
+                const funcName = parent.id.name;
+                const funcId = `function:${state.moduleName}.${funcName}`;
+                state.functionStack.push(state.currentFunction);
+                state.currentFunction = funcId;
+            },
+            exit(nodePath) {
+                const parent = nodePath.parent;
+                if (parent?.type !== 'VariableDeclarator' || parent.id?.type !== 'Identifier') return;
+                state.currentFunction = state.functionStack.pop() || null;
+            }
+        },
+
+        FunctionExpression: {
+            enter(nodePath) {
+                const parent = nodePath.parent;
+                if (parent?.type !== 'VariableDeclarator' || parent.id?.type !== 'Identifier') return;
+                const funcName = parent.id.name;
+                const funcId = `function:${state.moduleName}.${funcName}`;
+                state.functionStack.push(state.currentFunction);
+                state.currentFunction = funcId;
+            },
+            exit(nodePath) {
+                const parent = nodePath.parent;
+                if (parent?.type !== 'VariableDeclarator' || parent.id?.type !== 'Identifier') return;
+                state.currentFunction = state.functionStack.pop() || null;
+            }
+        },
+
         // Call expressions (function calls)
         CallExpression(nodePath) {
             const node = nodePath.node;
             const caller = state.currentFunction || state.currentClass || state.moduleId;
             
             let calleeName;
+            let memberObject = '';
+            let memberProperty = '';
             if (node.callee.type === 'Identifier') {
                 calleeName = node.callee.name;
             } else if (node.callee.type === 'MemberExpression') {
-                const obj = node.callee.object?.name || '';
-                const prop = node.callee.property?.name || '';
-                calleeName = obj ? `${obj}.${prop}` : prop;
+                memberObject = node.callee.object?.name || '';
+                memberProperty = node.callee.property?.name || '';
+                calleeName = memberObject ? `${memberObject}.${memberProperty}` : memberProperty;
             } else {
                 return;
             }
 
             // Check if calling a hook
-            if (/^use[A-Z]/.test(calleeName)) {
-                const hookId = `hook:${calleeName}`;
-                graph.addNode(hookId, 'HOOK', calleeName, calleeName);
+            const hookName = /^use[A-Z]/.test(memberProperty) ? memberProperty : calleeName;
+            if (/^use[A-Z]/.test(hookName)) {
+                const hookId = `hook:${hookName}`;
+                graph.addNode(hookId, 'HOOK', hookName, hookName);
                 graph.addRelationship(caller, hookId, 'USES_HOOK', {
                     lineNumber: node.loc?.start?.line
                 });
                 return;
+            }
+
+            if (memberObject && memberProperty) {
+                const objectImport = state.imports.get(memberObject);
+                if (objectImport && objectImport.isRelative) {
+                    const targetModule = resolveModulePath(objectImport.source, state.filePath);
+                    const targetFuncId = `function:${targetModule}.${memberProperty}`;
+                    graph.addRelationship(caller, targetFuncId, 'CALLS', {
+                        lineNumber: node.loc?.start?.line,
+                        resolved: true
+                    });
+                    return;
+                }
             }
 
             // Check if it's an imported function
@@ -754,6 +805,9 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
             graph.addRelationship(caller, targetId, 'RENDERS', {
                 lineNumber: node.loc?.start?.line
             });
+            if (node.attributes && node.attributes.length > 0 && String(caller).startsWith('function:')) {
+                graph.addRelationship(caller, targetId, 'PROP_DEPENDENCY');
+            }
         }
     });
 
@@ -838,7 +892,7 @@ function main() {
 
     // Filter relationships to only include internal targets
     const filteredRelationships = graph.relationships.filter(rel => {
-        if (rel.type === 'CALLS' || rel.type === 'RENDERS') {
+        if (rel.type === 'CALLS' || rel.type === 'RENDERS' || rel.type === 'PROP_DEPENDENCY') {
             return graph.nodes[rel.targetId] !== undefined;
         }
         return true;

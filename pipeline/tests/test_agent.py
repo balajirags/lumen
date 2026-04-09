@@ -10,6 +10,7 @@ from codedoc.stages.agent import (
     _build_analyst_system_prompt,
     _build_architect_prompt,
     _build_architect_request,
+    _controlled_frontend_source_confirmation,
     _build_executive_summary_evidence,
     _missing_target_state_artifacts,
     _required_artifacts,
@@ -195,14 +196,26 @@ def test_backfill_required_artifacts_frontend_module_dependency_map(tmp_path, mo
             pass
 
         def call(self, name: str):
+            if name == "get_route_component_map":
+                return "=== ROUTE COMPONENT MAP ==="
+            if name == "get_component_tree":
+                return "=== COMPONENT TREE ==="
+            if name == "get_component_boundary_map":
+                return "=== COMPONENT BOUNDARIES ==="
+            if name == "get_state_ownership_map":
+                return "=== STATE OWNERSHIP MAP ==="
+            if name == "get_hook_usage_graph":
+                return "=== HOOK USAGE GRAPH ==="
+            if name == "get_state_management_summary":
+                return "=== STATE MANAGEMENT ==="
+            if name == "get_frontend_architecture_summary":
+                return "=== FRONTEND ARCHITECTURE SUMMARY ==="
             if name == "get_module_dependency_map":
                 return "=== MODULE DEPENDENCY MAP ==="
-            if name == "get_route_map":
-                return "=== ROUTE MAP ==="
             if name == "get_api_client_summary":
                 return "=== API CLIENT SUMMARY ==="
-            if name == "get_api_endpoints":
-                return "=== API ENDPOINTS ==="
+            if name == "get_ui_to_api_call_map":
+                return "=== UI TO API CALL MAP ==="
             raise AssertionError(name)
 
     monkeypatch.setattr("codedoc.stages.agent.KuzuBackend", lambda path: object())
@@ -213,10 +226,13 @@ def test_backfill_required_artifacts_frontend_module_dependency_map(tmp_path, mo
     assert generated
     content = (artifacts_dir / "current-state" / "module-dependency-map.md").read_text()
     assert "MODULE DEPENDENCY MAP" in content
+    assert "FRONTEND ARCHITECTURE SUMMARY" in content
     ui_api_content = (artifacts_dir / "current-state" / "ui-to-api-interactions.md").read_text()
-    assert "ROUTE MAP" in ui_api_content
+    assert "ROUTE COMPONENT MAP" in ui_api_content
     assert "API CLIENT SUMMARY" in ui_api_content
-    assert "API ENDPOINTS" in ui_api_content
+    assert "UI TO API CALL MAP" in ui_api_content
+    assert (artifacts_dir / "architecture" / "component-boundaries.md").exists()
+    assert (artifacts_dir / "current-state" / "state-management.md").exists()
 
 
 def test_backfill_required_artifacts_fullstack_generates_frontend_interaction_views(tmp_path, monkeypatch):
@@ -226,15 +242,29 @@ def test_backfill_required_artifacts_fullstack_generates_frontend_interaction_vi
         def __init__(self, backend, repo_path=""):
             pass
 
-        def call(self, name: str):
+        def call(self, name: str, **kwargs):
+            if name == "get_route_component_map":
+                return "InventoryPage -> ReserveModal"
+            if name == "get_component_tree":
+                return "AppShell -> InventoryPage"
+            if name == "get_component_boundary_map":
+                return "InventoryPage -> ReserveModal"
+            if name == "get_state_ownership_map":
+                return "InventoryQueryProvider owns inventory query cache"
+            if name == "get_hook_usage_graph":
+                return "useInventoryData -> inventoryClient.getItems"
+            if name == "get_state_management_summary":
+                return "InventoryQueryProvider and useInventoryData coordinate page state"
+            if name == "get_frontend_architecture_summary":
+                return "Frontend architecture ties InventoryPage, useInventoryData, and inventoryClient together"
             if name == "get_module_dependency_map":
                 return "=== MODULE DEPENDENCY MAP ==="
-            if name == "get_route_map":
-                return "InventoryPage -> ReserveModal"
             if name == "get_api_client_summary":
                 return "inventoryClient.getItems -> GET /inventory"
-            if name == "get_api_endpoints":
-                return "GET /inventory\nPOST /inventory/reserve"
+            if name == "get_ui_to_api_call_map":
+                return '{"ui":"app.routes.InventoryPage","client":"api.inventoryClient.getItems","probable_endpoints":["no direct endpoint match"]}'
+            if name == "get_method_source":
+                return f"// {kwargs['method_name']}\n  27  inventoryClient.getItems()\n"
             raise AssertionError(name)
 
     monkeypatch.setattr("codedoc.stages.agent.KuzuBackend", lambda path: object())
@@ -242,10 +272,40 @@ def test_backfill_required_artifacts_fullstack_generates_frontend_interaction_vi
 
     generated = _backfill_required_artifacts("fake-db", "fake-repo", str(artifacts_dir), "fullstack-app")
 
-    assert len(generated) == 2
+    assert len(generated) == 5
     assert (artifacts_dir / "current-state" / "module-dependency-map.md").exists()
     assert (artifacts_dir / "current-state" / "ui-to-api-interactions.md").exists()
     assert "inventoryClient.getItems" in (artifacts_dir / "current-state" / "ui-to-api-interactions.md").read_text()
+    assert "Targeted Source Confirmation" in (artifacts_dir / "current-state" / "ui-to-api-interactions.md").read_text()
+    assert (artifacts_dir / "architecture" / "route-map.md").exists()
+    assert (artifacts_dir / "architecture" / "component-boundaries.md").exists()
+    assert (artifacts_dir / "current-state" / "state-management.md").exists()
+
+
+def test_controlled_frontend_source_confirmation_reads_only_when_unresolved():
+    class FakeToolkit:
+        def __init__(self):
+            self.calls = []
+
+        def call(self, name: str, **kwargs):
+            self.calls.append((name, kwargs))
+            if name == "get_method_source":
+                return f"// {kwargs['method_name']}\n  10  inventoryClient.getItems()\n"
+            raise AssertionError(name)
+
+    toolkit = FakeToolkit()
+
+    section = _controlled_frontend_source_confirmation(
+        toolkit,
+        '\n'.join([
+            '{"ui":"app.routes.InventoryPage","client":"api.inventoryClient.getItems","probable_endpoints":["no direct endpoint match"]}',
+            '{"ui":"app.hooks.useInventoryData","client":"api.inventoryClient.getItems","probable_endpoints":["no direct endpoint match"]}',
+        ]),
+        max_reads=2,
+    )
+
+    assert "### app.routes.InventoryPage" in section
+    assert len([call for call in toolkit.calls if call[0] == "get_method_source"]) == 2
 
 
 def test_missing_target_state_artifacts_uses_backend_contract(tmp_path):
@@ -283,8 +343,9 @@ def test_flows_prompt_limits_cypher_and_pivots_on_weak_routes():
         repo_metrics={"total_source_files": 79, "total_loc": 4198},
     )
 
-    assert "If `get_route_map` reports no route-like frontend structures, pivot immediately" in prompt
+    assert "If `get_route_map` or `get_route_component_map` reports no route-like frontend structures, pivot immediately" in prompt
     assert "Limit ad hoc `query` / `execute_cypher` use to at most one targeted fallback" in prompt
+    assert "get_ui_to_api_call_map" in prompt
 
 
 def test_recovery_prompt_gives_api_spec_more_budget(tmp_path, monkeypatch):
