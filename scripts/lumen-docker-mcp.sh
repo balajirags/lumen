@@ -30,6 +30,13 @@ docker_args=(
   -v "${OUTPUT_PATH}:/workspace/output"
 )
 
+if [ -t 0 ]; then
+  docker_args+=( -i )
+fi
+if [ -t 1 ]; then
+  docker_args+=( -t )
+fi
+
 if [ -n "${REPO}" ]; then
   docker_args+=( -v "${REPO}:/repo" )
 fi

@@ -21,6 +21,13 @@ docker_args=(
   -v "${OUTPUT_PATH}:/workspace/output"
 )
 
+if [ -t 0 ]; then
+  docker_args+=( -i )
+fi
+if [ -t 1 ]; then
+  docker_args+=( -t )
+fi
+
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   docker_args+=( -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" )
 fi
