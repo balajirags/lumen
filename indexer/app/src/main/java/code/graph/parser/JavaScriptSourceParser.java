@@ -42,7 +42,7 @@ public class JavaScriptSourceParser implements SourceParser {
 
         // Run the parser
         Path scriptPath = parserDir.resolve("parse.js");
-        ProcessBuilder pb = new ProcessBuilder("node", scriptPath.toString(), root.toString());
+        ProcessBuilder pb = new ProcessBuilder("node", scriptPath.toString(), root.toString(), "--backend", "json");
         pb.redirectErrorStream(false);
 
         System.out.printf("Parsing JavaScript/React files in: %s%n", root);
@@ -116,7 +116,10 @@ public class JavaScriptSourceParser implements SourceParser {
                     if (value.isJsonPrimitive()) {
                         JsonPrimitive prim = value.getAsJsonPrimitive();
                         if (prim.isNumber()) {
-                            codeNode = codeNode.withProperty(entry.getKey(), prim.getAsInt());
+                            // Use double for fractional values (e.g. confidence=0.90), int for whole numbers
+                            String raw = prim.getAsString();
+                            Object numVal = raw.contains(".") ? prim.getAsDouble() : prim.getAsInt();
+                            codeNode = codeNode.withProperty(entry.getKey(), numVal);
                         } else if (prim.isBoolean()) {
                             codeNode = codeNode.withProperty(entry.getKey(), prim.getAsBoolean());
                         } else {
@@ -148,7 +151,9 @@ public class JavaScriptSourceParser implements SourceParser {
                     if (value.isJsonPrimitive()) {
                         JsonPrimitive prim = value.getAsJsonPrimitive();
                         if (prim.isNumber()) {
-                            codeRel = codeRel.withProperty(entry.getKey(), prim.getAsInt());
+                            String raw = prim.getAsString();
+                            Object numVal = raw.contains(".") ? prim.getAsDouble() : prim.getAsInt();
+                            codeRel = codeRel.withProperty(entry.getKey(), numVal);
                         } else if (prim.isBoolean()) {
                             codeRel = codeRel.withProperty(entry.getKey(), prim.getAsBoolean());
                         } else {

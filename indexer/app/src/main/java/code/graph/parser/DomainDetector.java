@@ -272,8 +272,12 @@ public class DomainDetector {
             CodeNode n = graph.getNode(id);
             if (n == null) continue;
             Object lang = n.properties().get("language");
-            if (lang != null) langFreq.merge(lang.toString(), 1, Integer::sum);
-            else {
+            if (lang != null) {
+                // Normalise to lowercase so 'JavaScript', 'JSX', 'TypeScript' all count as 'javascript'
+                String normalised = lang.toString().toLowerCase();
+                if (normalised.equals("jsx") || normalised.equals("typescript")) normalised = "javascript";
+                langFreq.merge(normalised, 1, Integer::sum);
+            } else {
                 // Infer from node type
                 String inferred = isJsType(n.type()) ? "javascript" : "java";
                 langFreq.merge(inferred, 1, Integer::sum);

@@ -35,7 +35,7 @@ public class PythonSourceParser implements SourceParser {
 
         // Run the parser
         Path scriptPath = findParserScript();
-        ProcessBuilder pb = new ProcessBuilder(pythonCmd, scriptPath.toString(), root.toString());
+        ProcessBuilder pb = new ProcessBuilder(pythonCmd, scriptPath.toString(), root.toString(), "--backend", "json");
         pb.redirectErrorStream(false);
 
         System.out.printf("Parsing Python files in: %s%n", root);

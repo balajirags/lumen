@@ -568,11 +568,11 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
                 graph.addRelationship(state.moduleId, classId, 'CONTAINS');
                 
                 if (node.superClass) {
-                    const superName = node.superClass.name || 
-                        (node.superClass.type === 'MemberExpression' ? 
+                    const superName = node.superClass.name ||
+                        (node.superClass.type === 'MemberExpression' ?
                             `${node.superClass.object?.name}.${node.superClass.property?.name}` : 'Unknown');
                     const superId = `class:${superName}`;
-                    graph.addNode(superId, 'CLASS', superName, superName);
+                    graph.addNode(superId, 'CLASS', superName, superName, { language: state.fileLanguage });
                     graph.addRelationship(classId, superId, 'EXTENDS');
                 }
                 
@@ -744,7 +744,7 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
             const hookName = /^use[A-Z]/.test(memberProperty) ? memberProperty : calleeName;
             if (/^use[A-Z]/.test(hookName)) {
                 const hookId = `hook:${hookName}`;
-                graph.addNode(hookId, 'HOOK', hookName, hookName);
+                graph.addNode(hookId, 'HOOK', hookName, hookName, { language: state.fileLanguage });
                 graph.addRelationship(caller, hookId, 'USES_HOOK', {
                     lineNumber: node.loc?.start?.line
                 });
@@ -818,7 +818,7 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
 
             // Only add a placeholder if the definition node hasn't been created yet
             if (!graph.hasNode(targetId)) {
-                graph.addNode(targetId, 'COMPONENT', componentName, componentName);
+                graph.addNode(targetId, 'COMPONENT', componentName, componentName, { language: state.fileLanguage });
             }
             graph.addRelationship(caller, targetId, 'RENDERS', {
                 lineNumber: node.loc?.start?.line
