@@ -6,9 +6,11 @@ package code.graph;
 import code.graph.config.AppConfig;
 import code.graph.model.CodeGraph;
 import code.graph.parser.CpgParser;
+import code.graph.parser.DomainDetector;
 import code.graph.parser.FileHashCache;
 import code.graph.parser.SourceParser;
 import code.graph.parser.SourceParserFactory;
+import code.graph.parser.WorkflowBuilder;
 import code.graph.parser.SourceParserFactory.Language;
 import code.graph.store.GraphStore;
 import code.graph.store.KuzuGraphStore;
@@ -216,6 +218,13 @@ public class App implements Callable<Integer> {
         }
 
         System.out.printf("Extracted %d nodes and %d relationships%n",
+                graph.nodeCount(), graph.relationshipCount());
+
+        // Post-processing: derive Workflow and Domain abstractions from the merged graph
+        System.out.println("Running post-processing (WorkflowBuilder, DomainDetector)...");
+        new WorkflowBuilder().build(graph);
+        new DomainDetector().detect(graph);
+        System.out.printf("Post-processing complete: %d nodes, %d relationships%n",
                 graph.nodeCount(), graph.relationshipCount());
 
         // Store in graph database

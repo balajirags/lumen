@@ -13,6 +13,9 @@ NODE_TYPES = [
     "DataClass", "SealedClass", "SealedInterface", "ObjectDecl",
     "CompanionObject", "ExtensionFunction", "SuspendFunction",
     "Property", "Lambda", "InitBlock", "TypeAlias",
+    # Post-processing abstractions
+    "Workflow",   # end-to-end execution trace (HTTP entry → repository/event terminal)
+    "Domain",     # functional cluster of cohesive classes/modules
 ]
 
 REL_TYPES = [
@@ -22,7 +25,19 @@ REL_TYPES = [
     "IMPORTS", "EXPORTS", "RENDERS", "USES_HOOK", "PROP_DEPENDENCY",
     "DECORATES", "YIELDS",
     "EXTENSION_OF", "DELEGATES_TO", "SEALED_SUBTYPE", "COMPANION_OF", "SUSPENDS",
+    # Post-processing abstractions
+    "WORKFLOW_STEP",  # (Method|Component|Function)-[:WORKFLOW_STEP {step}]->(Workflow)
+    "IN_DOMAIN",      # (Class|Interface|Component|Module|...)-[:IN_DOMAIN]->(Domain)
 ]
+
+# CALLS edge properties:
+#   lineNumber INT64   — source line of the call site
+#   confidence DOUBLE  — 0.95=same-file, 0.90=import-resolved, 0.50=global/inferred
+#   reason     STRING  — "same-file" | "import-resolved" | "global"
+# Use confidence >= 0.9 to filter to reliable calls only.
+#
+# HAS_ANNOTATION edge properties:
+#   value STRING — the primary annotation attribute (e.g. "/api/v1/inventory" for @RequestMapping)
 
 _READ_ONLY_PATTERN = re.compile(
     r"^\s*(MATCH|RETURN|WITH|WHERE|ORDER|SKIP|LIMIT|UNWIND|OPTIONAL|CALL|UNION)\b",

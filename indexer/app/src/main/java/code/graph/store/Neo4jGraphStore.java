@@ -185,6 +185,8 @@ public class Neo4jGraphStore implements GraphStore {
             case LAMBDA -> "Lambda";
             case INIT_BLOCK -> "InitBlock";
             case TYPE_ALIAS -> "TypeAlias";
+            case WORKFLOW -> "Workflow";
+            case DOMAIN -> "Domain";
         };
     }
 }

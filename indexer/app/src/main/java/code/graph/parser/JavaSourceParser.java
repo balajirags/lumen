@@ -9,6 +9,8 @@ import com.github.javaparser.ast.body.*;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
+import com.github.javaparser.ast.expr.NormalAnnotationExpr;
+import com.github.javaparser.ast.expr.SingleMemberAnnotationExpr;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 import com.github.javaparser.resolution.declarations.ResolvedMethodDeclaration;
@@ -208,6 +210,7 @@ public class JavaSourceParser implements SourceParser {
             String nodeId = "type:" + qualifiedName;
 
             CodeNode node = new CodeNode(nodeId, nodeType, decl.getNameAsString(), qualifiedName)
+                    .withProperty("external", false)
                     .withProperty("isAbstract", decl.isAbstract())
                     .withProperty("isStatic", decl.isStatic())
                     .withProperty("visibility", decl.getAccessSpecifier().asString());
@@ -247,6 +250,7 @@ public class JavaSourceParser implements SourceParser {
             String nodeId = "type:" + qualifiedName;
 
             CodeNode node = new CodeNode(nodeId, NodeType.ENUM, decl.getNameAsString(), qualifiedName)
+                    .withProperty("external", false)
                     .withProperty("visibility", decl.getAccessSpecifier().asString());
             graph.addNode(node);
 
@@ -266,6 +270,7 @@ public class JavaSourceParser implements SourceParser {
             String nodeId = "type:" + qualifiedName;
 
             CodeNode node = new CodeNode(nodeId, NodeType.RECORD, decl.getNameAsString(), qualifiedName)
+                    .withProperty("external", false)
                     .withProperty("visibility", decl.getAccessSpecifier().asString());
             graph.addNode(node);
 
@@ -280,6 +285,7 @@ public class JavaSourceParser implements SourceParser {
                 String fieldId = "field:" + qualifiedName + "." + param.getNameAsString();
                 CodeNode fieldNode = new CodeNode(fieldId, NodeType.FIELD, param.getNameAsString(),
                         qualifiedName + "." + param.getNameAsString())
+                        .withProperty("external", false)
                         .withProperty("type", param.getTypeAsString())
                         .withProperty("visibility", "public")
                         .withProperty("isFinal", true)
@@ -306,6 +312,7 @@ public class JavaSourceParser implements SourceParser {
             String typeId = "type:" + containingType;
 
             CodeNode node = new CodeNode(methodId, NodeType.METHOD, decl.getNameAsString(), containingType + "." + methodSig)
+                    .withProperty("external", false)
                     .withProperty("visibility", decl.getAccessSpecifier().asString())
                     .withProperty("isAbstract", decl.isAbstract())
                     .withProperty("isStatic", decl.isStatic())
@@ -329,6 +336,7 @@ public class JavaSourceParser implements SourceParser {
                 String paramId = methodId + ".param:" + param.getNameAsString();
                 CodeNode paramNode = new CodeNode(paramId, NodeType.PARAMETER, param.getNameAsString(),
                         containingType + "." + methodSig + "." + param.getNameAsString())
+                        .withProperty("external", false)
                         .withProperty("type", param.getTypeAsString());
                 graph.addNode(paramNode);
                 graph.addRelationship(new CodeRelationship(methodId, paramId, RelationshipType.HAS_PARAMETER));
@@ -369,11 +377,28 @@ public class JavaSourceParser implements SourceParser {
 
             CodeNode node = new CodeNode(ctorId, NodeType.CONSTRUCTOR, decl.getNameAsString(),
                     containingType + "." + ctorSig)
+                    .withProperty("external", false)
                     .withProperty("visibility", decl.getAccessSpecifier().asString())
                     .withProperty("lineNumber", decl.getBegin().map(p -> p.line).orElse(-1));
             graph.addNode(node);
 
             graph.addRelationship(new CodeRelationship(typeId, ctorId, RelationshipType.CONTAINS));
+
+            // Parameters (Fix #7: constructor params were missing)
+            for (Parameter param : decl.getParameters()) {
+                String paramId = ctorId + ".param:" + param.getNameAsString();
+                CodeNode paramNode = new CodeNode(paramId, NodeType.PARAMETER, param.getNameAsString(),
+                        containingType + "." + ctorSig + "." + param.getNameAsString())
+                        .withProperty("external", false)
+                        .withProperty("type", param.getTypeAsString());
+                graph.addNode(paramNode);
+                graph.addRelationship(new CodeRelationship(ctorId, paramId, RelationshipType.HAS_PARAMETER));
+
+                String paramTypeName = param.getTypeAsString();
+                String paramTypeId = "type:" + paramTypeName;
+                ensureTypeNode(paramTypeId, paramTypeName);
+                graph.addRelationship(new CodeRelationship(paramId, paramTypeId, RelationshipType.OF_TYPE));
+            }
 
             visitAnnotations(decl.getAnnotations(), ctorId);
             super.visit(decl, arg);
@@ -388,6 +413,7 @@ public class JavaSourceParser implements SourceParser {
 
                 CodeNode node = new CodeNode(fieldId, NodeType.FIELD, var.getNameAsString(),
                         containingType + "." + var.getNameAsString())
+                        .withProperty("external", false)
                         .withProperty("type", var.getTypeAsString())
                         .withProperty("visibility", decl.getAccessSpecifier().asString())
                         .withProperty("isStatic", decl.isStatic())
@@ -448,9 +474,23 @@ public class JavaSourceParser implements SourceParser {
                 // Only create CALLS edge if target class is internal (from source code)
                 // This filters out JDK, Spring, and other library calls
                 if (internalTypes.contains(targetClassName)) {
+                    // Tier 1 (same-file, 0.95) vs Tier 2 (import-resolved, 0.90):
+                    // check if the declaring type lives in the same compilation unit as the caller
+                    boolean sameFile = call.findCompilationUnit()
+                            .flatMap(cu -> cu.getPackageDeclaration())
+                            .map(pkg -> targetClassName.startsWith(pkg.getNameAsString()))
+                            .orElse(false)
+                            && call.findCompilationUnit()
+                            .map(cu -> cu.findAll(TypeDeclaration.class).stream()
+                                    .anyMatch(td -> targetClassName.equals(
+                                            td.getFullyQualifiedName().orElse(""))))
+                            .orElse(false);
+                    double confidence = sameFile ? 0.95 : 0.90;
+                    String reason = sameFile ? "same-file" : "import-resolved";
                     graph.addRelationship(new CodeRelationship(callerId, targetId, RelationshipType.CALLS)
                             .withProperty("lineNumber", line)
-                            .withProperty("resolved", true));
+                            .withProperty("confidence", confidence)
+                            .withProperty("reason", reason));
                     resolvedCalls++;
                 }
                 // Skip external library calls - don't create nodes or edges
@@ -545,14 +585,24 @@ public class JavaSourceParser implements SourceParser {
                     if (!graph.hasNode(targetId)) {
                         graph.addNode(new CodeNode(targetId, NodeType.METHOD, methodName,
                                 scopeType + "." + methodName)
+                                .withProperty("external", false)
                                 .withProperty("inferred", true));
                         graph.addRelationship(new CodeRelationship(
                                 typeId, targetId, RelationshipType.CONTAINS));
                     }
 
+                    // Tier 2: scope type was resolved via field/calculateResolvedType → import-resolved (0.90)
+                    // Tier 3: scope type came from scope.toString() fallback → global (0.50)
+                    boolean scopeWasResolved = call.getScope().isPresent() &&
+                            !(call.getScope().get().toString().equals(scopeType) &&
+                              !internalTypes.contains(call.getScope().get().toString()));
+                    double confidence = scopeWasResolved ? 0.90 : 0.50;
+                    String reason = scopeWasResolved ? "import-resolved" : "global";
+
                     graph.addRelationship(new CodeRelationship(callerId, targetId, RelationshipType.CALLS)
                             .withProperty("lineNumber", line)
-                            .withProperty("resolved", false));
+                            .withProperty("confidence", confidence)
+                            .withProperty("reason", reason));
                     unresolvedCalls++;
                 }
                 // Skip external library calls - don't create nodes or edges
@@ -647,11 +697,33 @@ public class JavaSourceParser implements SourceParser {
             for (AnnotationExpr ann : annotations) {
                 String annName = ann.getNameAsString();
                 String annId = "annotation:" + annName;
+                String annValue = extractAnnotationValue(ann);
                 if (!graph.hasNode(annId)) {
-                    graph.addNode(new CodeNode(annId, NodeType.ANNOTATION_TYPE, annName, annName));
+                    graph.addNode(new CodeNode(annId, NodeType.ANNOTATION_TYPE, annName, annName)
+                            .withProperty("value", annValue));
                 }
-                graph.addRelationship(new CodeRelationship(targetNodeId, annId, RelationshipType.HAS_ANNOTATION));
+                graph.addRelationship(new CodeRelationship(targetNodeId, annId, RelationshipType.HAS_ANNOTATION)
+                        .withProperty("value", annValue));
             }
+        }
+
+        /**
+         * Extract the primary value/path attribute from an annotation.
+         * e.g. @RequestMapping("/api/v1/inventory") -> "/api/v1/inventory"
+         *      @GetMapping("/{sku}") -> "/{sku}"
+         *      @Query("SELECT ...") -> "SELECT ..."
+         */
+        private String extractAnnotationValue(AnnotationExpr ann) {
+            if (ann instanceof SingleMemberAnnotationExpr smae) {
+                return smae.getMemberValue().toString().replaceAll("^\"|\"$", "");
+            } else if (ann instanceof NormalAnnotationExpr nae) {
+                return nae.getPairs().stream()
+                        .filter(p -> p.getNameAsString().equals("value") || p.getNameAsString().equals("path"))
+                        .findFirst()
+                        .map(p -> p.getValue().toString().replaceAll("^\"|\"$", ""))
+                        .orElse(null);
+            }
+            return null;
         }
 
         private void ensureTypeNode(String typeId, String typeName) {
@@ -703,14 +775,7 @@ public class JavaSourceParser implements SourceParser {
         }
 
         private void visitAnnotations(com.github.javaparser.ast.NodeList<AnnotationExpr> annotations, String nodeId) {
-            for (AnnotationExpr ann : annotations) {
-                String annName = ann.getNameAsString();
-                String annId = "annotation:" + annName;
-                if (!graph.hasNode(annId)) {
-                    graph.addNode(new CodeNode(annId, NodeType.ANNOTATION_TYPE, annName, annName));
-                }
-                graph.addRelationship(new CodeRelationship(nodeId, annId, RelationshipType.HAS_ANNOTATION));
-            }
+            visitAnnotations((List<AnnotationExpr>) new java.util.ArrayList<>(annotations), nodeId);
         }
     }
 

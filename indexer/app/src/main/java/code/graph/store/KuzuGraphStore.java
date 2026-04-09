@@ -41,18 +41,18 @@ public class KuzuGraphStore implements GraphStore {
         // Create relationship tables
         String[] relDefs = {
                 // Core structural relationships
-                "CREATE REL TABLE IF NOT EXISTS CONTAINS (FROM Package TO Class, FROM Package TO Interface, FROM Package TO Enum, FROM Package TO Record, FROM Class TO Method, FROM Class TO Constructor, FROM Class TO Field, FROM Interface TO Method, FROM Interface TO Field, FROM Module TO Function, FROM Module TO ArrowFunction, FROM Module TO Component, FROM Module TO Hook, FROM Module TO Class, FROM Class TO Function, FROM Class TO ArrowFunction, FROM DataClass TO Method, FROM DataClass TO Property, FROM SealedClass TO Method, FROM SealedClass TO Property, FROM ObjectDecl TO Method, FROM ObjectDecl TO Property, FROM CompanionObject TO Method, FROM CompanionObject TO Property, FROM Class TO Property, FROM Class TO InitBlock, FROM Package TO TypeAlias, FROM Package TO ObjectDecl)",
+                "CREATE REL TABLE IF NOT EXISTS CONTAINS (FROM Package TO Class, FROM Package TO Interface, FROM Package TO Enum, FROM Package TO Record, FROM Class TO Method, FROM Class TO Constructor, FROM Class TO Field, FROM Interface TO Method, FROM Interface TO Field, FROM Module TO Function, FROM Module TO ArrowFunction, FROM Module TO AsyncFunction, FROM Module TO Generator, FROM Module TO Component, FROM Module TO Hook, FROM Module TO Class, FROM Class TO Function, FROM Class TO ArrowFunction, FROM DataClass TO Method, FROM DataClass TO Property, FROM SealedClass TO Method, FROM SealedClass TO Property, FROM ObjectDecl TO Method, FROM ObjectDecl TO Property, FROM CompanionObject TO Method, FROM CompanionObject TO Property, FROM Class TO Property, FROM Class TO InitBlock, FROM Package TO TypeAlias, FROM Package TO ObjectDecl)",
                 "CREATE REL TABLE IF NOT EXISTS EXTENDS (FROM Class TO Class, FROM Interface TO Interface, FROM Component TO Class, FROM DataClass TO Class, FROM SealedClass TO Class)",
                 "CREATE REL TABLE IF NOT EXISTS IMPLEMENTS (FROM Class TO Interface, FROM DataClass TO Interface, FROM SealedClass TO Interface, FROM ObjectDecl TO Interface)",
-                "CREATE REL TABLE IF NOT EXISTS CALLS (FROM Method TO Method, FROM Constructor TO Method, FROM Function TO Function, FROM Function TO Method, FROM ArrowFunction TO Function, FROM ArrowFunction TO Method, FROM Component TO Function, FROM Hook TO Function, FROM AsyncFunction TO Function, FROM ExtensionFunction TO Method, FROM ExtensionFunction TO Function, FROM SuspendFunction TO Method, FROM SuspendFunction TO Function, FROM Lambda TO Method, FROM Lambda TO Function, FROM InitBlock TO Method, lineNumber INT64, resolved BOOLEAN)",
+                "CREATE REL TABLE IF NOT EXISTS CALLS (FROM Method TO Method, FROM Constructor TO Method, FROM Function TO Function, FROM Function TO Method, FROM Function TO ArrowFunction, FROM Function TO AsyncFunction, FROM ArrowFunction TO Function, FROM ArrowFunction TO Method, FROM ArrowFunction TO AsyncFunction, FROM ArrowFunction TO ArrowFunction, FROM Component TO Function, FROM Component TO ArrowFunction, FROM Component TO AsyncFunction, FROM Component TO Method, FROM Hook TO Function, FROM Hook TO AsyncFunction, FROM AsyncFunction TO Function, FROM AsyncFunction TO AsyncFunction, FROM AsyncFunction TO Method, FROM AsyncFunction TO ArrowFunction, FROM ExtensionFunction TO Method, FROM ExtensionFunction TO Function, FROM SuspendFunction TO Method, FROM SuspendFunction TO Function, FROM Lambda TO Method, FROM Lambda TO Function, FROM InitBlock TO Method, lineNumber INT64, confidence DOUBLE, reason STRING)",
                 "CREATE REL TABLE IF NOT EXISTS RETURNS (FROM Method TO Class, FROM Method TO Interface, FROM Method TO Enum, FROM Method TO Record, FROM ExtensionFunction TO Class, FROM SuspendFunction TO Class)",
                 "CREATE REL TABLE IF NOT EXISTS HAS_PARAMETER (FROM Method TO Parameter, FROM Constructor TO Parameter, FROM Function TO Parameter, FROM ArrowFunction TO Parameter, FROM ExtensionFunction TO Parameter, FROM SuspendFunction TO Parameter, FROM Lambda TO Parameter)",
                 "CREATE REL TABLE IF NOT EXISTS OF_TYPE (FROM Field TO Class, FROM Field TO Interface, FROM Field TO Enum, FROM Field TO Record, FROM Parameter TO Class, FROM Parameter TO Interface, FROM Parameter TO Enum, FROM Parameter TO Record, FROM Property TO Class, FROM Property TO Interface)",
-                "CREATE REL TABLE IF NOT EXISTS HAS_ANNOTATION (FROM Class TO AnnotationType, FROM Interface TO AnnotationType, FROM Method TO AnnotationType, FROM Constructor TO AnnotationType, FROM Field TO AnnotationType, FROM Property TO AnnotationType, FROM ExtensionFunction TO AnnotationType)",
+                "CREATE REL TABLE IF NOT EXISTS HAS_ANNOTATION (FROM Class TO AnnotationType, FROM Interface TO AnnotationType, FROM Method TO AnnotationType, FROM Constructor TO AnnotationType, FROM Field TO AnnotationType, FROM Property TO AnnotationType, FROM ExtensionFunction TO AnnotationType, value STRING)",
                 "CREATE REL TABLE IF NOT EXISTS OVERRIDES (FROM Method TO Method, FROM ExtensionFunction TO Method)",
                 "CREATE REL TABLE IF NOT EXISTS THROWS (FROM Method TO Class)",
                 // CPG-specific relationship tables
-                "CREATE REL TABLE IF NOT EXISTS SOURCE_FILE (FROM Class TO File, FROM Interface TO File, FROM Enum TO File, FROM Record TO File, FROM AnnotationType TO File, FROM Module TO File, FROM Component TO File, FROM Function TO File, FROM DataClass TO File, FROM SealedClass TO File, FROM SealedInterface TO File, FROM ObjectDecl TO File, FROM ExtensionFunction TO File)",
+                "CREATE REL TABLE IF NOT EXISTS SOURCE_FILE (FROM Class TO File, FROM Interface TO File, FROM Enum TO File, FROM Record TO File, FROM AnnotationType TO File, FROM Module TO File, FROM Component TO File, FROM Function TO File, FROM ArrowFunction TO File, FROM AsyncFunction TO File, FROM Generator TO File, FROM Hook TO File, FROM DataClass TO File, FROM SealedClass TO File, FROM SealedInterface TO File, FROM ObjectDecl TO File, FROM ExtensionFunction TO File)",
                 "CREATE REL TABLE IF NOT EXISTS AST_CHILD (FROM Method TO Statement, FROM Constructor TO Statement, FROM Statement TO Statement, FROM Function TO Statement, FROM ArrowFunction TO Statement, FROM ExtensionFunction TO Statement, FROM SuspendFunction TO Statement, FROM InitBlock TO Statement, ast_order INT64)",
                 "CREATE REL TABLE IF NOT EXISTS CFG_NEXT (FROM Method TO Statement, FROM Constructor TO Statement, FROM Statement TO Statement, FROM Function TO Statement, FROM ExtensionFunction TO Statement, FROM SuspendFunction TO Statement, FROM InitBlock TO Statement, backEdge BOOLEAN)",
                 "CREATE REL TABLE IF NOT EXISTS DATA_FLOW (FROM Statement TO Statement, variable STRING)",
@@ -70,7 +70,16 @@ public class KuzuGraphStore implements GraphStore {
                 "CREATE REL TABLE IF NOT EXISTS DELEGATES_TO (FROM Property TO Class, FROM Property TO Interface)",
                 "CREATE REL TABLE IF NOT EXISTS SEALED_SUBTYPE (FROM SealedClass TO Class, FROM SealedClass TO DataClass, FROM SealedClass TO ObjectDecl, FROM SealedInterface TO Class, FROM SealedInterface TO Interface)",
                 "CREATE REL TABLE IF NOT EXISTS COMPANION_OF (FROM CompanionObject TO Class, FROM CompanionObject TO DataClass, FROM CompanionObject TO SealedClass)",
-                "CREATE REL TABLE IF NOT EXISTS SUSPENDS (FROM SuspendFunction TO SuspendFunction, FROM SuspendFunction TO Method)"
+                "CREATE REL TABLE IF NOT EXISTS SUSPENDS (FROM SuspendFunction TO SuspendFunction, FROM SuspendFunction TO Method)",
+                // Post-processing relationship tables
+                "CREATE REL TABLE IF NOT EXISTS WORKFLOW_STEP (FROM Method TO Workflow, FROM Function TO Workflow, FROM AsyncFunction TO Workflow, FROM ArrowFunction TO Workflow, FROM Component TO Workflow, step INT64)",
+                "CREATE REL TABLE IF NOT EXISTS IN_DOMAIN (FROM Class TO Domain, FROM Interface TO Domain, FROM Method TO Domain, FROM Component TO Domain, FROM Module TO Domain, FROM AsyncFunction TO Domain, FROM Function TO Domain, FROM ArrowFunction TO Domain)"
+        };
+
+        // Post-processing node tables (created separately — not passed through withNormalizedRelProps)
+        String[] abstractionNodeDefs = {
+                "CREATE NODE TABLE IF NOT EXISTS Workflow (id STRING, name STRING, entryPointId STRING, terminalId STRING, stepCount INT64, type STRING, httpMethod STRING, httpPath STRING, language STRING, PRIMARY KEY(id))",
+                "CREATE NODE TABLE IF NOT EXISTS Domain (id STRING, name STRING, heuristicLabel STRING, cohesion DOUBLE, memberCount INT64, language STRING, PRIMARY KEY(id))"
         };
 
         for (String relDef : relDefs) {
@@ -78,6 +87,14 @@ public class KuzuGraphStore implements GraphStore {
                 connection.query(withNormalizedRelProps(relDef));
             } catch (Exception e) {
                 System.err.printf("Warning: Could not create relationship: %s%n", e.getMessage());
+            }
+        }
+
+        for (String nodeDef : abstractionNodeDefs) {
+            try {
+                connection.query(nodeDef);
+            } catch (Exception e) {
+                System.err.printf("Warning: Could not create abstraction node table: %s%n", e.getMessage());
             }
         }
     }
@@ -90,7 +107,8 @@ public class KuzuGraphStore implements GraphStore {
                 "SOURCE_FILE", "AST_CHILD", "CFG_NEXT", "DATA_FLOW",
                 "IMPORTS", "EXPORTS", "RENDERS", "USES_HOOK", "PROP_DEPENDENCY",
                 "DECORATES", "YIELDS",
-                "EXTENSION_OF", "DELEGATES_TO", "SEALED_SUBTYPE", "COMPANION_OF", "SUSPENDS"}) {
+                "EXTENSION_OF", "DELEGATES_TO", "SEALED_SUBTYPE", "COMPANION_OF", "SUSPENDS",
+                "WORKFLOW_STEP", "IN_DOMAIN"}) {
             try {
                 connection.query("DROP TABLE " + relType);
             } catch (Exception ignored) {
@@ -120,11 +138,16 @@ public class KuzuGraphStore implements GraphStore {
 
                 StringBuilder props = new StringBuilder();
                 for (Map.Entry<String, Object> entry : node.properties().entrySet()) {
-                    // Only add properties that are in the schema
+                    // Only add properties that are in the node table schema
                     String key = entry.getKey();
-                    if (key.equals("visibility") || key.equals("isAbstract") || key.equals("isStatic") || 
-                        key.equals("isFinal") || key.equals("returnType") || key.equals("lineNumber") || 
-                        key.equals("type") || key.equals("external") || key.equals("path")) {
+                    if (key.equals("visibility") || key.equals("isAbstract") || key.equals("isStatic") ||
+                        key.equals("isFinal") || key.equals("returnType") || key.equals("lineNumber") ||
+                        key.equals("type") || key.equals("external") || key.equals("path") ||
+                        // Workflow-specific properties
+                        key.equals("entryPointId") || key.equals("terminalId") || key.equals("stepCount") ||
+                        key.equals("httpMethod") || key.equals("httpPath") ||
+                        // Domain-specific properties
+                        key.equals("heuristicLabel") || key.equals("cohesion") || key.equals("memberCount")) {
                         props.append(", ").append(key).append(": ");
                         props.append(formatValue(entry.getValue()));
                     }
@@ -256,6 +279,9 @@ public class KuzuGraphStore implements GraphStore {
             case LAMBDA -> "Lambda";
             case INIT_BLOCK -> "InitBlock";
             case TYPE_ALIAS -> "TypeAlias";
+            // Post-processing abstractions
+            case WORKFLOW -> "Workflow";
+            case DOMAIN -> "Domain";
         };
     }
 
@@ -289,6 +315,8 @@ public class KuzuGraphStore implements GraphStore {
             case FILE -> "SourceFile";
             case ANNOTATION_TYPE, DECORATOR -> "AnnotationLike";
             case STATEMENT -> "Statement";
+            case WORKFLOW -> "Workflow";
+            case DOMAIN -> "Domain";
             default -> "CodeElement";
         };
     }
@@ -302,6 +330,7 @@ public class KuzuGraphStore implements GraphStore {
             case RENDERS, USES_HOOK -> "UsesUi";
             case HAS_PARAMETER, OF_TYPE, RETURNS, THROWS, DECORATES, HAS_ANNOTATION, YIELDS, SUSPENDS -> "SemanticRelation";
             case AST_CHILD, CFG_NEXT, DATA_FLOW -> "FlowRelation";
+            case WORKFLOW_STEP, IN_DOMAIN -> "AbstractionRelation";
         };
     }
 

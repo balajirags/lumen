@@ -38,5 +38,8 @@ public enum NodeType {
     PROPERTY,         // Kotlin property with accessors
     LAMBDA,           // Lambda expression
     INIT_BLOCK,       // Init block in class
-    TYPE_ALIAS        // Kotlin typealias
+    TYPE_ALIAS,       // Kotlin typealias
+    // Post-processing abstractions
+    WORKFLOW,         // End-to-end execution trace (HTTP entry → repository/event terminal, or React root component → leaf API call)
+    DOMAIN            // Functional cluster of cohesive classes/modules (derived from call graph community detection)
 }

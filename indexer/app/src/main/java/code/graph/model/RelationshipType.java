@@ -31,5 +31,8 @@ public enum RelationshipType {
     DELEGATES_TO,       // Property delegation (by keyword)
     SEALED_SUBTYPE,     // Sealed class/interface -> permitted subtype
     COMPANION_OF,       // Companion object -> containing class
-    SUSPENDS            // Suspend function coroutine call
+    SUSPENDS,           // Suspend function coroutine call
+    // Post-processing abstractions
+    WORKFLOW_STEP,      // (Method|Component|Function|AsyncFunction|ArrowFunction) -> Workflow, with step INT
+    IN_DOMAIN           // (Class|Interface|Component|Module|AsyncFunction|Function|ArrowFunction) -> Domain
 }

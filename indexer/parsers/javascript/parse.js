@@ -555,10 +555,11 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
                      (node.superClass.type === 'MemberExpression' && 
                       node.superClass.property?.name === 'Component'));
                 
-                graph.addNode(classId, isComponent ? 'COMPONENT' : 'CLASS', className, 
+                graph.addNode(classId, isComponent ? 'COMPONENT' : 'CLASS', className,
                     `${state.moduleName}.${className}`, {
                         lineNumber: node.loc?.start?.line,
-                        isReactComponent: isComponent
+                        isReactComponent: isComponent,
+                        path: state.filePath
                     });
                 
                 graph.addRelationship(state.moduleId, classId, 'CONTAINS');
@@ -630,15 +631,17 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
                     lineNumber: node.loc?.start?.line,
                     isAsync: node.async,
                     isGenerator: node.generator,
-                    paramCount: node.params.length
+                    paramCount: node.params.length,
+                    path: state.filePath
                 });
-                
+
                 graph.addRelationship(state.moduleId, funcId, 'CONTAINS');
-                
+                graph.addRelationship(funcId, `file:${state.filePath}`, 'SOURCE_FILE');
+
                 if (state.exports.has(funcName)) {
                     graph.addRelationship(state.moduleId, funcId, 'EXPORTS');
                 }
-                
+
                 state.functionStack.push(state.currentFunction);
                 state.currentFunction = funcId;
             },
@@ -669,11 +672,13 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
             graph.addNode(funcId, nodeType, funcName, `${state.moduleName}.${funcName}`, {
                 lineNumber: node.loc?.start?.line,
                 isAsync: node.init.async,
-                isArrow: node.init.type === 'ArrowFunctionExpression'
+                isArrow: node.init.type === 'ArrowFunctionExpression',
+                path: state.filePath
             });
-            
+
             graph.addRelationship(state.moduleId, funcId, 'CONTAINS');
-            
+            graph.addRelationship(funcId, `file:${state.filePath}`, 'SOURCE_FILE');
+
             if (state.exports.has(funcName)) {
                 graph.addRelationship(state.moduleId, funcId, 'EXPORTS');
             }
@@ -747,7 +752,8 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
                     const targetFuncId = `function:${targetModule}.${memberProperty}`;
                     graph.addRelationship(caller, targetFuncId, 'CALLS', {
                         lineNumber: node.loc?.start?.line,
-                        resolved: true
+                        confidence: 0.90,
+                        reason: 'import-resolved'
                     });
                     return;
                 }
@@ -760,14 +766,16 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
                 const targetFuncId = `function:${targetModule}.${importInfo.importedName === 'default' ? calleeName : importInfo.importedName}`;
                 graph.addRelationship(caller, targetFuncId, 'CALLS', {
                     lineNumber: node.loc?.start?.line,
-                    resolved: true
+                    confidence: 0.90,
+                    reason: 'import-resolved'
                 });
             } else if (!importInfo) {
-                // Local function call
+                // Local function call within same module
                 const targetFuncId = `function:${state.moduleName}.${calleeName}`;
                 graph.addRelationship(caller, targetFuncId, 'CALLS', {
                     lineNumber: node.loc?.start?.line,
-                    resolved: true
+                    confidence: 0.95,
+                    reason: 'same-file'
                 });
             }
         },
@@ -790,18 +798,22 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
             
             const caller = state.currentFunction || state.currentClass || state.moduleId;
             
-            // Check if imported
+            // Check if imported — always use 'function:' prefix to match definition node IDs
             const importInfo = state.imports.get(componentName);
             let targetId;
-            
+
             if (importInfo && importInfo.isRelative) {
                 const targetModule = resolveModulePath(importInfo.source, state.filePath);
-                targetId = `component:${targetModule}.${componentName}`;
+                targetId = `function:${targetModule}.${componentName}`;
             } else {
-                targetId = `component:${componentName}`;
+                // Same module — resolve to the canonical definition ID
+                targetId = `function:${state.moduleName}.${componentName}`;
             }
-            
-            graph.addNode(targetId, 'COMPONENT', componentName, componentName);
+
+            // Only add a placeholder if the definition node hasn't been created yet
+            if (!graph.hasNode(targetId)) {
+                graph.addNode(targetId, 'COMPONENT', componentName, componentName);
+            }
             graph.addRelationship(caller, targetId, 'RENDERS', {
                 lineNumber: node.loc?.start?.line
             });

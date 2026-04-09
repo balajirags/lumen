@@ -95,7 +95,7 @@ class ReverseEngineerToolkit:
                 ],
                 "relationship_types": REL_TYPES,
                 "relationship_properties": {
-                    "CALLS": ["lineNumber", "resolved"],
+                    "CALLS": ["lineNumber", "confidence", "reason"],
                     "RENDERS": ["lineNumber"],
                     "USES_HOOK": ["lineNumber"],
                     "AST_CHILD": ["ast_order"],
@@ -183,9 +183,10 @@ class ReverseEngineerToolkit:
             esc = _cypher_escape(method_name)
             cypher = (
                 f"MATCH (caller)-[r:CALLS]->(callee) "
-                f"WHERE callee.name = '{esc}' OR callee.qualifiedName = '{esc}' "
+                f"WHERE (callee.name = '{esc}' OR callee.qualifiedName = '{esc}') "
+                f"AND (r.confidence IS NULL OR r.confidence >= 0.9) "
                 f"RETURN caller.qualifiedName AS caller, callee.qualifiedName AS callee, "
-                f"r.lineNumber AS line LIMIT 50"
+                f"r.lineNumber AS line, r.confidence AS confidence LIMIT 50"
             )
             try:
                 rows = backend.execute(cypher)
@@ -202,9 +203,10 @@ class ReverseEngineerToolkit:
             esc = _cypher_escape(method_name)
             cypher = (
                 f"MATCH (caller)-[r:CALLS]->(callee) "
-                f"WHERE caller.name = '{esc}' OR caller.qualifiedName = '{esc}' "
+                f"WHERE (caller.name = '{esc}' OR caller.qualifiedName = '{esc}') "
+                f"AND (r.confidence IS NULL OR r.confidence >= 0.9) "
                 f"RETURN caller.qualifiedName AS caller, callee.qualifiedName AS callee, "
-                f"r.lineNumber AS line LIMIT 50"
+                f"r.lineNumber AS line, r.confidence AS confidence LIMIT 50"
             )
             try:
                 rows = backend.execute(cypher)
@@ -1336,9 +1338,10 @@ class ReverseEngineerToolkit:
             lines = [f"=== CALL CHAIN: {start_method} → {end_method} ===\n"]
             try:
                 rows = backend.execute(
-                    f"MATCH path = (a)-[:CALLS*1..{max_depth}]->(b) "
+                    f"MATCH path = (a)-[r:CALLS*1..{max_depth}]->(b) "
                     f"WHERE (a.name = '{src}' OR a.qualifiedName = '{src}') "
                     f"  AND (b.name = '{tgt}' OR b.qualifiedName = '{tgt}') "
+                    f"  AND ALL(e IN relationships(path) WHERE e.confidence IS NULL OR e.confidence >= 0.9) "
                     f"RETURN nodes(path) AS chain_nodes, "
                     f"length(path) AS depth ORDER BY depth LIMIT 10"
                 )
@@ -1357,6 +1360,65 @@ class ReverseEngineerToolkit:
             except Exception as e:
                 lines.append(f"  (error: {e})")
             return "\n".join(lines)
+
+        # ------------------------------------------------------------------ #
+        # get_workflows
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_workflows() -> str:
+            """List pre-computed end-to-end workflows.
+            For Java/Kotlin: HTTP entry point → repository/event terminal.
+            For React: root component → leaf API-call function."""
+            try:
+                rows = backend.execute(
+                    "MATCH (w:Workflow) "
+                    "RETURN w.name AS name, w.httpMethod AS method, w.httpPath AS path, "
+                    "w.stepCount AS steps, w.type AS type, w.language AS language "
+                    "ORDER BY w.language, w.type, w.name LIMIT 100"
+                )
+                return _format_rows(rows) if rows else "No workflows found. Run indexer with post-processing enabled."
+            except Exception as e:
+                return f"Error: {e}"
+
+        # ------------------------------------------------------------------ #
+        # get_workflow_steps
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_workflow_steps(workflow_name: str) -> str:
+            """Trace all steps in a named workflow end-to-end.
+
+            Args:
+                workflow_name: The workflow name (from get_workflows).
+            """
+            esc = _cypher_escape(workflow_name)
+            try:
+                rows = backend.execute(
+                    f"MATCH (n)-[s:WORKFLOW_STEP]->(w:Workflow) "
+                    f"WHERE w.name = '{esc}' "
+                    f"RETURN s.step AS step, n.name AS node, n.qualifiedName AS qualifiedName "
+                    f"ORDER BY s.step"
+                )
+                return _format_rows(rows) if rows else f"Workflow '{workflow_name}' not found."
+            except Exception as e:
+                return f"Error: {e}"
+
+        # ------------------------------------------------------------------ #
+        # get_domains
+        # ------------------------------------------------------------------ #
+        @reg.tool()
+        def get_domains() -> str:
+            """List functional domains detected in the codebase with cohesion scores.
+            Domains are clusters of classes/components that work together on one concern."""
+            try:
+                rows = backend.execute(
+                    "MATCH (d:Domain) "
+                    "RETURN d.name AS domain, d.heuristicLabel AS layer, "
+                    "d.cohesion AS cohesion, d.memberCount AS members, d.language AS language "
+                    "ORDER BY d.language, d.cohesion DESC"
+                )
+                return _format_rows(rows) if rows else "No domains detected. Run indexer with post-processing enabled."
+            except Exception as e:
+                return f"Error: {e}"
 
         # ------------------------------------------------------------------ #
         # get_hotspots
