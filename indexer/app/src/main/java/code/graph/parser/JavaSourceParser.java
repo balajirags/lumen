@@ -230,11 +230,11 @@ public class JavaSourceParser implements SourceParser {
                 graph.addRelationship(new CodeRelationship(nodeId, parentId, RelationshipType.EXTENDS));
             }
 
-            // Implements
+            // Implements — create placeholder as INTERFACE so schema constraint (Class→Interface) is met
             for (ClassOrInterfaceType implemented : decl.getImplementedTypes()) {
                 String ifaceName = resolveTypeName(implemented);
                 String ifaceId = "type:" + ifaceName;
-                ensureTypeNode(ifaceId, ifaceName);
+                ensureInterfaceNode(ifaceId, ifaceName);
                 graph.addRelationship(new CodeRelationship(nodeId, ifaceId, RelationshipType.IMPLEMENTS));
             }
 
@@ -730,6 +730,13 @@ public class JavaSourceParser implements SourceParser {
             if (!graph.hasNode(typeId)) {
                 // External/unresolved type — create a placeholder node
                 graph.addNode(new CodeNode(typeId, NodeType.CLASS, typeName, typeName)
+                        .withProperty("external", true));
+            }
+        }
+
+        private void ensureInterfaceNode(String typeId, String typeName) {
+            if (!graph.hasNode(typeId)) {
+                graph.addNode(new CodeNode(typeId, NodeType.INTERFACE, typeName, typeName)
                         .withProperty("external", true));
             }
         }

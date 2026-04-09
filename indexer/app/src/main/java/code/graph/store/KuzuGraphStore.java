@@ -22,8 +22,10 @@ public class KuzuGraphStore implements GraphStore {
 
     @Override
     public void initSchema() {
-        // Create node tables for each type
+        // Create node tables for each type.
+        // WORKFLOW and DOMAIN have custom schemas and are created separately below.
         for (NodeType type : NodeType.values()) {
+            if (type == NodeType.WORKFLOW || type == NodeType.DOMAIN) continue;
             String tableName = nodeTypeToTable(type);
             try {
                 connection.query(String.format(
@@ -76,25 +78,27 @@ public class KuzuGraphStore implements GraphStore {
                 "CREATE REL TABLE IF NOT EXISTS IN_DOMAIN (FROM Class TO Domain, FROM Interface TO Domain, FROM Method TO Domain, FROM Component TO Domain, FROM Module TO Domain, FROM AsyncFunction TO Domain, FROM Function TO Domain, FROM ArrowFunction TO Domain)"
         };
 
-        // Post-processing node tables (created separately — not passed through withNormalizedRelProps)
+        // Post-processing node tables must be created BEFORE the rel tables that reference them
+        // (WORKFLOW_STEP references Workflow, IN_DOMAIN references Domain).
+        // qualifiedName is included because the generic save() always writes it.
         String[] abstractionNodeDefs = {
-                "CREATE NODE TABLE IF NOT EXISTS Workflow (id STRING, name STRING, entryPointId STRING, terminalId STRING, stepCount INT64, type STRING, httpMethod STRING, httpPath STRING, language STRING, PRIMARY KEY(id))",
-                "CREATE NODE TABLE IF NOT EXISTS Domain (id STRING, name STRING, heuristicLabel STRING, cohesion DOUBLE, memberCount INT64, language STRING, PRIMARY KEY(id))"
+                "CREATE NODE TABLE IF NOT EXISTS Workflow (id STRING, name STRING, qualifiedName STRING, entryPointId STRING, terminalId STRING, stepCount INT64, type STRING, httpMethod STRING, httpPath STRING, language STRING, kind STRING, normKind STRING, PRIMARY KEY(id))",
+                "CREATE NODE TABLE IF NOT EXISTS Domain (id STRING, name STRING, qualifiedName STRING, heuristicLabel STRING, cohesion DOUBLE, memberCount INT64, language STRING, kind STRING, normKind STRING, PRIMARY KEY(id))"
         };
-
-        for (String relDef : relDefs) {
-            try {
-                connection.query(withNormalizedRelProps(relDef));
-            } catch (Exception e) {
-                System.err.printf("Warning: Could not create relationship: %s%n", e.getMessage());
-            }
-        }
 
         for (String nodeDef : abstractionNodeDefs) {
             try {
                 connection.query(nodeDef);
             } catch (Exception e) {
                 System.err.printf("Warning: Could not create abstraction node table: %s%n", e.getMessage());
+            }
+        }
+
+        for (String relDef : relDefs) {
+            try {
+                connection.query(withNormalizedRelProps(relDef));
+            } catch (Exception e) {
+                System.err.printf("Warning: Could not create relationship: %s%n", e.getMessage());
             }
         }
     }
@@ -152,7 +156,11 @@ public class KuzuGraphStore implements GraphStore {
                         props.append(formatValue(entry.getValue()));
                     }
                 }
-                props.append(", language: ").append(formatValue(inferLanguage(node.type())));
+                // Prefer explicit language property (set by WorkflowBuilder/DomainDetector) over inferred
+                String lang = node.properties().containsKey("language")
+                        ? String.valueOf(node.properties().get("language"))
+                        : inferLanguage(node.type());
+                props.append(", language: ").append(formatValue(lang));
                 props.append(", kind: ").append(formatValue(nodeTypeToTable(node.type())));
                 props.append(", normKind: ").append(formatValue(inferNormKind(node.type())));
 

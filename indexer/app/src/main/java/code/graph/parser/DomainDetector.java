@@ -110,8 +110,10 @@ public class DomainDetector {
 
     private boolean isClusterableType(NodeType t) {
         return switch (t) {
-            case CLASS, INTERFACE, ENUM -> true;                                  // Java/Kotlin
-            case COMPONENT, MODULE, ASYNC_FUNCTION, FUNCTION, ARROW_FUNCTION -> true; // JS/TS
+            // Java/Kotlin: include METHOD so CALLS edges between methods form adjacency between classes
+            case CLASS, INTERFACE, ENUM, METHOD -> true;
+            // JS/TS: components and functions are the natural unit
+            case COMPONENT, MODULE, ASYNC_FUNCTION, FUNCTION, ARROW_FUNCTION -> true;
             default -> false;
         };
     }
