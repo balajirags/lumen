@@ -307,6 +307,7 @@ def run_loop(
     events: list[str] = []
     artifacts: list[str] = []
     tool_uses = 0
+    tool_call_counts: dict[str, int] = {}
     total_input_tokens = 0
     total_output_tokens = 0
 
@@ -338,6 +339,7 @@ def run_loop(
                 "artifacts": artifacts,
                 "events": events,
                 "tool_uses": tool_uses,
+                "tool_call_counts": tool_call_counts,
                 "input_tokens": total_input_tokens,
                 "output_tokens": total_output_tokens,
             }
@@ -366,6 +368,7 @@ def run_loop(
         # Process all tool calls in this turn
         for tc in response.tool_calls:
             tool_uses += 1
+            tool_call_counts[tc.name] = tool_call_counts.get(tc.name, 0) + 1
             args_summary = json.dumps(tc.arguments)
             if len(args_summary) > 120:
                 args_summary = args_summary[:120] + "…"
@@ -395,6 +398,7 @@ def run_loop(
             "artifacts": artifacts,
             "events": events,
             "tool_uses": tool_uses,
+            "tool_call_counts": tool_call_counts,
             "input_tokens": total_input_tokens,
             "output_tokens": total_output_tokens,
         }
@@ -413,6 +417,7 @@ def run_loop(
         "artifacts": artifacts,
         "events": events,
         "tool_uses": tool_uses,
+        "tool_call_counts": tool_call_counts,
         "input_tokens": total_input_tokens,
         "output_tokens": total_output_tokens,
     }
@@ -899,7 +904,7 @@ def _recover_missing_current_state_artifacts(
     analyst_name: str = "analyst/flows",
 ) -> dict[str, Any]:
     if not missing_paths:
-        return {"status": "done", "artifacts": [], "events": [], "tool_uses": 0, "input_tokens": 0, "output_tokens": 0}
+        return {"status": "done", "artifacts": [], "events": [], "tool_uses": 0, "tool_call_counts": {}, "input_tokens": 0, "output_tokens": 0}
     backend = KuzuBackend(kuzu_path)
     toolkit = ReverseEngineerToolkit(backend, repo_path=repo_path)
     system_prompt = _build_analyst_system_prompt(
@@ -1391,6 +1396,7 @@ def run_supervisor_agent(
             "artifacts": all_artifacts,
             "events": all_events,
             "tool_uses": 0,
+            "tool_call_counts": {},
             "input_tokens": 0,
             "output_tokens": 0,
             "prompt_archetype": selected_repo_archetype,
@@ -1435,6 +1441,7 @@ def run_supervisor_agent(
 
     from codedoc import log as _log
     _log.start_agent_boxes()
+    analyst_tool_counts: dict[str, dict[str, int]] = {}
     try:
         _log.update_workflow_phase("synthesis", status="running", tool="research fan-out")
         with ThreadPoolExecutor(max_workers=len(analyst_requests)) as pool:
@@ -1450,6 +1457,7 @@ def run_supervisor_agent(
                 total_input_tokens += result["input_tokens"]
                 total_output_tokens += result["output_tokens"]
                 total_tool_uses += result["tool_uses"]
+                analyst_tool_counts[name] = result.get("tool_call_counts", {})
                 n_artifacts = len(result["artifacts"])
                 if result["status"] == "failed":
                     _log.update_agent_box(name, status="failed", tool="error")
@@ -1462,6 +1470,9 @@ def run_supervisor_agent(
     except Exception:
         _log.update_workflow_phase("synthesis", status="failed", tool="research fan-out")
         raise
+
+    # Print per-researcher tool usage table so it's visible which tools each analyst called
+    _log.print_tool_usage_table(analyst_tool_counts)
 
     backfilled = _backfill_required_artifacts(kuzu_path, repo_path, artifacts_dir, selected_repo_archetype)
     if backfilled:
@@ -1581,6 +1592,10 @@ def run_supervisor_agent(
     all_events.append(f"[supervisor] architect done — {len(arch_result['artifacts'])} artifact(s)")
     from codedoc import log as _log
     _log.print_synthesizer_done(len(arch_result["artifacts"]))
+    # Print architect tool usage alongside analyst counts
+    arch_counts = arch_result.get("tool_call_counts", {})
+    if arch_counts:
+        _log.print_tool_usage_table({"architect": arch_counts})
 
     if arch_result["status"] == "failed":
         _log.update_workflow_phase("architect", status="failed", tool="error")

@@ -236,6 +236,59 @@ def print_researcher_done(name: str, char_count: int) -> None:
     console.print(text)
 
 
+_NEW_TOOLS = {"get_workflows", "get_workflow_steps", "get_domains"}
+
+
+def print_tool_usage_table(per_agent: dict[str, dict[str, int]]) -> None:
+    """Print a per-researcher tool usage table.
+
+    Highlights the new post-processing tools (get_workflows, get_workflow_steps,
+    get_domains) so it's immediately visible whether they were called.
+    """
+    if not per_agent:
+        return
+
+    # Collect all tools used across all agents, sorted by total frequency desc
+    all_tools: dict[str, int] = {}
+    for counts in per_agent.values():
+        for tool, n in counts.items():
+            all_tools[tool] = all_tools.get(tool, 0) + n
+    if not all_tools:
+        return
+
+    sorted_tools = sorted(all_tools.items(), key=lambda x: -x[1])
+    agent_names = list(per_agent.keys())
+
+    table = Table(
+        title="Tool usage by researcher",
+        box=SIMPLE_HEAVY,
+        show_lines=False,
+        title_style="bold",
+        header_style="bold dim",
+    )
+    table.add_column("tool", style="", no_wrap=True)
+    table.add_column("total", justify="right", style="dim")
+    for name in agent_names:
+        short = name.replace("analyst/", "").replace("researcher/", "")
+        table.add_column(short, justify="right")
+
+    for tool_name, total in sorted_tools:
+        is_new = tool_name in _NEW_TOOLS
+        name_cell = Text(tool_name, style="bold green" if is_new else "")
+        if is_new:
+            name_cell.append(" ✦", style="bold green")
+        total_cell = Text(str(total), style="bold green" if is_new else "dim")
+        per_agent_cells = []
+        for name in agent_names:
+            n = per_agent[name].get(tool_name, 0)
+            cell = Text(str(n) if n else "·", style="bold green" if (n and is_new) else ("" if n else "dim"))
+            per_agent_cells.append(cell)
+        table.add_row(name_cell, total_cell, *per_agent_cells)
+
+    console.print()
+    console.print(table)
+
+
 def print_synthesizer_done(artifact_count: int) -> None:
     text = Text("  ")
     text.append("synthesizer", style="bold magenta")
