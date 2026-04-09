@@ -10,7 +10,7 @@ large repos, and to reduce follow-up analysis cost when the same indexed repo is
 ```
 Source repo → [preflight + indexer] → KuzuDB graph
                                       ├─ [full pipeline] -> [agent] -> Markdown artifacts -> [builder] -> MkDocs Material site
-                                      └─ [mcp pipeline] -> MCP server (Streamable HTTP)
+                                      └─ [mcp pipeline] -> HTTP MCP server
 ```
 
 This is a monorepo containing two sub-projects:
@@ -100,7 +100,7 @@ If `timeout` or `max_turns` is explicitly set in `.codedoc.toml` or via CLI, tha
 
 | File | Purpose |
 |---|---|
-| `Dockerfile` | Multi-stage pipeline image: jlink JRE + PyInstaller binaries + Node JS parser |
+| `Dockerfile` | Multi-stage pipeline image: jlink JRE + pip-installed lumen runtime + Node JS parser |
 | `scripts/lumen-docker-*.sh` | Script-backed Docker entrypoints for pipeline, MCP, docs, image load, and release bundling |
 
 ### Dockerfile (pipeline) — 4 stages
@@ -124,7 +124,7 @@ on aarch64 where `python:3.11-slim` requires GLIBC_2.38 but `node:20-slim` only 
 | `mcp` | `make lumen-docker-mcp DB=...` | http://localhost:8765/mcp |
 | `docs` | `make lumen-docker-docs` | http://localhost:8081 |
 
-`pipeline`, `mcp`, and `docs` are now script-backed `docker run` entrypoints invoked from the Makefile.
+`run`, `mcp`, and `docs` are script-backed `docker run` entrypoints invoked from the Makefile.
 They all use the same `DOCKER_IMAGE` runtime.
 The scripts add `host.docker.internal:host-gateway` so Ollama-on-host works on Linux; on Mac/Windows Docker Desktop, `host.docker.internal` is available automatically.
 `lumen-docker-mcp` prefers serving an existing DB via `DB`, and falls back to repo indexing when `REPO` is provided.
@@ -138,19 +138,17 @@ Normal MCP commands already print config snippets before serving; `--print-confi
 Python package named `codedoc` (internal). CLI entry point: `lumen` (via `pyproject.toml`).
 
 Key files:
-- `pipeline/codedoc/cli.py` — Click CLI (`lumen run`, `lumen mcp`), includes MCP serve flags
-- `pipeline/codedoc/cli.py` — Click CLI (`lumen run`, `lumen mcp`), includes MCP serve flags
+- `pipeline/codedoc/cli.py` — Click CLI behind the repo-local `make lumen-run` and `make lumen-mcp` commands
 - `pipeline/codedoc/config.py` — config loader; defaults use `Path(__file__)` relative paths
 - `pipeline/codedoc/pipelines/full.py` — full docs pipeline: preflight → indexer → agent → builder
 - `pipeline/codedoc/pipelines/mcp.py` — MCP pipeline: preflight → indexer → MCP serve metadata
-- `pipeline/codedoc/pipelines/mcp_http.py` — HTTP MCP pipeline: preflight → indexer → HTTP MCP serve metadata
 - `pipeline/codedoc/pipelines/common.py` — shared run-dir, state-init, and finalization helpers
 - `pipeline/codedoc/pipeline.py` — compatibility shim exporting the pipeline entrypoints
 - `pipeline/codedoc/preflight/repo_metrics.py` — native pluggable repo metrics guardrail (LOC, file count, language mix)
 - `pipeline/codedoc/preflight/runner.py` — preflight registry/runner; pipeline core depends on this, not on repo-metrics directly
 - `pipeline/codedoc/stages/agent.py` — supervisor + parallel analysts + architect
 - `pipeline/codedoc/log.py` — structured progress logging, indexer progress panel, repo metrics panel, analyst live boxes
-- `pipeline/codedoc/mcp_server.py` — MCP server backed by `kg_tools`; supports Streamable HTTP plus native/Docker/client config output
+- `pipeline/codedoc/mcp_server.py` — MCP server backed by `kg_tools`; supports the HTTP MCP flow exposed by `make lumen-mcp` and `make lumen-docker-mcp`
 - `pipeline/codedoc/llm.py` — LLM abstraction: `ClaudeProvider`, `OllamaProvider`, `OpenAIProvider`
 - `pipeline/codedoc/kg_tools/toolkit.py` — `ReverseEngineerToolkit` (36 graph query tools)
 - `pipeline/codedoc/kg_tools/backends.py` — `KuzuBackend`, `Neo4jBackend`
@@ -262,7 +260,7 @@ Current indexing behavior:
 | `indexer/install.sh` unchanged | Already uses `$SCRIPT_DIR`; relocatable as-is |
 | `indexer_bin_dir = ../indexer/bin` | Wires pipeline to indexer binaries across monorepo boundary |
 | Repo metrics is a preflight plugin, not core pipeline logic | Easy for the team to disable/remove/replace without changing indexer/agent stages |
-| Separate full and MCP pipeline modules | Keeps `lumen run` and `lumen mcp` independent while reusing shared setup/finalization helpers |
+| Separate full and MCP pipeline modules | Keeps `make lumen-run` and `make lumen-mcp` independent while reusing shared setup/finalization helpers |
 | MCP is HTTP-first | URL-based MCP is the simplest client UX for Docker, local development, and external clients |
 | Multi-language indexing in one run | Real repos are often polyglot; warning-only detection was too weak |
 | Normalized graph metadata (`language`, `kind`, `normKind`) is additive | Preserve parser-native fidelity while improving toolkit/agent consistency |
