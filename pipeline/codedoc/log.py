@@ -80,12 +80,31 @@ def log_to_console(stage: str, message: str, ts: str) -> None:
 
 def print_pipeline_start(repo: str, output_dir: str) -> None:  # noqa: ARG001
     from pathlib import Path
+
     repo_name = Path(repo).name
+    intro = (
+        "Illuminate any codebase. lumen reverse-engineers a source repository into a full "
+        "documentation site — architecture diagrams, domain model, migration roadmap — "
+        "without reading source files en masse."
+    )
+    details = Table.grid(padding=(0, 2))
+    details.add_column(style="dim", no_wrap=True)
+    details.add_column()
+    details.add_row("Repo", repo_name)
+    details.add_row("Source", str(repo))
+    details.add_row("Output", str(output_dir))
+    header = Group(
+        Text(_LUMEN_ASCII, style="bold cyan"),
+        Text(intro, style="dim"),
+        Text(""),
+        details,
+    )
     console.print()
     console.print(
         Panel(
-            f"[bold cyan]{_LUMEN_ASCII}[/bold cyan]\n[dim]Analyzing[/dim] {repo_name}",
+            header,
             border_style="cyan",
+            title="[bold cyan] Lumen [/bold cyan]",
         )
     )
     console.print(Rule(f"Lumen · {repo_name}", style="bold cyan"))
