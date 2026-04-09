@@ -87,6 +87,7 @@ In practice, that gives you:
 - **Normalized graph metadata** — nodes and edges carry `language`, `kind`, and `normKind` so tooling can reason across language-specific parser outputs more consistently.
 - **Repo metrics guardrail** — a native preflight plugin estimates repo size using LOC, source-file count, and language mix before indexing starts.
 - **Repo-type-aware prompting** — the pipeline classifies a repo once, then carries `primary_repo_type`, capabilities, and an artifact plan through later stages.
+- **Frontend-aware JS/TS analysis** — React/TSX repos now get stronger graph-backed component, hook, and UI-to-API exploration, including SPA fallback views when no strong router graph exists.
 - **Improved CLI UX** — indexing shows live per-language progress, the three parallel researchers render as separate live boxes, and the synthesis / architect / summary phases are shown explicitly.
 - **MCP access** — `lumen mcp` serves the indexed graph over HTTP so other tools and clients can query the repo without rerunning the full docs pipeline.
 - **Split pipeline modules** — the full docs flow and the MCP flow live in separate pipeline modules with shared setup/finalization helpers.
@@ -119,7 +120,7 @@ metadata to read only the exact method body (50–600 tokens), not the whole fil
 |---|---|
 | Executive Summary | CXO-facing summary of the repo’s purpose, current state, risks, recommendations, and confidence limits |
 | Business Capabilities | All capabilities in the system + business rules and validations per capability |
-| Business Journeys | Key user flows as "As a [role], I can [action]…" + Mermaid sequence diagrams |
+| User Journeys | Key user or integration flows as "As a [role], I can [action]…" + Mermaid sequence diagrams |
 | C4 System Context | Integration map — upstream callers + downstream dependencies + protocols (deterministic PlantUML) |
 | Coupling Hotspots | Risk matrix, coupling pairs, dead code candidates, decomposition seam candidates |
 | UI to API Interactions | Which UI routes/components/hooks call which API clients and backend endpoints |
@@ -216,6 +217,21 @@ make lumen-docker-docs
 
 This is the supported docs viewer path. It rebuilds the MkDocs site from the existing
 `./output` directory, so you do not need to rerun the pipeline just to refresh docs rendering.
+
+### Release candidate bundle
+
+```bash
+scripts/lumen-docker-release.sh
+```
+
+Current behavior:
+
+- looks for the local image `lumen:latest`
+- if the image is missing, runs `make lumen-docker-build`
+- creates a bundle under `releases/`
+- packages the Docker image tar, runtime scripts, checksums, and a final `.tar.gz`
+
+The script does not create git tags automatically. Create or push tags manually before packaging if you want the bundle to correspond to a tagged release.
 
 ---
 
@@ -332,14 +348,14 @@ output/<repo-name>-<timestamp>/
     │   ├── business-capabilities.md  ← capabilities + business rules per capability
     │   └── er-diagram.md             ← Mermaid ER diagram (required for backend/fullstack repos)
     ├── architecture/
-    │   ├── business-journeys.md      ← Mermaid sequence diagrams for key flows
+    │   ├── user-journeys.md          ← Mermaid sequence diagrams for key flows
     │   ├── c4-context.md             ← deterministic PlantUML C4Context (upstream + downstream)
-    │   └── route-map.md              ← UI route/screen inventory when frontend route evidence is strong
+    │   └── route-map.md              ← UI route inventory or SPA entry-surface fallback
     ├── tech/
     │   └── coupling-hotspots.md      ← hotspot table + dead code + seam candidates
     ├── current-state/
     │   ├── api-spec.yaml             ← OpenAPI spec (required for backend/fullstack repos)
-    │   ├── ui-to-api-interactions.md ← UI/component to API/client interaction view
+    │   ├── ui-to-api-interactions.md ← UI/component to API/client interaction view, with import-fallback when direct call edges are weak
     │   └── module-dependency-map.md  ← dependency and seam summary
     ├── target-state/
     │   ├── bounded-contexts.md       ← BC decomposition + service table (backend-service)

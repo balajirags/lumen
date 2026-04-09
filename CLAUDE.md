@@ -170,7 +170,7 @@ run_supervisor_agent()
   ├─ Phase 2: 3 parallel researcher agents     ← each has graph tools + write_artifact
   │   ├─ analyst/domain  (Business Analyst)    → domain/business-capabilities.md
   │   │                                        → domain/er-diagram.md
-  │   ├─ analyst/flows   (Integration Arch.)   → architecture/business-journeys.md
+  │   ├─ analyst/flows   (Integration Arch.)   → architecture/user-journeys.md
   │   │                                        → architecture/c4-context.md
   │   │                                        → current-state/ui-to-api-interactions.md
   │   │                                        → current-state/api-spec.yaml
@@ -204,11 +204,11 @@ Artifacts produced (Mermaid + deterministic C4 PlantUML for C1 context views):
 summary/executive-summary.md      ← CXO-facing summary, risks, recommendations, confidence/limitations
 domain/business-capabilities.md   ← capabilities + business rules/validations per capability
 domain/er-diagram.md              ← Mermaid ER diagram + bounded context ownership table [required for backend/fullstack]
-architecture/business-journeys.md ← 3–5 business user journeys with Mermaid sequence diagrams
+architecture/user-journeys.md     ← 3–5 user or integration journeys with Mermaid sequence diagrams
 architecture/c4-context.md        ← deterministic PlantUML C4Context rendered from structured data
-architecture/route-map.md         ← UI route/screen inventory when frontend route evidence is strong
+architecture/route-map.md         ← UI route inventory or SPA entry-surface fallback when router evidence is weak
 tech/coupling-hotspots.md         ← hotspot table + coupling pairs + dead code + seam candidates
-current-state/ui-to-api-interactions.md ← UI/component to API/client interaction view
+current-state/ui-to-api-interactions.md ← UI/component to API/client interaction view; falls back to module-import evidence when direct call edges are weak
 current-state/module-dependency-map.md  ← dependency and seam summary
 current-state/api-spec.yaml       ← OpenAPI spec [required for backend/fullstack]
 target-state/bounded-contexts.md  ← BC decomposition + service responsibility table (backend-service)
@@ -238,6 +238,12 @@ Current indexing behavior:
 - The graph preserves parser-native labels and also stores normalized metadata on nodes/edges:
   `language`, `kind`, `normKind`
 - This normalized metadata is used by the toolkit and agent layer for more consistent cross-language reasoning.
+- JS/TS frontend analysis is React-first and includes stronger component, hook, and UI-to-API exploration, plus SPA fallback views when no strong router graph exists.
+
+Release packaging:
+- `scripts/lumen-docker-release.sh` packages the current local Docker image into `releases/`
+- if the image is missing, it runs `make lumen-docker-build`
+- it does not create git tags automatically
 
 ---
 
