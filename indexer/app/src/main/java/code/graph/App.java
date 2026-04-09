@@ -149,14 +149,30 @@ public class App implements Callable<Integer> {
                 System.err.println("Error: No supported source files found in " + sourcePath);
                 return 1;
             }
+
+            // Android detection: presence of AndroidManifest.xml signals an Android project.
+            // Android repos require the Android SDK on the classpath for meaningful analysis
+            // (Activities, Fragments, etc. extend framework classes not available here).
+            boolean isAndroid = Files.walk(sourcePath, 8)
+                    .anyMatch(p -> p.getFileName() != null
+                            && p.getFileName().toString().equals("AndroidManifest.xml"));
+            if (isAndroid) {
+                System.err.println("Error: Android project detected (AndroidManifest.xml found).");
+                System.err.println("       Android repos require the Android SDK for meaningful analysis.");
+                System.err.println("       Use --language kotlin to force indexing without SDK resolution,");
+                System.err.println("       or run against a non-Android Kotlin/Java module directly.");
+                return 1;
+            }
+
+            // For multi-language repos (e.g. Kotlin backend + JS frontend), index ALL detected
+            // languages together so cross-module relationships can be resolved.
             if (allLangs.containsKey(Language.JAVA) || allLangs.containsKey(Language.KOTLIN)) {
-                if (allLangs.containsKey(Language.JAVA)) {
-                    parseLanguages.add(Language.JAVA);
-                }
-                if (allLangs.containsKey(Language.KOTLIN)) {
-                    parseLanguages.add(Language.KOTLIN);
-                }
-                System.out.printf("Detected JVM languages: %s%n",
+                if (allLangs.containsKey(Language.JAVA))   parseLanguages.add(Language.JAVA);
+                if (allLangs.containsKey(Language.KOTLIN)) parseLanguages.add(Language.KOTLIN);
+                // Also include JS/Python modules in the same repo (e.g. frontend alongside backend)
+                if (allLangs.containsKey(Language.JAVASCRIPT)) parseLanguages.add(Language.JAVASCRIPT);
+                if (allLangs.containsKey(Language.PYTHON))     parseLanguages.add(Language.PYTHON);
+                System.out.printf("Detected languages: %s%n",
                         parseLanguages.stream().map(Language::getDisplayName).toList());
             } else {
                 Optional<Language> detected = SourceParserFactory.detectLanguage(sourcePath);
@@ -165,12 +181,12 @@ public class App implements Callable<Integer> {
                     return 1;
                 }
                 parseLanguages.add(detected.get());
-                if (allLangs.size() > 1) {
-                    System.out.printf("Detected languages: %s (using %s — override with --language)%n",
-                            allLangs, detected.get().getDisplayName());
-                } else {
-                    System.out.printf("Detected language: %s%n", detected.get().getDisplayName());
-                }
+                // Also include any secondary languages detected
+                allLangs.keySet().stream()
+                        .filter(l -> l != detected.get())
+                        .forEach(parseLanguages::add);
+                System.out.printf("Detected languages: %s%n",
+                        parseLanguages.stream().map(Language::getDisplayName).toList());
             }
         }
 
@@ -188,10 +204,15 @@ public class App implements Callable<Integer> {
         // Parse all modules into a single combined graph
         CodeGraph graph = new CodeGraph();
         for (Path module : modules) {
-            Path sourceRoot = detectSourceRoot(module, parseLanguages);
-            System.out.println("Parsing " +
-                    parseLanguages.stream().map(Language::getDisplayName).toList() +
-                    " sources from: " + sourceRoot.toAbsolutePath());
+            // JVM source root narrows to src/main/java or src/main/kotlin.
+            // Non-JVM parsers (JS, Python) should always search from the module root
+            // so they can find frontend/ or scripts/ directories alongside the backend.
+            List<Language> jvmLangs = parseLanguages.stream()
+                    .filter(l -> l == Language.JAVA || l == Language.KOTLIN)
+                    .toList();
+            Path jvmSourceRoot = jvmLangs.isEmpty()
+                    ? module
+                    : detectSourceRoot(module, jvmLangs);
 
             // For multi-module, also add each module's own classpath
             List<Path> moduleCp = new ArrayList<>(classpathEntries);
@@ -202,11 +223,21 @@ public class App implements Callable<Integer> {
             for (Language parseLanguage : parseLanguages) {
                 CodeGraph moduleGraph;
                 if (parseLanguage == Language.JAVA) {
-                    CpgParser cpgParser = new CpgParser(sourceRoot, moduleCp, hashCache);
-                    moduleGraph = cpgParser.parseDirectory(sourceRoot);
+                    System.out.printf("Parsing Java from: %s%n", jvmSourceRoot.toAbsolutePath());
+                    CpgParser cpgParser = new CpgParser(jvmSourceRoot, moduleCp, hashCache);
+                    moduleGraph = cpgParser.parseDirectory(jvmSourceRoot);
+                } else if (parseLanguage == Language.KOTLIN) {
+                    System.out.printf("Parsing Kotlin from: %s%n", jvmSourceRoot.toAbsolutePath());
+                    SourceParser parser = SourceParserFactory.createParser(parseLanguage, jvmSourceRoot, moduleCp, hashCache, workspaceRoot);
+                    moduleGraph = parser.parseDirectory(jvmSourceRoot);
                 } else {
-                    SourceParser parser = SourceParserFactory.createParser(parseLanguage, sourceRoot, moduleCp, hashCache, workspaceRoot);
-                    moduleGraph = parser.parseDirectory(sourceRoot);
+                    // JS/Python: scan from the project root (sourcePath) so sibling directories
+                    // like admin-frontend/ or scripts/ alongside the JVM module are included.
+                    // Only do this once (when processing the first/only module) to avoid duplicates.
+                    if (!module.equals(sourcePath) && modules.size() > 1) continue;
+                    System.out.printf("Parsing %s from: %s%n", parseLanguage.getDisplayName(), sourcePath.toAbsolutePath());
+                    SourceParser parser = SourceParserFactory.createParser(parseLanguage, sourcePath, moduleCp, hashCache, workspaceRoot);
+                    moduleGraph = parser.parseDirectory(sourcePath);
                 }
                 graph.merge(moduleGraph);
             }
