@@ -11,17 +11,15 @@ large repos, and to reduce follow-up analysis cost when the same indexed repo is
 Source repo → [preflight + indexer] → KuzuDB graph
                                       ├─ [full pipeline] -> [agent] -> Markdown artifacts -> [builder] -> MkDocs Material site
                                       ├─ [mcp pipeline] -> MCP server (stdio)
-                                      ├─ [mcp-http pipeline] -> MCP server (Streamable HTTP)
-                                      └─ [ui] -> Graph visualization (React + Sigma.js)
+                                      └─ [mcp-http pipeline] -> MCP server (Streamable HTTP)
 ```
 
-This is a monorepo containing three sub-projects:
+This is a monorepo containing two sub-projects:
 
 | Directory | Former repo | Purpose |
 |---|---|---|
 | `pipeline/` | `reverse-eng-agent` | Python LLM pipeline: indexer stage, agent (supervisor+subagents), MkDocs builder |
 | `indexer/` | `code-mem-graph` | Indexer runtimes: Java fat JAR, JS parser, Python parser |
-| `ui/` | `code-mem-graph-ui` | React + Express graph visualization UI |
 
 ---
 
@@ -42,7 +40,6 @@ make lumen-docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
 make lumen-docker-docs
 
 make lumen-docker-docs  # serve generated doc-site → http://localhost:8081
-make lumen-docker-ui    # graph visualization UI  → http://localhost:3002
 ```
 
 For `xlarge` repos, `lumen-docker-run` intentionally stops after preflight and recommends
@@ -66,7 +63,6 @@ make lumen-install-pipeline  # cd pipeline && uv sync
 # Run the pipeline (ARGS required: specify provider + model)
 make lumen-run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
 make lumen-run REPO=/path/to/repo ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'
-make lumen-dev-ui      # Vite (port 5174) + Express (port 3002) dev server
 ```
 
 Set provider credentials via environment variables such as `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
@@ -106,8 +102,6 @@ If `timeout` or `max_turns` is explicitly set in `.codedoc.toml` or via CLI, tha
 | File | Purpose |
 |---|---|
 | `Dockerfile` | Multi-stage pipeline image: jlink JRE + PyInstaller binaries + Node JS parser |
-| `Dockerfile.ui` | Multi-stage UI image: Vite build + tsx Express server |
-| `docker-compose.yml` | UI-only compose path (`compose-ui`) |
 | `scripts/lumen-docker-*.sh` | Script-backed Docker entrypoints for pipeline, MCP, docs, image load, and release bundling |
 
 ### Dockerfile (pipeline) — 4 stages
@@ -123,16 +117,6 @@ Using `python:3.11-slim` as the final base (instead of `node:20-slim`) avoids GL
 on aarch64 where `python:3.11-slim` requires GLIBC_2.38 but `node:20-slim` only has 2.36.
 `lumen` runs as a pip-installed entry point — no PyInstaller needed.
 
-### Dockerfile.ui — 2 stages
-
-| Stage | Output |
-|---|---|
-| `ui-builder` | `npm run build` → `dist/` (React static files) |
-| final | `node:20-slim` + `dist/` + Express server (`npx tsx server/index.ts`) |
-
-`ui/server/index.ts` serves `dist/` as static files when `NODE_ENV=production`, so the
-single Express process on port 3001 handles both API routes and the React app.
-
 ### Docker entrypoints
 
 | Profile | Command | URL |
@@ -140,14 +124,12 @@ single Express process on port 3001 handles both API routes and the React app.
 | `run` | `make lumen-docker-run REPO=... ARGS='...'` | — (writes to `./output/`) |
 | `mcp` | `make lumen-docker-mcp DB=...` | http://localhost:8765/mcp |
 | `docs` | `make lumen-docker-docs` | http://localhost:8081 |
-| `ui` | `make lumen-docker-ui` | http://localhost:3002 |
 
 `pipeline`, `mcp`, and `docs` are now script-backed `docker run` entrypoints invoked from the Makefile.
 They all use the same `DOCKER_IMAGE` runtime.
 The scripts add `host.docker.internal:host-gateway` so Ollama-on-host works on Linux; on Mac/Windows Docker Desktop, `host.docker.internal` is available automatically.
 `lumen-docker-mcp` prefers serving an existing DB via `DB`, and falls back to repo indexing when `REPO` is provided.
 `lumen-docker-docs` serves `output/doc-site` from the same `lumen` image instead of a separate generic Python image.
-`lumen-docker-ui` remains the only Compose-backed path.
 Normal MCP commands already print config snippets before serving; `--print-config` is only for config-only output.
 
 ---
@@ -269,24 +251,6 @@ Current indexing behavior:
 
 ---
 
-## Sub-project: ui/
-
-React 19 + TypeScript + Vite frontend with Sigma.js/Graphology graph visualization.
-Express 5 backend connects to KuzuDB or Neo4j.
-
-Key files:
-- `ui/src/App.tsx` — three-panel layout: QueryPanel | GraphCanvas | NodeDetailPanel
-- `ui/server/index.ts` — Express server (port 3002): `/api/connect`, `/api/query`, `/api/schema`
-  - In production (`NODE_ENV=production`): also serves built React `dist/` as static files
-- `ui/server/kuzu-service.ts` — KuzuDB adapter
-- `ui/server/neo4j-service.ts` — Neo4j adapter
-- `ui/vite.config.ts` — in dev mode proxies `/api` → port 3001
-
-Dev: `cd ui && npm run dev` (Vite port 5174 + Express port 3002)
-Docker: `make lumen-docker-ui` → Express serves everything on port 3002
-
----
-
 ## KuzuDB conventions (used across all sub-projects)
 
 - `label(n)` not `labels(n)[0]`
@@ -317,7 +281,6 @@ Docker: `make lumen-docker-ui` → Express serves everything on port 3002
 | `python:3.11-slim` as final Docker base | Same glibc as python-deps-builder; Node binary copied from node:20-slim (backwards-compatible) |
 | No `pkg`/Node SEA for JS parser | KuzuDB uses `process.dlopen()` on real `.node` file paths; can't virtualise |
 | Docker runtime `.codedoc.toml` at `/workspace/` | Overrides `indexer_bin_dir` + `build_script` without code changes |
-| `ui/server/index.ts` production static serving | Single port (3002) for both API and React app in Docker |
 | `extra_hosts: host.docker.internal:host-gateway` | Lets pipeline container reach host Ollama on Linux |
 | LangGraph removed from pipeline | 3 sequential nodes, no branching — 50 MB dep for zero benefit |
 | Analyst + Architect pattern | Analysts write artifacts directly via `write_artifact` (reliable); avoids fragile note-passing via custom tools |

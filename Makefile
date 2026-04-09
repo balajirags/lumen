@@ -1,11 +1,10 @@
 .PHONY: lumen-help lumen-install lumen-install-indexer lumen-install-pipeline lumen-run \
-        lumen-mcp lumen-dev-ui lumen-test lumen-docker-build lumen-docker-rebuild \
-        lumen-docker-run lumen-docker-mcp lumen-docker-docs lumen-docker-ui
+        lumen-mcp lumen-test lumen-docker-build lumen-docker-rebuild \
+        lumen-docker-run lumen-docker-mcp lumen-docker-docs
 
 
 # -- Docker Mode --
 DOCKER_IMAGE ?= lumen
-DOCKER_UI_IMAGE ?= lumen-ui
 
 lumen-docker-build:
 	docker build -t $(DOCKER_IMAGE) .
@@ -31,10 +30,6 @@ lumen-docker-mcp:
 
 lumen-docker-docs:
 	OUTPUT_PATH="$(PWD)/output" DOCKER_IMAGE="$(DOCKER_IMAGE)" PORT="$${PORT:-8081}" ./scripts/lumen-docker-docs.sh
-
-lumen-docker-ui:
-	OUTPUT_PATH="$(PWD)/output" DOCKER_UI_IMAGE="$(DOCKER_UI_IMAGE)" COMPOSE_PROFILES=ui docker-compose up ui
-
 
 # -- Native install (requires Java 21, Node 18, Python 3.11) --
 lumen-install: lumen-install-indexer lumen-install-pipeline
@@ -72,9 +67,6 @@ lumen-mcp:
 	else \
 	  cd pipeline && uv run lumen mcp-http "$(REPO)" --repo-name "$(notdir $(REPO))" --output-dir "$(PWD)/output" $(ARGS); \
 	fi
-
-lumen-dev-ui:
-	cd ui && npm install && npm run dev
 
 lumen-test:
 	cd pipeline && python tests/_test_kuzu.py
@@ -174,8 +166,6 @@ lumen-help:
 	  echo "    Run preflight + index + HTTP MCP in Docker."; \
 	  echo "  make lumen-docker-docs"; \
 	  echo "    Rebuild and serve the generated MkDocs site from ./output in Docker."; \
-	  echo "  make lumen-docker-ui"; \
-	  echo "    Run the graph UI in Docker."; \
 	  echo ""; \
 	  echo "Native:"; \
 	  echo "  make lumen-install"; \
@@ -187,16 +177,12 @@ lumen-help:
 	  echo "  make lumen-mcp REPO=/path/to/repo"; \
 	  echo "    Run preflight + index + HTTP MCP natively."; \
 	  echo ""; \
-	  echo "Development:"; \
-	  echo "  make lumen-dev-ui"; \
-	  echo ""; \
 	  echo "Common variables:"; \
 	  echo "  REPO=/path/to/repo"; \
 	  echo "  DB=/path/to/output/<run>/index.kuzu/<repo>-db"; \
 	  echo "  ARGS='--provider anthropic --model claude-sonnet-4-6'"; \
 	  echo "  PORT=8765"; \
 	  echo "  DOCKER_IMAGE=lumen"; \
-	  echo "  DOCKER_UI_IMAGE=lumen-ui"; \
 	  echo ""; \
 	  echo "Per-command help:"; \
 	  echo "  make lumen-help CMD=lumen-docker-mcp"; \

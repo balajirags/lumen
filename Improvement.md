@@ -1,6 +1,6 @@
 # Repo Improvements
 
-This branch focuses on pipeline and repo improvements, excluding UI/backend hardening.
+This branch focuses on pipeline and repo improvements, excluding companion-tool hardening.
 
 ## Implemented Areas
 
@@ -14,7 +14,7 @@ This branch focuses on pipeline and repo improvements, excluding UI/backend hard
 
 ## Out Of Scope In This Branch
 
-- UI/backend session isolation, query timeouts, and related hardening in `ui/server/`.
+- Companion UI hardening, session isolation, and related query-timeout work.
 
 ## Why These Changes Matter
 

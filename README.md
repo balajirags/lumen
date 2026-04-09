@@ -129,10 +129,6 @@ metadata to read only the exact method body (50–600 tokens), not the whole fil
 | Strangler Fig Plan | Ordered extraction plan with seam identification and routing strategy |
 | Repo Metrics | Preflight LOC / file-count / language-mix assessment with size/risk classification |
 
-Plus a **visual graph explorer** (the UI) for ad-hoc Cypher queries on the CPG.
-
----
-
 ## Quickstart (Docker — recommended)
 
 ```bash
@@ -180,7 +176,7 @@ Inside Docker, `localhost` is the container — not your machine. Use
 
 ```bash
 # Mac/Windows: host.docker.internal is automatic
-# Linux: docker-compose.yml already sets extra_hosts
+# Linux: the Docker wrapper scripts already add host.docker.internal:host-gateway
 
 make lumen-docker-run REPO=/path/to/repo \
   ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
@@ -231,9 +227,6 @@ Output lands in `./output/` after every run.
 |---|---|---|
 | MkDocs doc-site (Docker) | http://localhost:8081 | `make lumen-docker-docs` |
 | MCP HTTP (Docker) | http://localhost:8765/mcp | `make lumen-docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db` |
-| Graph UI (Docker) | http://localhost:3002 | `make lumen-docker-ui` |
-| Graph UI (dev) | http://localhost:5174 | `make lumen-dev-ui` |
-
 ### Doc-site
 
 ```bash
@@ -244,16 +237,6 @@ make lumen-docker-docs     # → http://localhost:8081
 The doc-site **accumulates** across runs — every repo you analyse appears as a top-level
 tab in the navigation. Run against multiple repos and browse them all at once.
 
-### Graph UI
-
-```bash
-make lumen-docker-ui
-# → http://localhost:3002
-# Connect → DB type: KuzuDB, DB path: /data/<repo>-<timestamp>/index.kuzu
-```
-
-(`/data` inside the container maps to `./output/` on your host.)
-
 ---
 
 ## Native Mode
@@ -261,7 +244,6 @@ make lumen-docker-ui
 ### 1. Prerequisites
 
 - Java 21
-- Node 18
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/)
 
@@ -296,14 +278,6 @@ make lumen-run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonn
 make lumen-run REPO=/path/to/repo ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'
 make lumen-run REPO=/path/to/repo ARGS='--provider openai --model gpt-4o'
 ```
-
-Graph UI in dev mode:
-
-```bash
-make lumen-dev-ui    # Vite → http://localhost:5174  |  Express → http://localhost:3002
-```
-
----
 
 ## CLI options
 
