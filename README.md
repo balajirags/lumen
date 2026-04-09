@@ -51,7 +51,7 @@ Source repo
     │
     ▼
 [Builder] → MkDocs Material documentation site (Mermaid + deterministic C4 PlantUML for C1 context views)
-         → KuzuDB graph (explorable in the UI)
+         → KuzuDB graph for MCP-backed exploration
 ```
 
 ### Supported languages
@@ -88,8 +88,8 @@ In practice, that gives you:
 - **Repo metrics guardrail** — a native preflight plugin estimates repo size using LOC, source-file count, and language mix before indexing starts.
 - **Repo-type-aware prompting** — the pipeline classifies a repo once, then carries `primary_repo_type`, capabilities, and an artifact plan through later stages.
 - **Improved CLI UX** — indexing shows live per-language progress, the three parallel researchers render as separate live boxes, and the synthesis / architect / summary phases are shown explicitly.
-- **MCP modes** — `lumen mcp` keeps the stdio flow, and `lumen mcp-http` adds a simpler URL-based MCP server for VS Code, Docker, and cross-workspace use.
-- **Split pipeline modules** — the full docs flow and the MCP flow now live in separate pipeline modules with shared setup/finalization helpers.
+- **MCP access** — `lumen mcp` serves the indexed graph over HTTP so other tools and clients can query the repo without rerunning the full docs pipeline.
+- **Split pipeline modules** — the full docs flow and the MCP flow live in separate pipeline modules with shared setup/finalization helpers.
 
 ### Why a Code Property Graph instead of file reading
 
@@ -307,22 +307,6 @@ lumen mcp [REPO_PATH] [OPTIONS]
   --verbose              Stream logs as the pipeline runs
 ```
 
-```
-lumen mcp-http [REPO_PATH] [OPTIONS]
-
-  --db-path TEXT         Serve an existing Kuzu DB directly
-  --repo-path TEXT       Optional source repo path when serving an existing DB
-  --repo-name TEXT       Override repo name in output dir
-  --output-dir TEXT      Output directory (default: ./codedoc-output)
-  --timeout INT          Per-stage timeout in seconds (default: 300)
-  --repo-size-check      off | warn | strict (default: warn)
-  --host TEXT            HTTP bind host (default: 127.0.0.1)
-  --port INT             HTTP bind port (default: 8765)
-  --path TEXT            HTTP MCP path (default: /mcp)
-  --print-config         Print MCP client config snippets and exit
-  --verbose              Stream logs as the pipeline runs
-```
-
 Docker convenience:
 
 ```bash
@@ -330,8 +314,8 @@ make lumen-docker-run REPO=/path/to/repo ARGS='--provider anthropic --model clau
 make lumen-docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
 make lumen-docker-docs
 ```
-`make lumen-mcp` prints the config before starting the server.
-Use `--print-config` only when you want config output without keeping the MCP server running.
+`make lumen-mcp` starts the HTTP MCP server directly.
+Use `--print-config` only when you want client config output without keeping the server running.
 
 ---
 

@@ -10,8 +10,7 @@ large repos, and to reduce follow-up analysis cost when the same indexed repo is
 ```
 Source repo → [preflight + indexer] → KuzuDB graph
                                       ├─ [full pipeline] -> [agent] -> Markdown artifacts -> [builder] -> MkDocs Material site
-                                      ├─ [mcp pipeline] -> MCP server (stdio)
-                                      └─ [mcp-http pipeline] -> MCP server (Streamable HTTP)
+                                      └─ [mcp pipeline] -> MCP server (Streamable HTTP)
 ```
 
 This is a monorepo containing two sub-projects:
@@ -139,7 +138,8 @@ Normal MCP commands already print config snippets before serving; `--print-confi
 Python package named `codedoc` (internal). CLI entry point: `lumen` (via `pyproject.toml`).
 
 Key files:
-- `pipeline/codedoc/cli.py` — Click CLI (`lumen run`, `lumen mcp`, `lumen mcp-http`), includes MCP serve flags
+- `pipeline/codedoc/cli.py` — Click CLI (`lumen run`, `lumen mcp`), includes MCP serve flags
+- `pipeline/codedoc/cli.py` — Click CLI (`lumen run`, `lumen mcp`), includes MCP serve flags
 - `pipeline/codedoc/config.py` — config loader; defaults use `Path(__file__)` relative paths
 - `pipeline/codedoc/pipelines/full.py` — full docs pipeline: preflight → indexer → agent → builder
 - `pipeline/codedoc/pipelines/mcp.py` — MCP pipeline: preflight → indexer → MCP serve metadata
@@ -150,7 +150,7 @@ Key files:
 - `pipeline/codedoc/preflight/runner.py` — preflight registry/runner; pipeline core depends on this, not on repo-metrics directly
 - `pipeline/codedoc/stages/agent.py` — supervisor + parallel analysts + architect
 - `pipeline/codedoc/log.py` — structured progress logging, indexer progress panel, repo metrics panel, analyst live boxes
-- `pipeline/codedoc/mcp_server.py` — MCP server backed by `kg_tools`; supports stdio and Streamable HTTP, plus native/Docker/client config output
+- `pipeline/codedoc/mcp_server.py` — MCP server backed by `kg_tools`; supports Streamable HTTP plus native/Docker/client config output
 - `pipeline/codedoc/llm.py` — LLM abstraction: `ClaudeProvider`, `OllamaProvider`, `OpenAIProvider`
 - `pipeline/codedoc/kg_tools/toolkit.py` — `ReverseEngineerToolkit` (36 graph query tools)
 - `pipeline/codedoc/kg_tools/backends.py` — `KuzuBackend`, `Neo4jBackend`
@@ -158,7 +158,7 @@ Key files:
 - `pipeline/codedoc/prompts/analyst-flows.md` — Integration Architect system prompt (writes 2–3 artifacts)
 - `pipeline/codedoc/prompts/analyst-tech.md` — Staff Engineer system prompt (writes 1 artifact)
 - `pipeline/codedoc/prompts/architect.md` — Solution Architect system prompt (writes target-state artifacts; manifest is machine-generated)
-- `pipeline/codedoc/prompts/archetype-*.md` — archetype overlays for `backend-service`, `frontend-app`, and `library`
+- `pipeline/codedoc/prompts/archetype-*.md` — archetype overlays for `backend-service`, `frontend-app`, `fullstack-app`, and `library`
 - `pipeline/codedoc/prompts/re-prompt.md` — single-agent fallback prompt (monolithic execution path)
 - `pipeline/scripts/build-docs-site.sh` — builds MkDocs Material site with Mermaid plus deterministic C4 PlantUML for C1 context views; supports multi-repo accumulation
 - `pipeline/.codedoc.toml` — runtime config (`indexer_bin_dir = ../indexer/bin`, `max_turns = 60`, `repo_size_check = "warn"`)
@@ -196,14 +196,6 @@ For `xlarge` repos, the full docs pipeline stops after preflight and directs the
 MCP pipeline architecture:
 ```
 run_mcp_pipeline()
-  ├─ Preflight: repo metrics
-  ├─ Stage 1: indexer
-  └─ Prepare MCP command + stdio server config snippets
-```
-
-HTTP MCP pipeline architecture:
-```
-run_mcp_http_pipeline()
   ├─ Preflight: repo metrics
   ├─ Stage 1: indexer
   └─ Prepare HTTP URL + native/Docker/client config snippets
@@ -270,8 +262,8 @@ Current indexing behavior:
 | `indexer/install.sh` unchanged | Already uses `$SCRIPT_DIR`; relocatable as-is |
 | `indexer_bin_dir = ../indexer/bin` | Wires pipeline to indexer binaries across monorepo boundary |
 | Repo metrics is a preflight plugin, not core pipeline logic | Easy for the team to disable/remove/replace without changing indexer/agent stages |
-| Separate full, MCP, and MCP HTTP pipeline modules | Keeps `lumen run`, `lumen mcp`, and `lumen mcp-http` independent while reusing shared setup/finalization helpers |
-| HTTP MCP is additive, not a replacement | URL-based MCP is the simplest client UX, but stdio remains useful for local process-based clients |
+| Separate full and MCP pipeline modules | Keeps `lumen run` and `lumen mcp` independent while reusing shared setup/finalization helpers |
+| MCP is HTTP-first | URL-based MCP is the simplest client UX for Docker, local development, and external clients |
 | Multi-language indexing in one run | Real repos are often polyglot; warning-only detection was too weak |
 | Normalized graph metadata (`language`, `kind`, `normKind`) is additive | Preserve parser-native fidelity while improving toolkit/agent consistency |
 | Repo archetype prompt overlays | Backend-only prompting was too brittle for frontend and library repos |
