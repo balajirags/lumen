@@ -118,6 +118,7 @@ class PipelineState:
                 "max_turns": self.max_turns,
                 "max_turns_source": self.max_turns_source,
                 "max_context_tokens": self.max_context_tokens,
+                "ollama_num_ctx": self.ollama_num_ctx,
             },
             "tool_uses": self.tool_uses,
             "events": self.events,
