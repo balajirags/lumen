@@ -36,7 +36,7 @@ output/
 
 #output folder
 output/
-output_v1.0/
+
 help.txt
 *.tar
 
@@ -48,3 +48,17 @@ releases/
 token-usage
 test-lumen.sh
 task_logs/
+
+
+
+task_logs_v1/
+task_logs_v2/
+task_logs_v3/
+task_logs_v4/
+task_logs_v5/
+
+output_v1.0/
+output_v2.0/
+output_v3.0/
+output_v4.0/
+output_v5.0/
