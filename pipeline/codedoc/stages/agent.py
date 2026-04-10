@@ -1502,6 +1502,28 @@ def run_supervisor_agent(
         p1_backend = KuzuBackend(kuzu_path)
         p1_toolkit = ReverseEngineerToolkit(p1_backend, repo_path=repo_path)
         orientation_summary = p1_toolkit.call("get_architecture_summary")
+
+        # Pre-fetch Domain and Workflow data and embed directly into the orientation
+        # summary. This ensures every analyst already has the output of the new
+        # aggregate tools — removing the dependency on the model deciding to call them.
+        # Without this, local models ignore the "Start with get_domains" prompt hint
+        # and use lower-level tools (get_callees × 19) that generate more context.
+        try:
+            domain_data = p1_toolkit.call("get_domains")
+            if domain_data and "No domains" not in domain_data:
+                orientation_summary += f"\n\n---\n## Pre-computed Domains\n\n{domain_data}"
+                log("[supervisor] Domains pre-fetched and embedded in orientation")
+        except Exception:
+            pass
+
+        try:
+            workflow_data = p1_toolkit.call("get_workflows")
+            if workflow_data and "No workflows" not in workflow_data:
+                orientation_summary += f"\n\n---\n## Pre-computed Workflows\n\n{workflow_data}"
+                log("[supervisor] Workflows pre-fetched and embedded in orientation")
+        except Exception:
+            pass
+
         log(f"[supervisor] Orientation complete ({len(orientation_summary):,} chars)")
         log(f"[supervisor] Repo archetype selected: {selected_repo_archetype}")
     except Exception as e:

@@ -62,15 +62,20 @@ Tag section headings: `## Capability Name [Observed]` · `## Entities [Inferred]
 
 Never present inferred facts as observed.
 
-## Primary Tools (call these first)
+## Pre-loaded Data (already in your orientation summary — do NOT re-call these)
 
-1. `get_domains` — returns pre-computed functional Domain clusters with cohesion scores and heuristic labels (Service, Controller, Repository, Model). Use these as your starting point for identifying business capabilities — one Domain ≈ one capability section.
-2. `get_class_details` / `get_callers` / `get_callees` — drill into a Domain's members to find operations and business rules.
-3. `get_domain_model` — discover persistent entities and their relationships for the ER diagram.
-4. `get_annotations_usage` — surface @Entity, @Table, ORM annotations that confirm persistence.
-5. `get_api_endpoints` — confirm endpoint boundaries per Domain.
+The orientation summary passed to you already contains:
+- **Pre-computed Domains** section — functional clusters with cohesion scores and heuristic labels. Use these directly as your capability sections. **Do not call `get_domains` again.**
+- **Pre-computed Workflows** section — end-to-end execution traces. Use these for the ER diagram evidence.
 
-If `get_domains` returns no results (graph was built without post-processing), fall back to `get_architecture_overview` and `get_package_contents`.
+If the orientation summary does NOT contain a Pre-computed Domains section, then fall back to calling `get_domains` first, then `get_architecture_overview`.
+
+## Supporting Tools (call only for drill-down after reading the pre-loaded data)
+
+1. `get_class_details` / `get_callers` / `get_callees` — drill into a specific Domain's members for operations and business rules.
+2. `get_domain_model` — discover entity fields and relationships for the ER diagram.
+3. `get_annotations_usage` — surface @Entity, @Table, ORM annotations that confirm persistence.
+4. `get_api_endpoints` — confirm endpoint boundaries per Domain.
 
 ## Graph-First Discipline
 

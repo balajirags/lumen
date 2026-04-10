@@ -87,15 +87,24 @@ Skip (write nothing) if endpoint detail is insufficient.
 
 Tag headings: `[Observed]` = verified · `[Inferred]` = derived · `[Unknown]` = not found.
 
-## Primary Tools (call these first)
+## Pre-loaded Data (already in your orientation summary — do NOT re-call these)
 
-1. `get_workflows` — returns pre-computed end-to-end Workflow traces (HTTP entry point → repository/event terminal) with `httpMethod`, `httpPath`, `stepCount`, and `type` (cross-domain vs intra-domain). Use one Workflow per `business-journeys.md` section — you have exact HTTP paths and step counts without any Cypher.
-2. `get_workflow_steps(workflow_name)` — returns the ordered step chain for a named workflow. Use this to build the `sequenceDiagram` — each step maps to one participant and one arrow.
-3. `get_api_endpoints` — fills any gaps when `get_workflows` returns fewer flows than expected.
-4. `get_route_component_map`, `get_ui_to_api_call_map` — for frontend/fullstack repos where React/Vue components drive the flows.
-5. `get_api_client_summary`, `get_entry_points` — secondary evidence for C4 context and api-spec.
+The orientation summary passed to you already contains:
+- **Pre-computed Workflows** section — end-to-end HTTP traces with `httpMethod`, `httpPath`, `stepCount`, `type`. Use these directly for `business-journeys.md`. **Do not call `get_workflows` again.**
+- **Pre-computed Domains** section — functional clusters for context.
 
-If `get_workflows` returns no results (graph built without post-processing, or non-Spring framework), fall back immediately to `get_api_endpoints` → `get_callers` → `get_callees` to trace flows manually.
+If the orientation summary does NOT contain a Pre-computed Workflows section, call `get_workflows` first.
+
+To get the step-by-step method chain for a specific workflow (for the sequenceDiagram), call `get_workflow_steps(workflow_name)` — this one you DO need to call per workflow.
+
+## Supporting Tools (call only for gaps the pre-loaded data doesn't cover)
+
+1. `get_workflow_steps(workflow_name)` — ordered method chain for one workflow → builds the sequenceDiagram participants and arrows.
+2. `get_api_endpoints` — fills gaps when pre-computed workflows are fewer than expected.
+3. `get_route_component_map`, `get_ui_to_api_call_map` — for React/Vue frontend flows.
+4. `get_api_client_summary`, `get_entry_points` — C4 context and api-spec evidence.
+
+**Do not call `get_callees` repeatedly to trace call chains** — use `get_workflow_steps` which gives the same result pre-computed in one call.
 
 ## Graph-First Discipline
 
