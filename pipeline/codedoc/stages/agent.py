@@ -57,8 +57,18 @@ _GRAPH_CONVENTIONS = GRAPH_CONVENTIONS_BASE
 # write_artifact tool (agent-specific, not a graph query tool)
 # ---------------------------------------------------------------------------
 
-def _write_artifact(output_root: str, filename: str, content: str) -> str:
-    """Persist a documentation artifact to disk."""
+def _write_artifact(
+    output_root: str,
+    filename: str,
+    content: str,
+    allowed_paths: set[str] | None = None,
+) -> str:
+    """Persist a documentation artifact to disk.
+
+    If `allowed_paths` is provided, the filename must be in that set.
+    Unplanned paths are rejected with an error that tells the agent the
+    correct path to use — preventing invented filenames and duplicates.
+    """
     # Strip output_root prefix if the model included a full path
     clean = filename
     for prefix in (output_root, str(Path(output_root))):
@@ -66,8 +76,20 @@ def _write_artifact(output_root: str, filename: str, content: str) -> str:
             clean = clean[len(prefix) + 1:]
         elif clean.startswith(prefix):
             clean = clean[len(prefix):]
-    # Also strip leading slashes
     clean = clean.lstrip("/")
+
+    # Validate against the planned artifact list
+    if allowed_paths is not None and clean not in allowed_paths:
+        # Find the closest match to help the agent correct itself
+        similar = [p for p in allowed_paths if Path(p).stem in clean or clean in p]
+        hint = f" Did you mean one of: {similar}?" if similar else ""
+        allowed_list = ", ".join(sorted(allowed_paths))
+        return (
+            f"ERROR: '{clean}' is not a planned artifact path and was not written. "
+            f"Allowed paths are: {allowed_list}.{hint} "
+            f"Use one of those exact paths."
+        )
+
     dest = Path(output_root) / clean
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(content, encoding="utf-8")
@@ -248,6 +270,7 @@ def _dispatch_tool(
     artifacts: list[str],
     extra_tools: dict[str, Callable] | None,
     source_reads_remaining: list[int] | None = None,
+    allowed_artifact_paths: set[str] | None = None,
 ) -> str:
     """Dispatch a single tool call and return the result text."""
     if tc.name == "write_artifact":
@@ -255,6 +278,7 @@ def _dispatch_tool(
             output_root,
             tc.arguments.get("filename", "unknown.md"),
             tc.arguments.get("content", ""),
+            allowed_paths=allowed_artifact_paths,
         )
         if result_text.startswith("written:"):
             artifacts.append(result_text[len("written:"):].strip())
@@ -301,6 +325,7 @@ def run_loop(
     include_write_artifact: bool = True,
     phase_label: str = "agent",
     pinned_user_messages: list[str] | None = None,
+    allowed_artifact_paths: set[str] | None = None,
 ) -> dict[str, Any]:
     """Run the agentic tool loop.
 
@@ -421,7 +446,10 @@ def run_loop(
                 args_summary = args_summary[:120] + "…"
             log(f"{tool_tag} {tc.name}({args_summary})")
 
-            result_text = _dispatch_tool(tc, toolkit, output_root, artifacts, extra_tools, source_reads_remaining)
+            result_text = _dispatch_tool(
+                tc, toolkit, output_root, artifacts, extra_tools,
+                source_reads_remaining, allowed_artifact_paths,
+            )
 
             log(f"{tool_tag} → {result_text[:150]}")
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
@@ -961,6 +989,7 @@ def _recover_missing_current_state_artifacts(
     verbose: bool,
     missing_paths: list[str],
     analyst_name: str = "analyst/flows",
+    allowed_artifact_paths: set[str] | None = None,
 ) -> dict[str, Any]:
     if not missing_paths:
         return {"status": "done", "artifacts": [], "events": [], "tool_uses": 0, "tool_call_counts": {}, "input_tokens": 0, "output_tokens": 0}
@@ -997,6 +1026,7 @@ def _recover_missing_current_state_artifacts(
         extra_tools={"write_c4_artifact": lambda **kwargs: write_c4_artifact(artifacts_dir, **kwargs)},
         extra_tool_defs=[WRITE_C4_ARTIFACT_ANTHROPIC if use_anthropic_format else WRITE_C4_ARTIFACT_OPENAI],
         phase_label="analyst/recovery",
+        allowed_artifact_paths=allowed_artifact_paths,
     )
 
 
@@ -1439,6 +1469,17 @@ def run_supervisor_agent(
     selected_repo_archetype = repo_archetype or str((repo_metrics or {}).get("selected_archetype", "")) or "backend-service"
     plan = artifact_plan or build_artifact_plan(selected_repo_archetype, repo_metrics)
 
+    # Derive the set of allowed write_artifact paths from the plan.
+    # write_artifact calls with paths outside this set will be rejected — preventing
+    # invented filenames (architecture/README.md), wrong-path duplicates
+    # (current-state/coupling-hotspots.md instead of tech/coupling-hotspots.md),
+    # and spurious extra artifacts.
+    _allowed_artifact_paths: set[str] = {
+        str(item["path"])
+        for item in plan.get("artifacts", [])
+        if item.get("class") != "manifest"  # manifest is self-managed, always allowed
+    } | {"manifests/artifacts.json"}  # always allow the manifest itself
+
     def log(msg: str) -> None:
         all_events.append(msg)
         from codedoc import log as _log
@@ -1525,6 +1566,7 @@ def run_supervisor_agent(
             extra_tool_defs=[WRITE_C4_ARTIFACT_ANTHROPIC if use_anthropic_format else WRITE_C4_ARTIFACT_OPENAI],
             phase_label=name,
             pinned_user_messages=pinned,
+            allowed_artifact_paths=_allowed_artifact_paths,
         )
         return name, result
 
@@ -1607,6 +1649,7 @@ def run_supervisor_agent(
                 verbose=verbose,
                 missing_paths=missing_paths,
                 analyst_name=analyst_name,
+                allowed_artifact_paths=_allowed_artifact_paths,
             )
             all_events.extend(recovery_result["events"])
             all_artifacts.extend(recovery_result["artifacts"])
@@ -1638,6 +1681,7 @@ def run_supervisor_agent(
         max_source_reads=0,
         include_write_artifact=True,
         phase_label="architect",
+        allowed_artifact_paths=_allowed_artifact_paths,
     )
 
     missing_target_artifacts = _missing_target_state_artifacts(artifacts_dir, selected_repo_archetype)
@@ -1665,6 +1709,7 @@ def run_supervisor_agent(
             max_source_reads=0,
             include_write_artifact=True,
             phase_label="architect/recovery",
+            allowed_artifact_paths=_allowed_artifact_paths,
         )
         arch_result["events"].extend(recovery_result["events"])
         arch_result["artifacts"].extend(recovery_result["artifacts"])
