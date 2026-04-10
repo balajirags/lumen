@@ -59,10 +59,12 @@ Source repo
 lumen currently supports:
 
 - Java / Kotlin
-- JavaScript / TypeScript
+- JavaScript / TypeScript (JSX, TSX, ES modules)
 - Python
 
 Multi-language repos are indexed in one run when supported language slices are present.
+
+**Android repos are detected early and rejected** — `AndroidManifest.xml` triggers an informative error before indexing starts, since Android SDK framework classes are not available for resolution. Use `--language kotlin` to force indexing a specific module directly.
 
 ### Core USP
 
@@ -70,8 +72,9 @@ The main differentiators are:
 
 1. **Token-aware architecture** — lumen minimizes raw source-file stuffing by default, using graph queries and targeted source reads instead. This is most beneficial on medium, large, and repeatedly queried repos.
 2. **Code Property Graph over files or plain AST** — lumen indexes the repo into a graph with structural and relationship-aware facts instead of relying on file-by-file reading or a plain syntax tree.
-3. **Multi-agent analysis** — lumen uses parallel analysts plus a synthesizing architect, closer to stochastic consensus / distributed research than a single monolithic agent pass.
-4. **Model flexibility** — lumen can run with local Ollama models as well as OpenAI and Anthropic models.
+3. **Post-processing abstractions** — the graph layer derives higher-level nodes that analysts use directly: **Workflow** nodes (pre-computed end-to-end execution traces from HTTP entry points to repository/event terminals) and **Domain** nodes (functional clusters of cohesive classes with cohesion scores). These are embedded into the agent orientation summary so analysts start with architectural context already available.
+4. **Multi-agent analysis** — lumen uses parallel analysts plus a synthesizing architect, closer to stochastic consensus / distributed research than a single monolithic agent pass.
+5. **Model flexibility** — lumen can run with local Ollama models as well as OpenAI and Anthropic models.
 
 In practice, that gives you:
 
@@ -85,10 +88,14 @@ In practice, that gives you:
 
 - **Multi-language indexing per run** — supported Java/Kotlin, JS/TS, and Python slices are all indexed in the same run when present.
 - **Normalized graph metadata** — nodes and edges carry `language`, `kind`, and `normKind` so tooling can reason across language-specific parser outputs more consistently.
+- **Three-tier CALL confidence** — CALLS edges carry `confidence` (0.95 same-file / 0.90 import-resolved / 0.50 global) and `reason` so downstream analysis can filter to reliable edges only.
+- **Workflow and Domain post-processing** — the indexer derives Workflow nodes (HTTP entry → repository/event terminal) and Domain nodes (functional clusters with cohesion scores) as a post-processing pass, then pre-fetches them into agent orientation for immediate use.
 - **Repo metrics guardrail** — a native preflight plugin estimates repo size using LOC, source-file count, and language mix before indexing starts.
 - **Repo-type-aware prompting** — the pipeline classifies a repo once, then carries `primary_repo_type`, capabilities, and an artifact plan through later stages.
-- **Frontend-aware JS/TS analysis** — React/TSX repos now get stronger graph-backed component, hook, and UI-to-API exploration, including SPA fallback views when no strong router graph exists.
-- **Improved CLI UX** — indexing shows live per-language progress, the three parallel researchers render as separate live boxes, and the synthesis / architect / summary phases are shown explicitly.
+- **Artifact path enforcement** — `write_artifact` only accepts paths listed in the run's artifact plan; spurious or wrong-path writes are rejected with a helpful correction message.
+- **Context-aware pruning** — the agent loop removes older turns in proportion to budget overage (3 turns at once for large/xlarge repos); critical endpoint evidence is pre-fetched and pinned before the loop starts so it survives pruning.
+- **Frontend-aware JS/TS analysis** — React/TSX repos get graph-backed component, hook, and UI-to-API exploration. Route-map and component-boundaries artifacts are suppressed for JS-frontend repos where call graph evidence is too sparse to produce reliable output.
+- **Improved CLI UX** — indexing shows live per-language progress, the three parallel researchers render as distinct colored live boxes, and a per-researcher tool usage table (highlighting new aggregate tools) prints after each phase.
 - **MCP access** — `lumen mcp` serves the indexed graph over HTTP so other tools and clients can query the repo without rerunning the full docs pipeline.
 - **Split pipeline modules** — the full docs flow and the MCP flow live in separate pipeline modules with shared setup/finalization helpers.
 
@@ -119,13 +126,13 @@ metadata to read only the exact method body (50–600 tokens), not the whole fil
 | Document | What it covers |
 |---|---|
 | Executive Summary | CXO-facing summary of the repo’s purpose, current state, risks, recommendations, and confidence limits |
-| Business Capabilities | All capabilities in the system + business rules and validations per capability |
-| User Journeys | Key user or integration flows as "As a [role], I can [action]…" + Mermaid sequence diagrams |
+| Business Capabilities | All capabilities in the system + business rules and validations per capability. Grounded in pre-computed Domain clusters when available. |
+| Business Journeys | Key user or integration flows as "As a [role], I can [action]…" + Mermaid sequence diagrams. Grounded in pre-computed Workflow step traces when available. |
 | C4 System Context | Integration map — upstream callers + downstream dependencies + protocols (deterministic PlantUML) |
 | Coupling Hotspots | Risk matrix, coupling pairs, dead code candidates, decomposition seam candidates |
 | UI to API Interactions | Which UI routes/components/hooks call which API clients and backend endpoints |
-| ER Diagram | Entity relationships and bounded context ownership (Mermaid, required for backend/fullstack repos) |
-| API Spec | OpenAPI YAML (required for backend/fullstack repos) |
+| ER Diagram | Entity relationships and bounded context ownership (Mermaid). For Java/Spring repos, derived from JPA annotations and class field edges. For JS/TS repos, derived from TypeScript class/interface properties and module-path/naming conventions. |
+| API Spec | OpenAPI YAML (required for backend/fullstack repos; conditional for large/xlarge) |
 | Bounded Contexts | Bounded context decomposition grounded in coupling + domain evidence |
 | Strangler Fig Plan | Ordered extraction plan with seam identification and routing strategy |
 | Repo Metrics | Preflight LOC / file-count / language-mix assessment with size/risk classification |
@@ -409,12 +416,16 @@ Run cost depends on:
 For Sonnet-class pricing, output tokens are materially more expensive than input tokens, so
 a flat "total tokens = cost" estimate is often misleading.
 
-Example from a recent run:
+Indicative ranges across repo sizes (Sonnet pricing, input $3/M, output $15/M):
 
-- `311,287` input tokens
-- `28,098` output tokens
-- `339,385` total tokens
-- roughly `$1.36` at Sonnet 4 API pricing
+| Size band | LOC | Type | Token range | Sonnet est. |
+|---|---|---|---|---|
+| small | 1k–10k | backend | 150k–380k | $0.53–$1.35 |
+| small | 1k–10k | fullstack | 350k–800k | $1.24–$2.84 |
+| large | 50k–200k | backend | 600k–1,100k | $2.13–$3.91 |
+| xlarge | >200k | backend | 800k–1,400k | $2.84–$4.97 |
+
+Output tokens are consistently ~4–5% of total. Exact token usage is recorded in `pipeline.json` after every run.
 
 The main cost advantage of lumen is not that every full run is always cheaper. It is that
 the graph-first architecture scales better than naive full-repo prompting on medium and

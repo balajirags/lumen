@@ -150,7 +150,7 @@ Key files:
 - `pipeline/codedoc/log.py` — structured progress logging, indexer progress panel, repo metrics panel, analyst live boxes
 - `pipeline/codedoc/mcp_server.py` — MCP server backed by `kg_tools`; supports the HTTP MCP flow exposed by `make lumen-mcp` and `make lumen-docker-mcp`
 - `pipeline/codedoc/llm.py` — LLM abstraction: `ClaudeProvider`, `OllamaProvider`, `OpenAIProvider`
-- `pipeline/codedoc/kg_tools/toolkit.py` — `ReverseEngineerToolkit` (36 graph query tools)
+- `pipeline/codedoc/kg_tools/toolkit.py` — `ReverseEngineerToolkit` (40+ graph query tools including `get_workflows`, `get_workflow_steps`, `get_domains`)
 - `pipeline/codedoc/kg_tools/backends.py` — `KuzuBackend`, `Neo4jBackend`
 - `pipeline/codedoc/prompts/analyst-domain.md` — Business Analyst system prompt (writes 2 artifacts)
 - `pipeline/codedoc/prompts/analyst-flows.md` — Integration Architect system prompt (writes 2–3 artifacts)
@@ -165,12 +165,16 @@ Key files:
 Full pipeline architecture (researcher fan-out + architect):
 ```
 run_supervisor_agent()
-  ├─ Phase 1: get_architecture_summary()       ← direct graph call, no LLM
+  ├─ Phase 1: orientation (direct graph calls, no LLM)
+  │   ├─ get_architecture_summary()   ← architecture overview
+  │   ├─ get_domains()                ← pre-fetch Domain clusters → embedded in orientation_summary
+  │   ├─ get_workflows()              ← pre-fetch Workflow traces → embedded in orientation_summary
+  │   └─ get_workflow_steps(name)     ← pre-fetch step chains for top workflows → embedded
   │
   ├─ Phase 2: 3 parallel researcher agents     ← each has graph tools + write_artifact
   │   ├─ analyst/domain  (Business Analyst)    → domain/business-capabilities.md
   │   │                                        → domain/er-diagram.md
-  │   ├─ analyst/flows   (Integration Arch.)   → architecture/user-journeys.md
+  │   ├─ analyst/flows   (Integration Arch.)   → architecture/business-journeys.md
   │   │                                        → architecture/c4-context.md
   │   │                                        → current-state/ui-to-api-interactions.md
   │   │                                        → current-state/api-spec.yaml
@@ -184,12 +188,14 @@ run_supervisor_agent()
 
 Each analyst has its own `KuzuBackend` (connections are not thread-safe).
 Analyst turn contract: explicit TURN 1/2/3/N sequence in `user_request`; `max_source_reads=0`.
-Architect receives Phase 2 artifact content injected into its system prompt (up to 20k chars each).
+Architect receives Phase 2 artifact content injected into system prompt (adaptive char limit: 80k total / artifact count, capped at 20k each).
 `manifests/artifacts.json` is machine-written by the pipeline, not the model.
+`write_artifact` validates the filename against the run's artifact plan; unplanned paths are rejected with a correction hint.
 Before Stage 1, the pipeline may run pluggable native preflights; the default one is repo metrics.
 Pipeline classification is pipeline-owned and normalized into `primary_repo_type`, `capabilities`, and an `artifact_plan`.
 Repo types currently supported in the prompt layer are `backend-service`, `frontend-app`, `fullstack-app`, and `library`.
 For `xlarge` repos, the full docs pipeline stops after preflight and directs the user to MCP mode instead of indexing, unless `--allow-xlarge` is set.
+Context pruning removes 3 turns at once when over budget by >20k tokens (large/xlarge only); 1 turn for small/medium. Critical evidence (endpoints, workflows) is pre-pinned before the loop for analyst/flows on medium+ repos.
 
 MCP pipeline architecture:
 ```
@@ -202,15 +208,15 @@ run_mcp_pipeline()
 Artifacts produced (Mermaid + deterministic C4 PlantUML for C1 context views):
 ```
 summary/executive-summary.md      ← CXO-facing summary, risks, recommendations, confidence/limitations
-domain/business-capabilities.md   ← capabilities + business rules/validations per capability
-domain/er-diagram.md              ← Mermaid ER diagram + bounded context ownership table [required for backend/fullstack]
-architecture/user-journeys.md     ← 3–5 user or integration journeys with Mermaid sequence diagrams
+domain/business-capabilities.md   ← capabilities + business rules/validations; grounded in Domain clusters
+domain/er-diagram.md              ← Mermaid ER diagram; JPA annotations for Java, TS class/interface fields for JS/TS [required for backend/fullstack]
+architecture/business-journeys.md ← 3–5 journeys with Mermaid sequence diagrams; grounded in Workflow step traces
 architecture/c4-context.md        ← deterministic PlantUML C4Context rendered from structured data
-architecture/route-map.md         ← UI route inventory or SPA entry-surface fallback when router evidence is weak
+architecture/route-map.md         ← UI route inventory [suppressed for JS-frontend repos]
 tech/coupling-hotspots.md         ← hotspot table + coupling pairs + dead code + seam candidates
-current-state/ui-to-api-interactions.md ← UI/component to API/client interaction view; falls back to module-import evidence when direct call edges are weak
+current-state/ui-to-api-interactions.md ← UI/component to API/client interaction view
 current-state/module-dependency-map.md  ← dependency and seam summary
-current-state/api-spec.yaml       ← OpenAPI spec [required for backend/fullstack]
+current-state/api-spec.yaml       ← OpenAPI spec [required for backend/fullstack; conditional for large/xlarge]
 target-state/bounded-contexts.md  ← BC decomposition + service responsibility table (backend-service)
 target-state/strangler-fig.md     ← ordered extraction plan grounded in hotspot data (backend-service)
 target-state/fullstack-boundaries.md ← frontend/backend seam plan (fullstack-app)
@@ -225,20 +231,25 @@ manifests/artifacts.json          ← machine-generated index of all artifacts w
 Gradle multi-project (Java + embedded JS/Python parsers). Builds wrapper scripts in `indexer/bin/`.
 
 Key files:
-- `indexer/install.sh` — builds all runtimes, generates `bin/cmg-{java,js,python}` wrappers
+- `indexer/install.sh` — builds all runtimes, generates `bin/cmg-{java,js,python}` wrappers. Run `make lumen-install` after any indexer code change to rebuild the fat JAR (`./gradlew shadowJar`).
 - `indexer/app/` — Java/Kotlin fat JAR (Gradle Shadow, main: `code.graph.App`)
-- `indexer/parsers/javascript/parse.js` — Babel-based JS/TS parser
-- `indexer/parsers/python/parse.py` — Python AST parser
+- `indexer/app/src/main/java/code/graph/parser/WorkflowBuilder.java` — post-processing: traces HTTP entry points → repository/event terminals via BFS over CALLS edges; emits `Workflow` + `WORKFLOW_STEP` nodes
+- `indexer/app/src/main/java/code/graph/parser/DomainDetector.java` — post-processing: label propagation over CALLS+CONTAINS graph to cluster cohesive classes; emits `Domain` + `IN_DOMAIN` nodes
+- `indexer/parsers/javascript/parse.js` — Babel-based JS/TS parser; creates `Field` nodes for TypeScript class properties and interface members
+- `indexer/parsers/python/parse.py` — Python AST parser; creates `Field` nodes for annotated class variables and ORM column assignments
 
 `install.sh` uses `$SCRIPT_DIR` — re-run after cloning or moving the repo. Generated
 `indexer/bin/` wrappers contain absolute paths and are gitignored.
 
 Current indexing behavior:
-- The pipeline detects all supported languages present in the repo and runs all relevant indexers in one pipeline run.
-- The graph preserves parser-native labels and also stores normalized metadata on nodes/edges:
-  `language`, `kind`, `normKind`
-- This normalized metadata is used by the toolkit and agent layer for more consistent cross-language reasoning.
-- JS/TS frontend analysis is React-first and includes stronger component, hook, and UI-to-API exploration, plus SPA fallback views when no strong router graph exists.
+- The pipeline detects all supported languages present in the repo and runs all relevant indexers in one pipeline run. Android repos (containing `AndroidManifest.xml`) are detected and rejected early with an informative message.
+- The graph preserves parser-native labels and also stores normalized metadata on nodes/edges: `language`, `kind`, `normKind`
+- CALLS edges carry `confidence` (0.95 same-file / 0.90 import-resolved / 0.50 global) and `reason` for reliable call-chain filtering.
+- Internal nodes have `external=false`; library/placeholder nodes have `external=true`.
+- Post-processing runs after all language parsers complete: `WorkflowBuilder` then `DomainDetector` operate on the merged graph.
+- JS/TS: TypeScript class property declarations and interface member signatures produce `Field` nodes for ER diagram support.
+- JS/TS: For repos with no ORM annotations, `get_domain_model()` falls back to module-path and naming-convention entity detection.
+- Route-map and component-boundaries artifacts are suppressed for JS-frontend repos (sparse call graph makes them unreliable).
 
 Release packaging:
 - `scripts/lumen-docker-release.sh` packages the current local Docker image into `releases/`
@@ -256,6 +267,10 @@ Release packaging:
 - No `shortestPath()` — use `MATCH path = (a)-[*1..N]->(b)`
 - After DISTINCT/aggregation, ORDER BY must use column aliases
 - `PARENT -[:CONTAINS]-> CHILD` direction
+- Internal nodes: `external = false`. External/library placeholder nodes: `external = true`. Inferred method stubs: `inferred = true`.
+- Filter to reliable calls: `WHERE c.confidence >= 0.9` on CALLS edges
+- New node types: `Workflow` (id, name, httpMethod, httpPath, entryPointId, terminalId, stepCount, type, language), `Domain` (id, name, heuristicLabel, cohesion, memberCount, language)
+- New rel types: `WORKFLOW_STEP {step: INT}`, `IN_DOMAIN`
 
 ---
 
@@ -296,3 +311,11 @@ Release packaging:
 | `--repo-name` CLI flag | Docker mounts repo at `/repo` so `Path("/repo").name = "repo"`; flag lets caller override |
 | Output dir `<repo>-<timestamp>` | Allows multiple runs of the same repo side-by-side without overwriting |
 | Multi-repo doc-site | `build-docs-site.sh` iterates `output/*/artifacts/` — accumulates all runs in one site |
+| Workflow and Domain as post-processing nodes | Derived from the merged graph after all parsers run; both use BFS/label-propagation over CALLS+CONTAINS and are language-agnostic. Pre-fetched in Phase 1 orientation so analysts use pre-loaded data rather than tool calls. |
+| Adaptive context pruning (1 vs 3 turns) | Small repos prune 1 turn; large/xlarge prune 3 turns when >20k over budget. Single-turn pruning on small repos prevents the 2× slowdown from agents losing thread and re-exploring. |
+| `write_artifact` path validation | Unplanned filenames are rejected (not written) with a correction hint listing allowed paths. Prevents invented paths (architecture/README.md) and wrong-path duplicates (content in current-state/ instead of tech/). |
+| api-spec.yaml conditional for large/xlarge | Requires annotated routes or dense call graph; large repos with sparse JS routing reliably fail to produce valid YAML, so it stays optional to avoid marking valid runs as failed. |
+| Route-map + component-boundaries suppressed for JS frontend | These artifacts need a typed component tree and resolved call graph; JS repos don't have them so the output was consistently noise. Suppressed in `build_artifact_plan` when `js-runtime` capability is present. |
+| Android repos fail fast | `AndroidManifest.xml` detected up to 8 directory levels deep; exits before indexing with a clear message rather than producing a partial/confusing graph. |
+| `make lumen-install` rebuilds the JAR | `install.sh` runs `./gradlew shadowJar`. Must be re-run after any Java/Kotlin indexer code change to update `cmg-java`. Gradle's incremental build skips recompilation if no sources changed. |
+| Analyst prompts reference pre-loaded orientation sections | Prompts say "if Orientation Summary does NOT contain `## Pre-computed Domains`, call `get_domains` first" — the literal heading is the fallback trigger, not a subjective existence judgement. |
