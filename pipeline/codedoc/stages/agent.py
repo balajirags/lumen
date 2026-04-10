@@ -1547,6 +1547,40 @@ def run_supervisor_agent(
             if _has_content(workflow_data, "No workflows"):
                 orientation_summary += f"\n\n---\n## Pre-computed Workflows\n\n{workflow_data}"
                 log("[supervisor] Workflows pre-fetched and embedded in orientation")
+
+                # Pre-fetch step traces for the top workflows so the flows analyst
+                # has everything it needs to write sequenceDiagram blocks without
+                # calling get_workflow_steps itself (local models don't call it).
+                # Cap at 5 workflows to avoid bloating the orientation summary.
+                try:
+                    import json as _json
+                    step_sections: list[str] = []
+                    wf_lines = [ln for ln in workflow_data.splitlines() if '"name"' in ln]
+                    wf_names: list[str] = []
+                    for ln in wf_lines[:5]:
+                        try:
+                            obj = _json.loads("{" + ln.strip().rstrip(",") + "}")
+                            if "name" in obj:
+                                wf_names.append(obj["name"])
+                        except Exception:
+                            pass
+                    # Fallback: extract names from JSON rows
+                    if not wf_names:
+                        import re as _re
+                        wf_names = _re.findall(r'"name"\s*:\s*"([^"]+)"', workflow_data)[:5]
+                    for wf_name in wf_names:
+                        steps = p1_toolkit.call("get_workflow_steps", workflow_name=wf_name)
+                        if _has_content(steps, "not found"):
+                            step_sections.append(f"### {wf_name}\n{steps}")
+                    if step_sections:
+                        orientation_summary += (
+                            "\n\n---\n## Pre-computed Workflow Step Traces\n\n"
+                            "Use these step traces to build `sequenceDiagram` blocks in business-journeys.md.\n\n"
+                            + "\n\n".join(step_sections)
+                        )
+                        log(f"[supervisor] Workflow step traces pre-fetched ({len(step_sections)} workflows)")
+                except Exception as e:
+                    log(f"[supervisor] WARNING: workflow step trace pre-fetch failed ({e})")
             else:
                 log("[supervisor] Workflows pre-fetch returned no results — analysts will fall back to get_workflows")
         except Exception as e:

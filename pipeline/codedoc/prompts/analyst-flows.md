@@ -90,12 +90,12 @@ Tag headings: `[Observed]` = verified · `[Inferred]` = derived · `[Unknown]` =
 ## Pre-loaded Data (already in your orientation summary — do NOT re-call these)
 
 The orientation summary passed to you already contains:
-- **Pre-computed Workflows** section — end-to-end HTTP traces with `httpMethod`, `httpPath`, `stepCount`, `type`. Use these directly for `business-journeys.md`. **Do not call `get_workflows` again.**
+- **Pre-computed Workflows** — end-to-end HTTP traces with `httpMethod`, `httpPath`, `stepCount`, `type`. Use directly for `business-journeys.md`. **Do not call `get_workflows` again.**
+- **Pre-computed Workflow Step Traces** — ordered step chains for each workflow. Use these to build `sequenceDiagram` blocks. **Do not call `get_workflow_steps` again.**
 - **Pre-computed Domains** section — functional clusters for context.
 
-If the **Orientation Summary** section above does NOT contain the heading `## Pre-computed Workflows`, call `get_workflows` as your **first tool call**.
-
-To get the step-by-step method chain for a specific workflow (for the sequenceDiagram), call `get_workflow_steps(workflow_name)` — this one you DO need to call per workflow.
+If the **Orientation Summary** does NOT contain `## Pre-computed Workflows`, call `get_workflows` first.
+If it contains Workflows but NOT `## Pre-computed Workflow Step Traces`, call `get_workflow_steps(name)` for each workflow you need to diagram.
 
 ## Supporting Tools (call only for gaps the pre-loaded data doesn't cover)
 
