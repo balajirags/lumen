@@ -9,6 +9,13 @@ provider      = "auto"
 # base_url: override API endpoint (e.g. "http://localhost:11434/v1" for Ollama)
 base_url      = ""
 
+# ollama_num_ctx: KV-cache context window allocated per Ollama request.
+# Ignored for Claude/OpenAI (they manage context on their side).
+# Default 131072 (128k). Increase for xlarge repos if RAM allows:
+#   192k → ollama_num_ctx = 196608   (recommended for 24GB with qwen3.5:35b)
+#   256k → ollama_num_ctx = 262144   (full qwen3.5 window; tight on 24GB)
+ollama_num_ctx = 131072
+
 [paths]
 indexer_bin_dir  = "../indexer/bin"
 agent_prompt     = "./codedoc/prompts/re-prompt.md"
