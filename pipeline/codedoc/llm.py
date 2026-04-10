@@ -119,10 +119,16 @@ class LLMProvider(Protocol):
 class OllamaProvider:
     """Wraps the OpenAI client pointed at an Ollama (or compatible) endpoint."""
 
-    def __init__(self, model: str, base_url: str = "http://127.0.0.1:11434/v1"):
+    def __init__(
+        self,
+        model: str,
+        base_url: str = "http://127.0.0.1:11434/v1",
+        num_ctx: int = 131072,
+    ):
         from openai import OpenAI
         self.model = model
         self.base_url = base_url
+        self.num_ctx = num_ctx
         self.client = OpenAI(base_url=base_url, api_key="ollama")
 
     def chat(
@@ -134,6 +140,10 @@ class OllamaProvider:
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
+            # Pass num_ctx so Ollama allocates the full context window per request.
+            # Without this the Ollama app uses its default (often 4096-8192) regardless
+            # of the model's capability. extra_body is forwarded as-is to the Ollama API.
+            "extra_body": {"options": {"num_ctx": self.num_ctx}},
         }
         if tools:
             kwargs["tools"] = tools
@@ -417,6 +427,7 @@ def create_provider(
     model: str = "claude-sonnet-4-6",
     base_url: str = "",
     api_key: str | None = None,
+    num_ctx: int = 131072,
 ) -> LLMProvider:
     """Create an LLM provider based on configuration.
 
@@ -448,7 +459,7 @@ def create_provider(
         return ClaudeProvider(model=model, api_key=api_key)
     elif provider == "ollama":
         url = base_url or "http://127.0.0.1:11434/v1"
-        return OllamaProvider(model=model, base_url=url)
+        return OllamaProvider(model=model, base_url=url, num_ctx=num_ctx)
     elif provider == "openai":
         return OpenAIProvider(model=model, api_key=api_key, base_url=base_url or None)
     else:
