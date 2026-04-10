@@ -57,6 +57,7 @@ class PipelineState:
     base_url: str = ""
     max_turns: int = 60
     max_context_tokens: int = 120_000
+    ollama_num_ctx: int = 131_072
     timeout: int = 300
     repo_size_check: str = "warn"
     allow_xlarge: bool = False

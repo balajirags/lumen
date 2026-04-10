@@ -81,6 +81,7 @@ def run(
         base_url=cfg.base_url,
         max_turns=cfg.max_turns,
         max_context_tokens=cfg.max_context_tokens,
+        ollama_num_ctx=cfg.ollama_num_ctx,
         timeout=cfg.timeout,
         repo_size_check=cfg.repo_size_check,
         allow_xlarge=cfg.allow_xlarge,

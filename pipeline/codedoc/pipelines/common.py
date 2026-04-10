@@ -27,6 +27,7 @@ def init_state(
     base_url: str = "",
     max_turns: int = 60,
     max_context_tokens: int = 120_000,
+    ollama_num_ctx: int = 131_072,
     timeout: int = 300,
     repo_size_check: str = "warn",
     allow_xlarge: bool = False,
@@ -47,6 +48,7 @@ def init_state(
         base_url=base_url,
         max_turns=max_turns,
         max_context_tokens=max_context_tokens,
+        ollama_num_ctx=ollama_num_ctx,
         timeout=timeout,
         repo_size_check=repo_size_check,
         allow_xlarge=allow_xlarge,
@@ -94,15 +96,24 @@ def should_stop_full_pipeline_for_xlarge_repo(state: PipelineState) -> bool:
     )
 
 
+def _runtime_settings_line(state: PipelineState) -> str:
+    """Single log line summarising the key runtime settings for this run."""
+    parts = [
+        f"timeout={state.timeout}s ({state.timeout_source})",
+        f"max_turns={state.max_turns} ({state.max_turns_source})",
+        f"max_context={state.max_context_tokens // 1000}k",
+    ]
+    # Show ollama_num_ctx only when using an Ollama-backed provider
+    if "ollama" in state.provider.lower() or "11434" in state.base_url:
+        parts.append(f"ollama_num_ctx={state.ollama_num_ctx // 1000}k")
+    return "Effective runtime settings — " + ", ".join(parts)
+
+
 def apply_repo_size_runtime_defaults(state: PipelineState) -> PipelineState:
     """Adjust runtime defaults from repo size when the user did not override them."""
     size_band = str((state.repo_metrics or {}).get("size_band", ""))
     if size_band not in {"large", "xlarge"}:
-        state.log(
-            "pipeline",
-            f"Effective runtime settings — timeout={state.timeout}s ({state.timeout_source}), "
-            f"max_turns={state.max_turns} ({state.max_turns_source})",
-        )
+        state.log("pipeline", _runtime_settings_line(state))
         return state
 
     if not state.timeout_explicit:
@@ -113,9 +124,5 @@ def apply_repo_size_runtime_defaults(state: PipelineState) -> PipelineState:
         state.max_turns = 100
         state.max_turns_source = f"adaptive-{size_band}"
 
-    state.log(
-        "pipeline",
-        f"Effective runtime settings — timeout={state.timeout}s ({state.timeout_source}), "
-        f"max_turns={state.max_turns} ({state.max_turns_source})",
-    )
+    state.log("pipeline", _runtime_settings_line(state))
     return state
