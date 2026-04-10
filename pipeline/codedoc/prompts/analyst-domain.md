@@ -65,17 +65,20 @@ Never present inferred facts as observed.
 ## Pre-loaded Data (already in your orientation summary — do NOT re-call these)
 
 The orientation summary passed to you already contains:
-- **Pre-computed Domains** section — functional clusters with cohesion scores and heuristic labels. Use these directly as your capability sections. **Do not call `get_domains` again.**
+- **Pre-computed Domains** section — functional clusters with cohesion scores and heuristic labels. Use these as the **structure** for your capability sections (one Domain ≈ one capability), but you must still call `get_class_details` and `get_callers` on each Domain's key members to discover the business rules, validations, and evidence. The Domain clusters tell you *what* to investigate — they do not contain the rules themselves. **Do not call `get_domains` again.**
 - **Pre-computed Workflows** section — end-to-end execution traces. Use these for the ER diagram evidence.
 
 If the **Orientation Summary** section above does NOT contain the heading `## Pre-computed Domains`, call `get_domains` as your **first tool call**, then `get_architecture_overview`.
 
-## Supporting Tools (call only for drill-down after reading the pre-loaded data)
+## Required Drill-Down Tools (call these for every capability)
 
-1. `get_class_details` / `get_callers` / `get_callees` — drill into a specific Domain's members for operations and business rules.
-2. `get_domain_model` — discover entity fields and relationships for the ER diagram.
-3. `get_annotations_usage` — surface @Entity, @Table, ORM annotations that confirm persistence.
-4. `get_api_endpoints` — confirm endpoint boundaries per Domain.
+For each Domain cluster in the orientation summary, you **must** call:
+
+1. `get_class_details(class_name)` on the primary service and entity classes — this is how you find business rules, field constraints, and validations. Do this for every capability section.
+2. `get_callers(method_name)` on key methods to understand usage context and additional business rules.
+3. `get_api_endpoints` — confirm HTTP paths per capability.
+4. `get_domain_model` — entity fields and relationships for the ER diagram.
+5. `get_annotations_usage` — @Entity, @Table, @NotNull, ORM annotations that confirm rules and persistence.
 
 ## Graph-First Discipline
 
