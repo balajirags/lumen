@@ -1835,35 +1835,87 @@ class ReverseEngineerToolkit:
         # ------------------------------------------------------------------ #
         @reg.tool()
         def get_domain_model() -> str:
-            """Extract the domain model: entity classes, their fields, and relationships."""
+            """Extract the domain model: entity classes, their fields, and relationships.
+
+            Works for JPA/Spring repos (Field nodes from @Entity classes) and for
+            JS/TS repos (Field nodes from TypeScript class/interface properties, or
+            entity candidates inferred from module-path and class-naming conventions).
+            """
             lines = ["=== DOMAIN MODEL ===\n"]
 
+            # ── 1. Field-level entity map (works for Java JPA and TS class properties) ──
             try:
                 rows = backend.execute(
-                    "MATCH (c:Class)-[:CONTAINS]->(f:Field)-[:OF_TYPE]->(t:Class) "
+                    "MATCH (c:Class)-[:CONTAINS]->(f:Field) "
+                    "WHERE c.external IS NULL OR c.external = false "
+                    "OPTIONAL MATCH (f)-[:OF_TYPE]->(t) "
                     "RETURN c.qualifiedName AS owner_class, c.name AS owner_name, "
-                    "f.name AS field_name, t.qualifiedName AS field_type, t.name AS type_name "
-                    "ORDER BY c.qualifiedName, f.name"
+                    "f.name AS field_name, f.type AS field_type_str, "
+                    "t.name AS type_name "
+                    "ORDER BY c.qualifiedName, f.name LIMIT 300"
                 )
                 if rows:
-                    lines.append("── Entity Relationships (class → field → type) ──")
+                    lines.append("── Entity Fields (class → field : type) ──")
                     current_class = None
                     for r in rows:
                         owner = r.get("owner_class", "")
                         if owner != current_class:
                             current_class = owner
                             lines.append(f"\n  {owner}")
-                        lines.append(f"    .{r.get('field_name', '')} : {r.get('type_name', '')}")
+                        type_label = r.get("type_name") or r.get("field_type_str") or "?"
+                        lines.append(f"    .{r.get('field_name', '')} : {type_label}")
                 else:
-                    lines.append("  No field-type relationships found.")
+                    lines.append("  No field-level entity data found.")
             except Exception as e:
-                lines.append(f"  (domain model error: {e})")
+                lines.append(f"  (field query error: {e})")
 
+            # ── 2. Entity candidates by module path (model/schema/entity directories) ──
+            # Returns the module itself even when it has no parsed children (e.g. Mongoose schema files)
             try:
                 rows = backend.execute(
-                    "MATCH (c:Class)-[:IMPLEMENTS]->(i:Interface) "
+                    "MATCH (m:Module) "
+                    "WHERE (m.name CONTAINS '.model' OR m.name CONTAINS '.models' "
+                    "    OR m.name CONTAINS '.schema' OR m.name CONTAINS '.schemas' "
+                    "    OR m.name CONTAINS '.entity' OR m.name CONTAINS '.entities') "
+                    "OPTIONAL MATCH (m)-[:CONTAINS]->(c) "
+                    "  WHERE c.external IS NULL OR c.external = false "
+                    "RETURN m.name AS module, c.name AS entity_name, "
+                    "labels(c) AS node_type "
+                    "ORDER BY m.name, c.name LIMIT 60"
+                )
+                if rows:
+                    lines.append("\n── Entity Candidates (model/schema/entity modules) ──")
+                    for r in rows:
+                        entity = r.get("entity_name") or "(module only — entity inferred from module name)"
+                        lines.append(f"  {entity}  ← {r.get('module', '')}")
+            except Exception as e:
+                lines.append(f"  (module-path entity query error: {e})")
+
+            # ── 3. Entity candidates by naming convention ──
+            try:
+                rows = backend.execute(
+                    "MATCH (c:Class) "
+                    "WHERE (c.external IS NULL OR c.external = false) "
+                    "  AND (c.name ENDS WITH 'Model' OR c.name ENDS WITH 'Schema' "
+                    "    OR c.name ENDS WITH 'Entity' OR c.name ENDS WITH 'Document' "
+                    "    OR c.name ENDS WITH 'Record' OR c.name ENDS WITH 'Dto' "
+                    "    OR c.name ENDS WITH 'DTO') "
+                    "RETURN c.name AS name, c.qualifiedName AS qualified_name "
+                    "ORDER BY c.name LIMIT 40"
+                )
+                if rows:
+                    lines.append("\n── Entity Candidates (naming convention: *Model/*Schema/*Entity) ──")
+                    for r in rows:
+                        lines.append(f"  {r.get('name', '')}  ({r.get('qualified_name', '')})")
+            except Exception as e:
+                lines.append(f"  (naming-convention entity query error: {e})")
+
+            # ── 4. Interface implementations (useful for JPA repos and TypeScript) ──
+            try:
+                rows = backend.execute(
+                    "MATCH (c:Class)-[:IMPLEMENTS]->(i) "
                     "RETURN i.qualifiedName AS interface, i.name AS interface_name, "
-                    "collect(c.qualifiedName) AS implementors ORDER BY interface"
+                    "collect(c.qualifiedName) AS implementors ORDER BY interface LIMIT 30"
                 )
                 if rows:
                     lines.append("\n── Interface Implementations ──")

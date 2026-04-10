@@ -21,8 +21,15 @@ If a section has no findings, write `_No findings._`. Tag headings: `[Observed]`
 100–200 lines total.
 
 ### `domain/er-diagram.md`
-Write **only** if domain graph shows persistent entities (ORM annotations, @Entity, repositories).
-Skip (write a one-line note instead) if no persistent entity evidence.
+Write if **any** of these entity signals exist — not just JPA/Spring:
+- `get_domain_model` returns field-level entity data (Java `@Entity`, TypeScript class properties, Kotlin `DataClass` fields)
+- `get_domain_model` returns entity candidates from `*/model*`, `*/schema*`, `*/entity*` module paths
+- `get_domain_model` returns naming-convention candidates (`*Model`, `*Schema`, `*Entity`, `*Document`, `*DTO`)
+- `get_annotations_usage` shows ORM annotations (`@Entity`, `@Table`, `@Column`, `@Document`, `@Schema`, `@Prop`, `@Embedded`)
+
+For JS/TS repos without ORM annotations: draw the ER diagram from the entity candidates found by `get_domain_model` (module-path and naming signals). Tag the diagram `[Inferred]` and note the evidence source.
+
+Skip (write a one-line note) only when `get_domain_model` returns nothing at all and no module/naming signals exist.
 
 One paragraph: summary of domain model.
 

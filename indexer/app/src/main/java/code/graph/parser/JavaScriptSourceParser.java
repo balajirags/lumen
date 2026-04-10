@@ -105,7 +105,8 @@ public class JavaScriptSourceParser implements SourceParser {
             String qualifiedName = node.get("qualifiedName").getAsString();
             
             NodeType type = mapNodeType(typeStr);
-            
+            if (type == null) continue;  // skip unrecognised node types
+
             CodeNode codeNode = new CodeNode(id, type, name, qualifiedName);
             
             // Copy properties
@@ -141,6 +142,7 @@ public class JavaScriptSourceParser implements SourceParser {
             String typeStr = rel.get("type").getAsString();
             
             RelationshipType type = mapRelationshipType(typeStr);
+            if (type == null) continue;  // skip unrecognised rel types
             CodeRelationship codeRel = new CodeRelationship(sourceId, targetId, type);
             
             // Copy properties
@@ -171,33 +173,51 @@ public class JavaScriptSourceParser implements SourceParser {
 
     private NodeType mapNodeType(String type) {
         return switch (type.toUpperCase()) {
-            case "MODULE" -> NodeType.MODULE;
-            case "CLASS" -> NodeType.CLASS;
-            case "FUNCTION" -> NodeType.FUNCTION;
-            case "METHOD" -> NodeType.METHOD;
-            case "CONSTRUCTOR" -> NodeType.CONSTRUCTOR;
-            case "ARROW_FUNCTION" -> NodeType.ARROW_FUNCTION;
-            case "COMPONENT" -> NodeType.COMPONENT;
-            case "HOOK" -> NodeType.HOOK;
-            case "JSX_ELEMENT" -> NodeType.JSX_ELEMENT;
-            case "ASYNC_FUNCTION" -> NodeType.ASYNC_FUNCTION;
-            case "GENERATOR" -> NodeType.GENERATOR;
-            case "FILE" -> NodeType.FILE;
-            default -> NodeType.CLASS; // fallback
+            case "MODULE"        -> NodeType.MODULE;
+            case "CLASS"         -> NodeType.CLASS;
+            case "FUNCTION"      -> NodeType.FUNCTION;
+            case "METHOD"        -> NodeType.METHOD;
+            case "CONSTRUCTOR"   -> NodeType.CONSTRUCTOR;
+            case "ARROW_FUNCTION"-> NodeType.ARROW_FUNCTION;
+            case "COMPONENT"     -> NodeType.COMPONENT;
+            case "HOOK"          -> NodeType.HOOK;
+            case "JSX_ELEMENT"   -> NodeType.JSX_ELEMENT;
+            case "ASYNC_FUNCTION"-> NodeType.ASYNC_FUNCTION;
+            case "GENERATOR"     -> NodeType.GENERATOR;
+            case "FILE"          -> NodeType.FILE;
+            case "STATEMENT"     -> NodeType.STATEMENT;  // CPG statement nodes
+            case "FIELD"         -> NodeType.FIELD;       // TypeScript class/interface properties
+            case "DECORATOR"     -> NodeType.DECORATOR;
+            default -> {
+                System.err.printf("Warning: unknown JS node type '%s', skipping%n", type);
+                yield null;
+            }
         };
     }
 
     private RelationshipType mapRelationshipType(String type) {
         return switch (type.toUpperCase()) {
-            case "CONTAINS" -> RelationshipType.CONTAINS;
-            case "IMPORTS" -> RelationshipType.IMPORTS;
-            case "EXPORTS" -> RelationshipType.EXPORTS;
-            case "CALLS" -> RelationshipType.CALLS;
-            case "RENDERS" -> RelationshipType.RENDERS;
-            case "USES_HOOK" -> RelationshipType.USES_HOOK;
-            case "EXTENDS" -> RelationshipType.EXTENDS;
-            case "SOURCE_FILE" -> RelationshipType.SOURCE_FILE;
-            default -> RelationshipType.CONTAINS; // fallback
+            case "CONTAINS"     -> RelationshipType.CONTAINS;
+            case "IMPORTS"      -> RelationshipType.IMPORTS;
+            case "EXPORTS"      -> RelationshipType.EXPORTS;
+            case "CALLS"        -> RelationshipType.CALLS;
+            case "RENDERS"      -> RelationshipType.RENDERS;
+            case "USES_HOOK"    -> RelationshipType.USES_HOOK;
+            case "EXTENDS"      -> RelationshipType.EXTENDS;
+            case "SOURCE_FILE"  -> RelationshipType.SOURCE_FILE;
+            case "OF_TYPE"       -> RelationshipType.OF_TYPE;
+            case "HAS_ANNOTATION"-> RelationshipType.HAS_ANNOTATION;
+            case "PROP_DEPENDENCY"-> RelationshipType.PROP_DEPENDENCY;
+            case "IMPLEMENTS"    -> RelationshipType.IMPLEMENTS;
+            case "AST_CHILD"     -> RelationshipType.AST_CHILD;
+            case "CFG_NEXT"      -> RelationshipType.CFG_NEXT;
+            case "DATA_FLOW"     -> RelationshipType.DATA_FLOW;
+            case "DECORATES"     -> RelationshipType.DECORATES;
+            case "YIELDS"        -> RelationshipType.YIELDS;
+            default -> {
+                System.err.printf("Warning: unknown JS rel type '%s', skipping%n", type);
+                yield null;
+            }
         };
     }
 

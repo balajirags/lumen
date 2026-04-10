@@ -583,6 +583,94 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
             }
         },
 
+        // TypeScript class property declarations (e.g. `id: string`, `@Column() name: string`)
+        // Creates Field nodes so get_domain_model() can find them for ER diagrams.
+        ClassProperty(nodePath) {
+            const node = nodePath.node;
+            const parentClass = state.currentClass;
+            if (!parentClass || !node.key) return;
+
+            const fieldName = node.key.name || node.key.value || 'unknown';
+            if (!fieldName || fieldName === 'unknown') return;
+
+            const fieldId = `field:${parentClass.replace('class:', '')}.${fieldName}`;
+            const typeName = _getTsTypeName(node.typeAnnotation);
+
+            graph.addNode(fieldId, 'FIELD', fieldName,
+                `${parentClass.replace('class:', '')}.${fieldName}`, {
+                    lineNumber: node.loc?.start?.line,
+                    type: typeName,
+                    isStatic: node.static || false,
+                    visibility: node.accessibility || 'public',
+                    path: state.filePath,
+                    language: state.fileLanguage,
+                    external: false
+                });
+            graph.addRelationship(parentClass, fieldId, 'CONTAINS');
+
+            // OF_TYPE edge to the type class node if the type looks like a user-defined class
+            if (typeName && /^[A-Z]/.test(typeName)) {
+                const typeId = `class:${typeName}`;
+                if (!graph.hasNode(typeId)) {
+                    graph.addNode(typeId, 'CLASS', typeName, typeName, {
+                        language: state.fileLanguage,
+                        external: true
+                    });
+                }
+                graph.addRelationship(fieldId, typeId, 'OF_TYPE');
+            }
+        },
+
+        // TypeScript interface declarations — members become Field nodes on the interface
+        TSInterfaceDeclaration(nodePath) {
+            const node = nodePath.node;
+            const ifaceName = node.id?.name;
+            if (!ifaceName) return;
+
+            const ifaceId = `class:${state.moduleName}.${ifaceName}`;
+            if (!graph.hasNode(ifaceId)) {
+                graph.addNode(ifaceId, 'CLASS', ifaceName,
+                    `${state.moduleName}.${ifaceName}`, {
+                        lineNumber: node.loc?.start?.line,
+                        path: state.filePath,
+                        language: state.fileLanguage,
+                        external: false,
+                        isInterface: true
+                    });
+                graph.addRelationship(state.moduleId, ifaceId, 'CONTAINS');
+            }
+
+            // Create Field nodes for each interface member
+            for (const member of (node.body?.body || [])) {
+                if (member.type !== 'TSPropertySignature' || !member.key) continue;
+                const memberName = member.key.name || member.key.value;
+                if (!memberName) continue;
+
+                const fieldId = `field:${state.moduleName}.${ifaceName}.${memberName}`;
+                const typeName = _getTsTypeName(member.typeAnnotation);
+                graph.addNode(fieldId, 'FIELD', memberName,
+                    `${state.moduleName}.${ifaceName}.${memberName}`, {
+                        lineNumber: member.loc?.start?.line,
+                        type: typeName,
+                        visibility: 'public',
+                        path: state.filePath,
+                        language: state.fileLanguage,
+                        external: false
+                    });
+                graph.addRelationship(ifaceId, fieldId, 'CONTAINS');
+
+                if (typeName && /^[A-Z]/.test(typeName)) {
+                    const typeId = `class:${typeName}`;
+                    if (!graph.hasNode(typeId)) {
+                        graph.addNode(typeId, 'CLASS', typeName, typeName, {
+                            language: state.fileLanguage, external: true
+                        });
+                    }
+                    graph.addRelationship(fieldId, typeId, 'OF_TYPE');
+                }
+            }
+        },
+
         // Method definitions within classes
         ClassMethod: {
             enter(nodePath) {
@@ -832,6 +920,37 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
     // Second pass: CPG enhancement (statement-level CFG + data flow)
     if (cpgEnhancer) {
         cpgEnhancer.enhanceFile(ast, code, moduleName, relativePath);
+    }
+}
+
+/**
+ * Extract a readable type name from a Babel TSTypeAnnotation node.
+ * Returns 'unknown' when the annotation is absent or unrecognised.
+ */
+function _getTsTypeName(annotation) {
+    if (!annotation) return null;
+    const t = annotation.typeAnnotation || annotation;
+    if (!t) return null;
+    switch (t.type) {
+        case 'TSStringKeyword':  return 'string';
+        case 'TSNumberKeyword':  return 'number';
+        case 'TSBooleanKeyword': return 'boolean';
+        case 'TSAnyKeyword':     return 'any';
+        case 'TSUnknownKeyword': return 'unknown';
+        case 'TSVoidKeyword':    return 'void';
+        case 'TSNullKeyword':    return 'null';
+        case 'TSUndefinedKeyword': return 'undefined';
+        case 'TSObjectKeyword':  return 'object';
+        case 'TSTypeReference':
+            return t.typeName?.name || t.typeName?.right?.name || 'object';
+        case 'TSArrayType':
+            return (_getTsTypeName(t.elementType) || 'unknown') + '[]';
+        case 'TSUnionType':
+            return (t.types || []).map(x => _getTsTypeName(x) || 'unknown').join(' | ');
+        case 'TSOptionalType':
+            return (_getTsTypeName(t.typeAnnotation) || 'unknown') + '?';
+        default:
+            return null;
     }
 }
 
