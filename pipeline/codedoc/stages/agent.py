@@ -164,42 +164,81 @@ def _build_assistant_message(response: Any, use_anthropic_format: bool) -> dict:
     return {"role": "assistant", "content": response.content, "tool_calls": tc_list}
 
 
-def _trim_context(messages: list[dict]) -> tuple[list[dict], int]:
-    """Remove the oldest assistant+tool turn group after the initial system+user messages.
+def _find_oldest_assistant_turn(messages: list[dict]) -> tuple[int | None, int | None]:
+    """Return (start, end) indices of the first assistant+tool turn after any leading messages.
 
-    Keeps messages[0] (system) and messages[1] (user) always. Removes the first
-    assistant message (with tool_calls) and all tool messages immediately following
-    it. Inserts a synthetic user message noting the trimmed content.
-
-    Returns:
-        (trimmed_messages, number_of_messages_removed)
+    Skips system, user, and pinned-user messages at the front. Returns (None, None) if
+    no trimmable turn exists or if trimming would remove the last turn (unsafe).
     """
-    # Find the first assistant message with tool_calls at position >= 2
+    # Find first assistant message that has tool_calls
     trim_start = None
-    trim_end = None
-    for i in range(2, len(messages)):
+    for i in range(len(messages)):
         if messages[i].get("role") == "assistant" and messages[i].get("tool_calls"):
             trim_start = i
-            # Collect all following tool messages
-            for j in range(i + 1, len(messages)):
-                if messages[j].get("role") != "tool":
-                    trim_end = j
-                    break
-            else:
-                trim_end = len(messages)
             break
 
-    if trim_start is None or trim_end is None or trim_end >= len(messages):
-        # Nothing safe to trim
+    if trim_start is None:
+        return None, None
+
+    # Collect all immediately following tool-result messages
+    trim_end = trim_start + 1
+    for j in range(trim_start + 1, len(messages)):
+        if messages[j].get("role") == "tool":
+            trim_end = j + 1
+        else:
+            break
+
+    # Don't trim if this is the last turn (nothing left to work with)
+    if trim_end >= len(messages):
+        return None, None
+
+    return trim_start, trim_end
+
+
+def _trim_context(messages: list[dict], max_turns: int = 1) -> tuple[list[dict], int]:
+    """Remove up to `max_turns` oldest assistant+tool turn groups.
+
+    When over budget by a large margin, removing multiple turns at once prevents
+    the 17-22 single-removal loops seen on large repos. All removals are reported
+    in a single combined placeholder so the LLM sees one coherent gap notice.
+
+    Pinned user messages near the front (inserted before the agentic loop) are
+    never removed — only assistant+tool turns are eligible.
+
+    Returns:
+        (trimmed_messages, total_number_of_messages_removed)
+    """
+    removed_total = 0
+    turn_summaries: list[str] = []
+
+    for turn_n in range(max_turns):
+        trim_start, trim_end = _find_oldest_assistant_turn(messages)
+        if trim_start is None:
+            break
+        n = trim_end - trim_start
+        removed_total += n
+        turn_summaries.append(f"{n} msgs (turn starting at pos {trim_start})")
+        messages = messages[:trim_start] + messages[trim_end:]
+
+    if removed_total == 0:
         return messages, 0
 
-    removed = trim_end - trim_start
+    summary = "; ".join(turn_summaries)
     placeholder = {
         "role": "user",
-        "content": f"[{removed} earlier messages trimmed to stay within context limit]",
+        "content": (
+            f"[Context pruned: removed {removed_total} earlier messages "
+            f"({len(turn_summaries)} turn(s)) to stay within context limit. "
+            f"Details: {summary}. Continue from available context.]"
+        ),
     }
-    trimmed = messages[:2] + [placeholder] + messages[trim_end:]
-    return trimmed, removed
+    # Insert placeholder just before the first remaining assistant turn
+    first_assistant = next(
+        (i for i, m in enumerate(messages) if m.get("role") == "assistant"),
+        len(messages),
+    )
+    trimmed = messages[:first_assistant] + [placeholder] + messages[first_assistant:]
+    return trimmed, removed_total
 
 
 def _dispatch_tool(
@@ -261,6 +300,7 @@ def run_loop(
     max_source_reads: int = 15,
     include_write_artifact: bool = True,
     phase_label: str = "agent",
+    pinned_user_messages: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run the agentic tool loop.
 
@@ -304,6 +344,13 @@ def run_loop(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_request},
     ]
+    # Pinned user messages are inserted right after the initial request and are
+    # never removed by _trim_context() because that function only removes
+    # assistant+tool turns. This keeps critical evidence (e.g. pre-fetched
+    # endpoint data) visible throughout the entire session.
+    if pinned_user_messages:
+        for pinned in pinned_user_messages:
+            messages.append({"role": "user", "content": pinned})
     events: list[str] = []
     artifacts: list[str] = []
     tool_uses = 0
@@ -379,11 +426,16 @@ def run_loop(
             log(f"{tool_tag} → {result_text[:150]}")
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_text})
 
-        # Prune oldest turn group if we're over the context token budget
+        # Prune oldest turn group(s) if over the context token budget.
+        # Remove 3 turns at once when heavily over-budget to avoid the
+        # 17-22 single-removal loops observed on large repos.
         if max_context_tokens > 0 and total_input_tokens > max_context_tokens:
-            messages, removed = _trim_context(messages)
+            overage = total_input_tokens - max_context_tokens
+            turns_to_remove = 3 if overage > 20_000 else 1
+            messages, removed = _trim_context(messages, max_turns=turns_to_remove)
             if removed:
-                log(f"{tag} context pruned: removed {removed} messages (input tokens so far: {total_input_tokens:,})")
+                log(f"{tag} context pruned: removed {removed} messages "
+                    f"(over budget by {overage:,} tokens, {turns_to_remove} turn(s) removed)")
     else:
         log(f"{tag} WARNING: exceeded {max_turns} tool turns — continuing with {len(artifacts)} artifact(s) produced so far")
         notes = next(
@@ -770,7 +822,14 @@ def _build_executive_summary_evidence(
         if rel_path in seen:
             continue
         seen.add(rel_path)
-        excerpt = _artifact_excerpt(root, rel_path)
+        # Give more room to the two most information-dense artifacts.
+        # coupling-hotspots has specific method names + numeric scores;
+        # business-capabilities maps capabilities to concrete services.
+        # The extra ~2k chars per artifact adds ~500 tokens but meaningfully
+        # improves the specificity of the executive summary recommendations.
+        _HIGH_VALUE_EVIDENCE = {"tech/coupling-hotspots.md", "domain/business-capabilities.md"}
+        excerpt_limit = 3_500 if rel_path in _HIGH_VALUE_EVIDENCE else 2_400
+        excerpt = _artifact_excerpt(root, rel_path, limit=excerpt_limit)
         if not excerpt:
             continue
         evidence_sections.append(f"### {rel_path}\n{excerpt}")
@@ -1283,11 +1342,18 @@ def _build_architect_prompt(
 
     prompt += f"\n\n---\n## Orientation Summary\n\n{orientation_summary}\n"
 
-    # Inject current-state artifacts written by analysts
-    ARTIFACT_CHAR_LIMIT = 20_000
+    # Inject current-state artifacts written by analysts.
+    # Use an adaptive per-artifact char limit so the total passed to the architect
+    # stays within ~80k chars regardless of how many artifacts were produced.
+    # This prevents truncation at the model's hard context limit (e.g. 32k on local models).
+    #   4 artifacts (small backend):   80k / 4  = 20k each  (unchanged)
+    #   8 artifacts (fullstack):        80k / 8  = 10k each
+    #  12 artifacts (large fullstack):  80k / 12 =  6.6k each
+    MAX_ARCHITECT_TOTAL_CHARS = 80_000
     artifact_plan = build_artifact_plan(archetype, repo_metrics)
     contract = _artifact_contract(archetype)
     current_state_files = _current_state_artifacts(archetype)
+    ARTIFACT_CHAR_LIMIT = min(20_000, MAX_ARCHITECT_TOTAL_CHARS // max(len(current_state_files), 1))
     prompt += "\n\n---\n## Current State Artifacts (written by analysts)\n\n"
     for rel_path in current_state_files:
         full_path = Path(artifacts_dir) / rel_path
@@ -1419,6 +1485,30 @@ def run_supervisor_agent(
         analyst_system = _build_analyst_system_prompt(
             name, kuzu_path, repo_name, orientation_summary, selected_repo_archetype, repo_metrics=repo_metrics
         )
+
+        # For the flows analyst, pre-fetch endpoint + workflow evidence BEFORE the
+        # agentic loop starts and pin it as a non-prunable user message.
+        # Without this, the evidence is collected in early turns then pruned away
+        # before the write step, producing an empty api-spec.yaml paths section.
+        pinned: list[str] | None = None
+        if name == "analyst/flows":
+            try:
+                endpoint_data = toolkit.call("get_api_endpoints")
+                workflow_data = toolkit.call("get_workflows")
+                has_endpoints = (
+                    endpoint_data
+                    and "No entry points" not in endpoint_data
+                    and "No API endpoints" not in endpoint_data
+                )
+                if has_endpoints:
+                    pinned = [
+                        "[Pinned evidence — survives context pruning, do not re-query these]\n\n"
+                        f"## API Endpoints\n{endpoint_data}\n\n"
+                        f"## Pre-computed Workflows\n{workflow_data}"
+                    ]
+            except Exception:
+                pass  # pre-fetch is best-effort; agent will fall back to tool calls
+
         result = run_loop(
             provider=provider,
             toolkit=toolkit,
@@ -1434,6 +1524,7 @@ def run_supervisor_agent(
             extra_tools={"write_c4_artifact": lambda **kwargs: write_c4_artifact(artifacts_dir, **kwargs)},
             extra_tool_defs=[WRITE_C4_ARTIFACT_ANTHROPIC if use_anthropic_format else WRITE_C4_ARTIFACT_OPENAI],
             phase_label=name,
+            pinned_user_messages=pinned,
         )
         return name, result
 

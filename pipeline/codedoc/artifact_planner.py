@@ -374,7 +374,14 @@ def build_artifact_plan(primary_repo_type: str, repo_metrics: dict[str, Any] | N
                 if signal_counts.get("frontend-ui", 0) < 3:
                     artifact_class = "conditional"
             if repo_type in {"backend-service", "fullstack-app"} and path in {"current-state/api-spec.yaml", "domain/er-diagram.md"}:
-                artifact_class = "core"
+                # api-spec.yaml requires annotated routes or a resolved call graph to produce
+                # valid YAML. Large/xlarge repos with sparse call graphs (JS without @GetMapping,
+                # Kotlin without Spring annotations) fail to produce it reliably — keeping it
+                # conditional for those bands means a missing spec no longer marks the run failed.
+                if path == "current-state/api-spec.yaml" and size_profile == "large":
+                    pass  # stays conditional — won't block run status
+                else:
+                    artifact_class = "core"
             if size_profile == "large" and artifact_class == "conditional":
                 required = False
             else:
