@@ -237,8 +237,6 @@ PACKS: dict[str, ArtifactPackDefinition] = {
     "frontend-core": ArtifactPackDefinition(
         "frontend-core",
         (
-            "architecture/route-map.md",
-            "architecture/component-boundaries.md",
             "architecture/user-journeys.md",
             "current-state/ui-to-api-interactions.md",
             "current-state/state-management.md",
@@ -252,8 +250,6 @@ PACKS: dict[str, ArtifactPackDefinition] = {
         (
             "domain/business-capabilities.md",
             "architecture/c4-context.md",
-            "architecture/route-map.md",
-            "architecture/component-boundaries.md",
             "architecture/user-journeys.md",
             "current-state/ui-to-api-interactions.md",
             "current-state/state-management.md",
@@ -342,19 +338,6 @@ def build_artifact_plan(primary_repo_type: str, repo_metrics: dict[str, Any] | N
     pack_keys = REPO_TYPE_PACKS[repo_type]
     signal_counts = dict((repo_metrics or {}).get("archetype_signal_counts", {}))
 
-    # Artifacts that are unreliable / thin for JS frontends.
-    # route-map and component-boundaries depend on a resolved call graph and typed
-    # component tree that doesn't exist for JavaScript.  Skipping them avoids weak
-    # output that reviewers correctly identified as noise.
-    _JS_FRONTEND_SUPPRESSED = frozenset({
-        "architecture/route-map.md",
-        "architecture/component-boundaries.md",
-    })
-    has_js_frontend = (
-        repo_type in {"frontend-app", "fullstack-app"}
-        and "js-runtime" in capabilities
-    )
-
     artifacts: list[dict[str, Any]] = []
     seen: set[str] = set()
     for pack_key in pack_keys:
@@ -364,15 +347,8 @@ def build_artifact_plan(primary_repo_type: str, repo_metrics: dict[str, Any] | N
                 continue
             seen.add(path)
 
-            # Drop route-map + component-boundaries entirely for JS frontend repos
-            if has_js_frontend and path in _JS_FRONTEND_SUPPRESSED:
-                continue
-
             definition = ARTIFACT_DEFINITIONS[path]
             artifact_class = definition.artifact_class
-            if repo_type == "fullstack-app" and path == "architecture/route-map.md":
-                if signal_counts.get("frontend-ui", 0) < 3:
-                    artifact_class = "conditional"
             if repo_type in {"backend-service", "fullstack-app"} and path in {"current-state/api-spec.yaml", "domain/er-diagram.md"}:
                 # api-spec.yaml requires annotated routes or a resolved call graph to produce
                 # valid YAML. Large/xlarge repos with sparse call graphs (JS without @GetMapping,
