@@ -35,10 +35,16 @@ indexer/parsers/javascript/package-lock.json
 output/
 
 #output folder
-.output/
+output/
+output_v1.0/
 help.txt
 *.tar
 
 # Native distribution build artefacts
 dist/
 releases/
+
+#test
+token-usage
+test-lumen.sh
+task_logs/
