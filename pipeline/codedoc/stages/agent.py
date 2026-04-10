@@ -1951,6 +1951,7 @@ def run_agent(state) -> Any:
     prompt_path = ps.agent_prompt if not is_dict else ps.get("agent_prompt", "")
     max_turns = ps.max_turns if not is_dict else ps.get("max_turns", 60)
     max_context_tokens = ps.max_context_tokens if not is_dict else ps.get("max_context_tokens", 120_000)
+    ollama_num_ctx = (ps.ollama_num_ctx if not is_dict else ps.get("ollama_num_ctx", 131_072)) or 131_072
     verbose = ps.verbose if not is_dict else ps.get("verbose", False)
     repo_path = ps.repo_path if not is_dict else ps.get("repo_path", "")
     selected_archetype = ps.selected_archetype if not is_dict else ps.get("selected_archetype", "")
@@ -1970,7 +1971,7 @@ def run_agent(state) -> Any:
             ps.error = str(e)
         return state
 
-    provider = create_provider(provider=provider_name, model=model, base_url=base_url)
+    provider = create_provider(provider=provider_name, model=model, base_url=base_url, num_ctx=ollama_num_ctx)
 
     use_anthropic = provider_name in ("claude", "anthropic") or (
         provider_name == "auto" and (model.startswith("claude") or model.startswith("anthropic"))
@@ -2123,6 +2124,7 @@ def main() -> None:
         provider=args.provider,
         model=args.model,
         base_url=args.base_url,
+        num_ctx=getattr(args, "ollama_num_ctx", 131_072) or 131_072,
     )
 
     use_anthropic = args.provider in ("claude", "anthropic") or (

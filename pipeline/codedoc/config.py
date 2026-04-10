@@ -22,6 +22,7 @@ _DEFAULTS = {
     "base_url": "",
     "max_turns": 60,
     "max_context_tokens": 120_000,
+    "ollama_num_ctx": 131_072,   # Ollama KV-cache context window; ignored for Claude/OpenAI
     "timeout": 300,
     "repo_size_check": "warn",
     "allow_xlarge": False,
@@ -43,6 +44,7 @@ class Config:
     base_url: str = _DEFAULTS["base_url"]
     max_turns: int = _DEFAULTS["max_turns"]
     max_context_tokens: int = _DEFAULTS["max_context_tokens"]
+    ollama_num_ctx: int = _DEFAULTS["ollama_num_ctx"]
     timeout: int = _DEFAULTS["timeout"]
     repo_size_check: str = _DEFAULTS["repo_size_check"]
     allow_xlarge: bool = _DEFAULTS["allow_xlarge"]
