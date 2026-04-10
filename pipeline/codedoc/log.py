@@ -410,12 +410,14 @@ def _render_agent_columns() -> Columns:
         body.append(Text(f"tool: {tool}", style=tool_style))
         if artifacts is not None:
             body.append(Text(f"artifacts: {artifacts}", style="dim"))
-        # Border and title both use the researcher's accent when running
-        border = accent if status == "running" else {
-            "pending": "dim",
-            "done": "green",
-            "failed": "red",
-        }.get(status, "dim")
+        # Border uses accent when running, green when done, dark-gray when pending.
+        # "dim" made pending boxes nearly invisible; "bright_black" keeps them framed.
+        border = {
+            "running": accent,
+            "done":    "green",
+            "failed":  "red",
+            "pending": "bright_black",
+        }.get(status, "bright_black")
         title_style = f"bold {accent}" if status == "running" else "bold"
         panels.append(Panel(
             Group(*body),
