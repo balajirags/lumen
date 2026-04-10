@@ -326,6 +326,7 @@ def run_loop(
     phase_label: str = "agent",
     pinned_user_messages: list[str] | None = None,
     allowed_artifact_paths: set[str] | None = None,
+    max_prune_turns: int = 1,
 ) -> dict[str, Any]:
     """Run the agentic tool loop.
 
@@ -459,7 +460,7 @@ def run_loop(
         # 17-22 single-removal loops observed on large repos.
         if max_context_tokens > 0 and total_input_tokens > max_context_tokens:
             overage = total_input_tokens - max_context_tokens
-            turns_to_remove = 3 if overage > 20_000 else 1
+            turns_to_remove = min(max_prune_turns, 3 if overage > 20_000 else 1)
             messages, removed = _trim_context(messages, max_turns=turns_to_remove)
             if removed:
                 log(f"{tag} context pruned: removed {removed} messages "
@@ -990,6 +991,7 @@ def _recover_missing_current_state_artifacts(
     missing_paths: list[str],
     analyst_name: str = "analyst/flows",
     allowed_artifact_paths: set[str] | None = None,
+    max_prune_turns: int = 1,
 ) -> dict[str, Any]:
     if not missing_paths:
         return {"status": "done", "artifacts": [], "events": [], "tool_uses": 0, "tool_call_counts": {}, "input_tokens": 0, "output_tokens": 0}
@@ -1027,6 +1029,7 @@ def _recover_missing_current_state_artifacts(
         extra_tool_defs=[WRITE_C4_ARTIFACT_ANTHROPIC if use_anthropic_format else WRITE_C4_ARTIFACT_OPENAI],
         phase_label="analyst/recovery",
         allowed_artifact_paths=allowed_artifact_paths,
+        max_prune_turns=max_prune_turns,
     )
 
 
@@ -1480,6 +1483,12 @@ def run_supervisor_agent(
         if item.get("class") != "manifest"  # manifest is self-managed, always allowed
     } | {"manifests/artifacts.json"}  # always allow the manifest itself
 
+    # Aggressive multi-turn pruning (3 turns at once) only for large/xlarge repos
+    # where 17-22 prune events were observed. For small/medium, 1 turn is enough
+    # and removing more causes the LLM to re-orient unnecessarily.
+    _size_profile = plan.get("size_profile", "small")
+    _max_prune_turns = 3 if _size_profile == "large" else 1
+
     def log(msg: str) -> None:
         all_events.append(msg)
         from codedoc import log as _log
@@ -1527,12 +1536,14 @@ def run_supervisor_agent(
             name, kuzu_path, repo_name, orientation_summary, selected_repo_archetype, repo_metrics=repo_metrics
         )
 
-        # For the flows analyst, pre-fetch endpoint + workflow evidence BEFORE the
-        # agentic loop starts and pin it as a non-prunable user message.
-        # Without this, the evidence is collected in early turns then pruned away
-        # before the write step, producing an empty api-spec.yaml paths section.
+        # For the flows analyst on medium+ repos, pre-fetch endpoint + workflow
+        # evidence BEFORE the loop and pin it as a non-prunable user message.
+        # Pinning is SKIPPED for small repos — they rarely prune more than once
+        # and the extra upfront context causes the agent to over-write, generating
+        # spurious artifacts and inflating output tokens significantly.
         pinned: list[str] | None = None
-        if name == "analyst/flows":
+        _size = plan.get("size_profile", "small")
+        if name == "analyst/flows" and _size in {"medium", "large"}:
             try:
                 endpoint_data = toolkit.call("get_api_endpoints")
                 workflow_data = toolkit.call("get_workflows")
@@ -1543,7 +1554,9 @@ def run_supervisor_agent(
                 )
                 if has_endpoints:
                     pinned = [
-                        "[Pinned evidence — survives context pruning, do not re-query these]\n\n"
+                        "[Pinned endpoint evidence — for api-spec.yaml and business-journeys.md ONLY. "
+                        "Do not use this as a prompt to write additional artifacts beyond your assigned scope. "
+                        "This evidence survives context pruning so you do not need to re-query it.]\n\n"
                         f"## API Endpoints\n{endpoint_data}\n\n"
                         f"## Pre-computed Workflows\n{workflow_data}"
                     ]
@@ -1567,6 +1580,7 @@ def run_supervisor_agent(
             phase_label=name,
             pinned_user_messages=pinned,
             allowed_artifact_paths=_allowed_artifact_paths,
+            max_prune_turns=_max_prune_turns,
         )
         return name, result
 
@@ -1650,6 +1664,7 @@ def run_supervisor_agent(
                 missing_paths=missing_paths,
                 analyst_name=analyst_name,
                 allowed_artifact_paths=_allowed_artifact_paths,
+                max_prune_turns=_max_prune_turns,
             )
             all_events.extend(recovery_result["events"])
             all_artifacts.extend(recovery_result["artifacts"])
@@ -1710,6 +1725,7 @@ def run_supervisor_agent(
             include_write_artifact=True,
             phase_label="architect/recovery",
             allowed_artifact_paths=_allowed_artifact_paths,
+            max_prune_turns=_max_prune_turns,
         )
         arch_result["events"].extend(recovery_result["events"])
         arch_result["artifacts"].extend(recovery_result["artifacts"])
