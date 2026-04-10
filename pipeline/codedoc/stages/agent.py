@@ -407,7 +407,11 @@ def run_loop(
         if verbose:
             print(msg, flush=True)
 
-    log(f"{tag} starting  max_turns={max_turns}")
+    # Log context window size so it's visible in task logs per analyst
+    ctx_kb = f"{max_context_tokens // 1000}k" if max_context_tokens else "unlimited"
+    provider_ctx = getattr(provider, "num_ctx", None)
+    ctx_note = f"  llm_ctx={provider_ctx // 1000}k" if provider_ctx else ""
+    log(f"{tag} starting  max_turns={max_turns}  context_window={ctx_kb}{ctx_note}")
 
     for turn in range(1, max_turns + 1):
         log(f"{tag} LLM call #{turn}")
