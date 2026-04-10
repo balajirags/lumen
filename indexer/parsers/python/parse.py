@@ -142,6 +142,61 @@ class PythonVisitor(ast.NodeVisitor):
                 self.graph.add_node(base_id, "CLASS", base_name, base_name)
                 self.graph.add_relationship(class_id, base_id, "EXTENDS")
         
+        # Extract class-level field declarations for ER diagram support.
+        # Handles: annotated class variables (dataclass, Pydantic, plain typed attrs)
+        # and ORM-style column assignments (SQLAlchemy, Django models).
+        for item in node.body:
+            field_name = None
+            type_name = None
+
+            # Annotated assignment: `name: str` or `name: str = default`
+            if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                field_name = item.target.id
+                type_name = self._get_name(item.annotation) or ast.unparse(item.annotation) if hasattr(ast, 'unparse') else None
+
+            # Untyped assignment that looks like an ORM column:
+            # `id = Column(...)`, `name = models.CharField(...)`, `email = fields.CharField(...)`
+            elif (isinstance(item, ast.Assign)
+                  and len(item.targets) == 1
+                  and isinstance(item.targets[0], ast.Name)
+                  and isinstance(item.value, ast.Call)):
+                call_func = item.value.func
+                call_name = self._get_name(call_func) or ''
+                _ORM_CALLS = {'Column', 'Field', 'CharField', 'IntegerField',
+                              'ForeignKey', 'relationship', 'mapped_column',
+                              'TextField', 'BooleanField', 'DateTimeField',
+                              'DecimalField', 'FloatField', 'EmailField'}
+                func_leaf = call_name.split('.')[-1]
+                if func_leaf in _ORM_CALLS:
+                    field_name = item.targets[0].id
+                    # Try to extract type from first positional arg (e.g. Column(Integer))
+                    if item.value.args:
+                        type_name = self._get_name(item.value.args[0])
+                    else:
+                        type_name = func_leaf  # fallback: use the column type name
+
+            if field_name and not field_name.startswith('_'):
+                field_id = f"field:{self.module_name}.{class_name}.{field_name}"
+                self.graph.add_node(
+                    field_id, "FIELD", field_name,
+                    f"{self.module_name}.{class_name}.{field_name}",
+                    {
+                        "lineNumber": getattr(item, 'lineno', -1),
+                        "type": type_name,
+                        "visibility": "public",
+                        "language": "python",
+                        "external": False,
+                    }
+                )
+                self.graph.add_relationship(class_id, field_id, "CONTAINS")
+                # OF_TYPE edge when the type looks like a user-defined class (PascalCase)
+                if type_name and type_name[:1].isupper():
+                    type_id = f"class:{type_name}"
+                    if not self.graph.has_node(type_id):
+                        self.graph.add_node(type_id, "CLASS", type_name, type_name,
+                                            {"language": "python", "external": True})
+                    self.graph.add_relationship(field_id, type_id, "OF_TYPE")
+
         # Visit class body
         old_class = self.current_class
         self.current_class = class_id

@@ -98,7 +98,8 @@ public class PythonSourceParser implements SourceParser {
             String qualifiedName = node.get("qualifiedName").getAsString();
             
             NodeType type = mapNodeType(typeStr);
-            
+            if (type == null) continue;  // skip unrecognised node types
+
             CodeNode codeNode = new CodeNode(id, type, name, qualifiedName);
             
             // Copy properties
@@ -109,7 +110,9 @@ public class PythonSourceParser implements SourceParser {
                     if (value.isJsonPrimitive()) {
                         JsonPrimitive prim = value.getAsJsonPrimitive();
                         if (prim.isNumber()) {
-                            codeNode = codeNode.withProperty(entry.getKey(), prim.getAsInt());
+                            String raw = prim.getAsString();
+                            Object numVal = raw.contains(".") ? prim.getAsDouble() : prim.getAsInt();
+                            codeNode = codeNode.withProperty(entry.getKey(), numVal);
                         } else if (prim.isBoolean()) {
                             codeNode = codeNode.withProperty(entry.getKey(), prim.getAsBoolean());
                         } else {
@@ -134,6 +137,7 @@ public class PythonSourceParser implements SourceParser {
             String typeStr = rel.get("type").getAsString();
             
             RelationshipType type = mapRelationshipType(typeStr);
+            if (type == null) continue;  // skip unrecognised rel types
             CodeRelationship codeRel = new CodeRelationship(sourceId, targetId, type);
             
             // Copy properties
@@ -162,28 +166,42 @@ public class PythonSourceParser implements SourceParser {
 
     private NodeType mapNodeType(String type) {
         return switch (type.toUpperCase()) {
-            case "MODULE" -> NodeType.MODULE;
-            case "CLASS" -> NodeType.CLASS;
-            case "FUNCTION" -> NodeType.FUNCTION;
-            case "METHOD" -> NodeType.METHOD;
-            case "CONSTRUCTOR" -> NodeType.CONSTRUCTOR;
-            case "ASYNC_FUNCTION" -> NodeType.ASYNC_FUNCTION;
-            case "GENERATOR" -> NodeType.GENERATOR;
-            case "DECORATOR" -> NodeType.DECORATOR;
-            case "FILE" -> NodeType.FILE;
-            default -> NodeType.CLASS; // fallback
+            case "MODULE"        -> NodeType.MODULE;
+            case "CLASS"         -> NodeType.CLASS;
+            case "FUNCTION"      -> NodeType.FUNCTION;
+            case "METHOD"        -> NodeType.METHOD;
+            case "CONSTRUCTOR"   -> NodeType.CONSTRUCTOR;
+            case "ASYNC_FUNCTION"-> NodeType.ASYNC_FUNCTION;
+            case "GENERATOR"     -> NodeType.GENERATOR;
+            case "DECORATOR"     -> NodeType.DECORATOR;
+            case "FILE"          -> NodeType.FILE;
+            case "STATEMENT"     -> NodeType.STATEMENT;  // CPG statement nodes
+            case "FIELD"         -> NodeType.FIELD;       // Python class attributes
+            default -> {
+                System.err.printf("Warning: unknown Python node type '%s', skipping%n", type);
+                yield null;
+            }
         };
     }
 
     private RelationshipType mapRelationshipType(String type) {
         return switch (type.toUpperCase()) {
-            case "CONTAINS" -> RelationshipType.CONTAINS;
-            case "IMPORTS" -> RelationshipType.IMPORTS;
-            case "CALLS" -> RelationshipType.CALLS;
-            case "EXTENDS" -> RelationshipType.EXTENDS;
-            case "DECORATES" -> RelationshipType.DECORATES;
-            case "SOURCE_FILE" -> RelationshipType.SOURCE_FILE;
-            default -> RelationshipType.CONTAINS; // fallback
+            case "CONTAINS"      -> RelationshipType.CONTAINS;
+            case "IMPORTS"       -> RelationshipType.IMPORTS;
+            case "CALLS"         -> RelationshipType.CALLS;
+            case "EXTENDS"       -> RelationshipType.EXTENDS;
+            case "DECORATES"     -> RelationshipType.DECORATES;
+            case "SOURCE_FILE"   -> RelationshipType.SOURCE_FILE;
+            case "AST_CHILD"     -> RelationshipType.AST_CHILD;
+            case "CFG_NEXT"      -> RelationshipType.CFG_NEXT;
+            case "DATA_FLOW"     -> RelationshipType.DATA_FLOW;
+            case "OF_TYPE"       -> RelationshipType.OF_TYPE;
+            case "HAS_ANNOTATION"-> RelationshipType.HAS_ANNOTATION;
+            case "IMPLEMENTS"    -> RelationshipType.IMPLEMENTS;
+            default -> {
+                System.err.printf("Warning: unknown Python rel type '%s', skipping%n", type);
+                yield null;
+            }
         };
     }
 
