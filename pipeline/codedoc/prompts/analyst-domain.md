@@ -68,7 +68,7 @@ The orientation summary passed to you already contains:
 - **Pre-computed Domains** section — functional clusters with cohesion scores and heuristic labels. Use these directly as your capability sections. **Do not call `get_domains` again.**
 - **Pre-computed Workflows** section — end-to-end execution traces. Use these for the ER diagram evidence.
 
-If the orientation summary does NOT contain a Pre-computed Domains section, then fall back to calling `get_domains` first, then `get_architecture_overview`.
+If the **Orientation Summary** section above does NOT contain the heading `## Pre-computed Domains`, call `get_domains` as your **first tool call**, then `get_architecture_overview`.
 
 ## Supporting Tools (call only for drill-down after reading the pre-loaded data)
 

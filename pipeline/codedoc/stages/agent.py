@@ -186,6 +186,21 @@ def _build_assistant_message(response: Any, use_anthropic_format: bool) -> dict:
     return {"role": "assistant", "content": response.content, "tool_calls": tc_list}
 
 
+def _has_content(data: str | None, empty_sentinel: str) -> bool:
+    """Return True if data looks like real content rather than an empty/error result."""
+    if not data:
+        return False
+    stripped = data.strip()
+    if len(stripped) < 50:
+        return False
+    if empty_sentinel.lower() in stripped.lower():
+        return False
+    for marker in ("no results", "not found", "error:", "no data"):
+        if stripped.lower().startswith(marker):
+            return False
+    return True
+
+
 def _find_oldest_assistant_turn(messages: list[dict]) -> tuple[int | None, int | None]:
     """Return (start, end) indices of the first assistant+tool turn after any leading messages.
 
@@ -1501,28 +1516,41 @@ def run_supervisor_agent(
     try:
         p1_backend = KuzuBackend(kuzu_path)
         p1_toolkit = ReverseEngineerToolkit(p1_backend, repo_path=repo_path)
-        orientation_summary = p1_toolkit.call("get_architecture_summary")
 
-        # Pre-fetch Domain and Workflow data and embed directly into the orientation
-        # summary. This ensures every analyst already has the output of the new
-        # aggregate tools — removing the dependency on the model deciding to call them.
-        # Without this, local models ignore the "Start with get_domains" prompt hint
-        # and use lower-level tools (get_callees × 19) that generate more context.
+        # Soft fallback: if the architecture summary fails, continue with a stub
+        # so analysts can still orient themselves using direct tool calls.
+        try:
+            orientation_summary = p1_toolkit.call("get_architecture_summary")
+        except Exception as e:
+            log(f"[supervisor] WARNING: orientation query failed ({e}) — continuing with stub")
+            orientation_summary = (
+                "[Orientation data unavailable — graph query failed. "
+                "Use get_schema, get_architecture_overview, and get_package_contents "
+                "to orient yourself before writing artifacts.]"
+            )
+
+        # Pre-fetch Domains and Workflows and embed into orientation summary.
+        # Analysts receive this data pre-loaded so they don't need to call the tools
+        # themselves — local models ignore prompt hints to call specific tools first.
         try:
             domain_data = p1_toolkit.call("get_domains")
-            if domain_data and "No domains" not in domain_data:
+            if _has_content(domain_data, "No domains"):
                 orientation_summary += f"\n\n---\n## Pre-computed Domains\n\n{domain_data}"
                 log("[supervisor] Domains pre-fetched and embedded in orientation")
-        except Exception:
-            pass
+            else:
+                log("[supervisor] Domains pre-fetch returned no results — analysts will fall back to get_domains")
+        except Exception as e:
+            log(f"[supervisor] WARNING: get_domains pre-fetch failed ({e}) — analysts will call it themselves")
 
         try:
             workflow_data = p1_toolkit.call("get_workflows")
-            if workflow_data and "No workflows" not in workflow_data:
+            if _has_content(workflow_data, "No workflows"):
                 orientation_summary += f"\n\n---\n## Pre-computed Workflows\n\n{workflow_data}"
                 log("[supervisor] Workflows pre-fetched and embedded in orientation")
-        except Exception:
-            pass
+            else:
+                log("[supervisor] Workflows pre-fetch returned no results — analysts will fall back to get_workflows")
+        except Exception as e:
+            log(f"[supervisor] WARNING: get_workflows pre-fetch failed ({e}) — analysts will call it themselves")
 
         log(f"[supervisor] Orientation complete ({len(orientation_summary):,} chars)")
         log(f"[supervisor] Repo archetype selected: {selected_repo_archetype}")

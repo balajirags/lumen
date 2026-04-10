@@ -93,7 +93,7 @@ The orientation summary passed to you already contains:
 - **Pre-computed Workflows** section — end-to-end HTTP traces with `httpMethod`, `httpPath`, `stepCount`, `type`. Use these directly for `business-journeys.md`. **Do not call `get_workflows` again.**
 - **Pre-computed Domains** section — functional clusters for context.
 
-If the orientation summary does NOT contain a Pre-computed Workflows section, call `get_workflows` first.
+If the **Orientation Summary** section above does NOT contain the heading `## Pre-computed Workflows`, call `get_workflows` as your **first tool call**.
 
 To get the step-by-step method chain for a specific workflow (for the sequenceDiagram), call `get_workflow_steps(workflow_name)` — this one you DO need to call per workflow.
 
