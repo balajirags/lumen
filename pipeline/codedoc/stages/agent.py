@@ -444,8 +444,23 @@ def run_loop(
         from codedoc import log as _log
         _log.print_progress_line(phase_label, turn, max_turns, first_tool)
 
-        # No tool calls → agent is done
+        # No tool calls → agent wants to stop.
+        # If it hasn't written any artifacts yet and still has turns left,
+        # inject a hard reminder so weaker local models don't silently quit.
         if not response.tool_calls:
+            if not artifacts and turn < max_turns - 1 and include_write_artifact:
+                log(f"{tag} model stopped without writing — injecting write reminder (turn {turn})")
+                if response.content:
+                    messages.append({"role": "assistant", "content": response.content})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "You have not called write_artifact yet. "
+                        "Your task is NOT complete until you write your assigned artifacts. "
+                        "Call write_artifact now with the content you have gathered."
+                    ),
+                })
+                continue  # give the model another turn to write
             log(f"{tag} model finished (stop)")
             if response.content:
                 messages.append({"role": "assistant", "content": response.content})
