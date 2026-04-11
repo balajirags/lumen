@@ -43,6 +43,7 @@ help.txt
 # Native distribution build artefacts
 dist/
 releases/
+.learnings/
 
 #test
 token-usage
@@ -62,3 +63,4 @@ output_v2.0/
 output_v3.0/
 output_v4.0/
 output_v5.0/
+
