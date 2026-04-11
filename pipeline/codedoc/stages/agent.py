@@ -1103,54 +1103,6 @@ def _backfill_required_artifacts(kuzu_path: str, repo_path: str, artifacts_dir: 
     backend = KuzuBackend(kuzu_path)
     toolkit = ReverseEngineerToolkit(backend, repo_path=repo_path)
 
-    route_target = root / "architecture" / "route-map.md"
-    if archetype in {"frontend-app", "fullstack-app"} and not route_target.exists():
-        route_summary = toolkit.call("get_route_component_map")
-        if "UI Entry Surfaces (SPA Fallback)" in route_summary:
-            intro = (
-                "# Route Map\n\n"
-                "## UI Entry Surface [Observed]\n\n"
-                "This frontend does not expose a strong router/page graph. The current-state view is therefore centered on the SPA entry modules and top-level rendered components captured in the graph.\n\n"
-                "## Entry Modules And Root Components [Observed]\n\n"
-                "```text\n"
-                f"{route_summary}\n"
-                "```\n\n"
-                "## Interpretation [Inferred]\n\n"
-                "- Treat the listed App/main modules as UI entry surfaces rather than URL routes.\n"
-                "- Treat the rendered child components as the primary feature shells or tabs exposed by the SPA.\n"
-                "- If a separate routing layer exists, it is not strongly represented in the current graph and should be documented as a follow-up gap.\n"
-            )
-            content = intro
-        else:
-            content = (
-                "# Route Map\n\n"
-                "## Route And Page Surface [Observed]\n\n"
-                "The following route/page/layout view was generated directly from the knowledge graph.\n\n"
-                "```text\n"
-                f"{route_summary}\n"
-                "```\n"
-            )
-        _write_artifact(artifacts_dir, "architecture/route-map.md", content)
-        generated.append(str(route_target))
-
-    component_target = root / "architecture" / "component-boundaries.md"
-    if archetype in {"frontend-app", "fullstack-app"} and not component_target.exists():
-        component_tree = toolkit.call("get_component_tree")
-        boundaries = toolkit.call("get_component_boundary_map")
-        content = (
-            "# Component Boundaries\n\n"
-            "## Component Tree [Observed]\n\n"
-            "```text\n"
-            f"{component_tree}\n"
-            "```\n\n"
-            "## Boundary Summary [Observed]\n\n"
-            "```text\n"
-            f"{boundaries}\n"
-            "```\n"
-        )
-        _write_artifact(artifacts_dir, "architecture/component-boundaries.md", content)
-        generated.append(str(component_target))
-
     state_target = root / "current-state" / "state-management.md"
     if archetype in {"frontend-app", "fullstack-app"} and not state_target.exists():
         ownership = toolkit.call("get_state_ownership_map")
