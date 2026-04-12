@@ -34,6 +34,9 @@ fi
 if [ -n "${OPENAI_API_KEY:-}" ]; then
   docker_args+=( -e "OPENAI_API_KEY=${OPENAI_API_KEY}" )
 fi
+if [ -n "${CMG_JS_HEAP_MB:-}" ]; then
+  docker_args+=( -e "CMG_JS_HEAP_MB=${CMG_JS_HEAP_MB}" )
+fi
 
 cmd=( "${DOCKER_IMAGE}" run /repo --repo-name "$(basename "${REPO}")" --output-dir /workspace/output )
 if [ -n "${ARGS}" ]; then

@@ -34,7 +34,9 @@ if command -v node >/dev/null 2>&1; then
     (cd "$SCRIPT_DIR/parsers/javascript" && npm install --silent 2>/dev/null)
     cat > "$BIN_DIR/cmg-js" <<EOF
 #!/usr/bin/env bash
-exec node "$SCRIPT_DIR/parsers/javascript/parse.js" "\$@"
+NODE_ARGS=()
+[ -n "\${CMG_JS_HEAP_MB:-}" ] && NODE_ARGS+=(--max-old-space-size="\$CMG_JS_HEAP_MB")
+exec node "\${NODE_ARGS[@]}" "$SCRIPT_DIR/parsers/javascript/parse.js" "\$@"
 EOF
     chmod +x "$BIN_DIR/cmg-js"
     echo "  ✓ bin/cmg-js"

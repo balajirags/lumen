@@ -411,6 +411,13 @@ class CpgEnhancer {
     }
 }
 
+const SKIP_DIRS = new Set([
+    'node_modules', 'dist', 'build', 'coverage', 'target',
+    '__pycache__', 'venv', '.venv', '.gradle',
+    '.tox', '.pytest_cache',
+    'vendor', 'fixtures', '__fixtures__', '__snapshots__',
+]);
+
 function collectFiles(dir, extensions) {
     const files = [];
     
@@ -419,11 +426,16 @@ function collectFiles(dir, extensions) {
         for (const entry of entries) {
             const fullPath = path.join(currentDir, entry.name);
             if (entry.isDirectory()) {
-                // Skip node_modules, build directories, etc.
-                if (!['node_modules', 'dist', 'build', '.git', 'coverage'].includes(entry.name)) {
-                    walk(fullPath);
+                // Skip dot-directories, node_modules, build outputs, etc.
+                if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) {
+                    continue;
                 }
+                walk(fullPath);
             } else if (entry.isFile() && extensions.some(ext => entry.name.endsWith(ext))) {
+                // Skip minified / bundled files — garbage ASTs, waste memory
+                if (entry.name.endsWith('.min.js') || entry.name.endsWith('.bundle.js') || entry.name.endsWith('.chunk.js')) {
+                    continue;
+                }
                 files.push(fullPath);
             }
         }
