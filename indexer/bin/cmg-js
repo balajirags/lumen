@@ -1,2 +1,4 @@
 #!/usr/bin/env bash
-exec node "/Users/gbalaji/projects/personal/lumen/indexer/parsers/javascript/parse.js" "$@"
+NODE_ARGS=()
+[ -n "${CMG_JS_HEAP_MB:-}" ] && NODE_ARGS+=(--max-old-space-size="$CMG_JS_HEAP_MB")
+exec node "${NODE_ARGS[@]}" "/Users/gbalaji/projects/personal/lumen/indexer/parsers/javascript/parse.js" "$@"

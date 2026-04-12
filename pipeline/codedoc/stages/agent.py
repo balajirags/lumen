@@ -90,6 +90,22 @@ def _write_artifact(
             f"Use one of those exact paths."
         )
 
+    # Strip LLM wrapper artefacts: filename-echo heading and code fences.
+    # Order varies (heading then fence, or fence then heading), so loop.
+    stripped = content.strip()
+    for _ in range(2):
+        # Strip filename-echo heading (e.g. "# summary/executive-summary.md")
+        if stripped.startswith(f"# {clean}"):
+            stripped = stripped[len(f"# {clean}"):].lstrip("\n")
+        # Strip markdown code-fence wrapper
+        if stripped.startswith("```"):
+            first_nl = stripped.index("\n") if "\n" in stripped else len(stripped)
+            inner = stripped[first_nl + 1:]
+            if inner.rstrip().endswith("```"):
+                inner = inner.rstrip()[:-3].rstrip()
+            stripped = inner
+    content = stripped
+
     dest = Path(output_root) / clean
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(content, encoding="utf-8")
