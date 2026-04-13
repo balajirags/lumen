@@ -15,7 +15,7 @@ dependencies = [
     "openai>=1.0,<3",
     "mkdocs-material>=9.0,<10",
     "mkdocs-build-plantuml-plugin>=0.10,<3",
-    "rich>=13.0,<15",
+    "rich>=15.0.0,<16",
 ]
 
 [project.optional-dependencies]
