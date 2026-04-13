@@ -14,7 +14,7 @@ dependencies = [
     "anthropic>=0.39,<1",
     "openai>=1.0,<3",
     "mkdocs-material>=9.0,<10",
-    "mkdocs-build-plantuml-plugin>=0.10,<3",
+    "mkdocs-build-plantuml-plugin>=2.1.0,<3",
     "rich>=13.0,<15",
 ]
 
