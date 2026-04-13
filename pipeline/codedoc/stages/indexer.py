@@ -86,7 +86,8 @@ def run_indexer(state: PipelineState) -> PipelineState:
         state.log(stage, f"Detected capabilities: {', '.join(state.capabilities)}")
 
     # index.kuzu/ is the container directory passed as --db-path.
-    # All binaries create {source_dir_name}-db inside it (e.g. index.kuzu/repo-db).
+    # All binaries create {repo_name}-db inside it.
+    effective_repo_name = state.repo_name or repo.name
     kuzu_dir = Path(state.output_dir).resolve() / "index.kuzu"
     kuzu_dir.mkdir(parents=True, exist_ok=True)
     _log.start_indexer_progress([LANGUAGE_CATEGORY_BY_KEY[lang].display_name for lang in ordered_languages])
@@ -103,8 +104,8 @@ def run_indexer(state: PipelineState) -> PipelineState:
 
             display = definition.display_name
             _log.update_indexer_progress(display, "running")
-            state.log(stage, f"Running {binary_name} for {display} → {kuzu_dir}/{repo.name}-db")
-            cmd = [str(binary), str(repo), _DB_FLAG, str(kuzu_dir)]
+            state.log(stage, f"Running {binary_name} for {display} → {kuzu_dir}/{effective_repo_name}-db")
+            cmd = [str(binary), str(repo), _DB_FLAG, str(kuzu_dir), "--repo-name", effective_repo_name]
             if definition.cli_language:
                 cmd.extend(["--language", definition.cli_language])
             try:
@@ -138,9 +139,9 @@ def run_indexer(state: PipelineState) -> PipelineState:
         _log.stop_indexer_progress()
 
     # --- Locate the database created by the indexer ---
-    # All binaries (Java, JS, Python) create {source_dir_name}-db inside --db-path.
+    # All binaries (Java, JS, Python) create {repo_name}-db inside --db-path.
     # With KuzuDB 0.11.x this is a single FILE; older versions produce a directory.
-    expected = kuzu_dir / f"{repo.name}-db"
+    expected = kuzu_dir / f"{effective_repo_name}-db"
     if expected.exists():
         kuzu_path = str(expected)
         kuzu = expected
@@ -150,7 +151,7 @@ def run_indexer(state: PipelineState) -> PipelineState:
         if len(entries) == 1:
             kuzu_path = str(entries[0])
             kuzu = entries[0]
-            state.log(stage, f"KuzuDB entry name '{entries[0].name}' differs from expected '{repo.name}-db'")
+            state.log(stage, f"KuzuDB entry name '{entries[0].name}' differs from expected '{effective_repo_name}-db'")
         elif len(entries) == 0:
             state.log(stage, f"stdout:\n{proc.stdout[-1000:]}" if proc.stdout else "No stdout")
             raise FileNotFoundError(
@@ -161,7 +162,7 @@ def run_indexer(state: PipelineState) -> PipelineState:
             state.log(stage, f"stdout:\n{proc.stdout[-1000:]}" if proc.stdout else "No stdout")
             raise FileNotFoundError(
                 f"Indexer created {len(entries)} entries in {kuzu_dir} but none match "
-                f"expected '{repo.name}-db'. Found: {[e.name for e in entries]}"
+                f"expected '{effective_repo_name}-db'. Found: {[e.name for e in entries]}"
             )
 
     total_size = sum(f.stat().st_size for f in (kuzu.rglob("*") if kuzu.is_dir() else [kuzu]) if f.is_file())

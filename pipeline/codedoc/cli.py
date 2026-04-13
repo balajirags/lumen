@@ -164,6 +164,7 @@ def mcp(
     if db_path:
         final_db_path = str(Path(db_path).resolve())
         effective_repo_path = str(Path(served_repo_path).resolve()) if served_repo_path else ""
+        effective_repo_name = repo_name or ""
     else:
         cfg = load_config({
             "output_dir": output_dir,
@@ -191,10 +192,11 @@ def mcp(
             sys.exit(1)
         final_db_path = state.kuzu_path
         effective_repo_path = state.repo_path
+        effective_repo_name = state.repo_name
 
     command = format_mcp_command(final_db_path, effective_repo_path)
-    snippets = format_client_snippets(final_db_path, effective_repo_path)
-    _log.print_mcp_panel(final_db_path, command, snippets)
+    snippets = format_client_snippets(final_db_path, effective_repo_path, repo_name=effective_repo_name)
+    _log.print_mcp_panel(final_db_path, command, snippets, repo_name=effective_repo_name)
 
     if print_config:
         sys.exit(0)
@@ -238,6 +240,7 @@ def mcp_http(
     if db_path:
         final_db_path = str(Path(db_path).resolve())
         effective_repo_path = str(Path(served_repo_path).resolve()) if served_repo_path else ""
+        effective_repo_name = repo_name or ""
     else:
         cfg = load_config({
             "output_dir": output_dir,
@@ -268,6 +271,7 @@ def mcp_http(
             sys.exit(1)
         final_db_path = state.kuzu_path
         effective_repo_path = state.repo_path
+        effective_repo_name = state.repo_name
 
     url = format_mcp_http_url(host=host, port=port, path=path)
     command = format_mcp_http_command(
@@ -283,8 +287,8 @@ def mcp_http(
         port=port,
         path=path,
     )
-    snippets = format_http_client_snippets(url, final_db_path, effective_repo_path)
-    _log.print_mcp_http_panel(final_db_path, url, command, docker_command, snippets)
+    snippets = format_http_client_snippets(url, final_db_path, effective_repo_path, repo_name=effective_repo_name)
+    _log.print_mcp_http_panel(final_db_path, url, command, docker_command, snippets, repo_name=effective_repo_name)
 
     if print_config:
         sys.exit(0)

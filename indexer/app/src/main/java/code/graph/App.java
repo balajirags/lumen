@@ -69,6 +69,9 @@ public class App implements Callable<Integer> {
     @Option(names = {"--incremental"}, description = "Only re-parse files that have changed since the last run.")
     private boolean incremental;
 
+    @Option(names = {"--repo-name"}, description = "Logical repository name (overrides source directory name for DB naming).")
+    private String repoName;
+
     @Option(names = {"-l", "--language"}, description = "Source language: java, javascript, python, kotlin, jvm (default: auto-detect)")
     private String language;
 
@@ -97,7 +100,9 @@ public class App implements Callable<Integer> {
         }
 
         // Derive database name from project directory and always use <db-path>/<project-name>-db
-        String projectName = sourcePath.toAbsolutePath().normalize().getFileName().toString();
+        String projectName = (repoName != null && !repoName.isEmpty())
+                ? repoName
+                : sourcePath.toAbsolutePath().normalize().getFileName().toString();
         if (neo4jDatabase == null || neo4jDatabase.equals(config.getNeo4jDatabase())) {
             if ("neo4j".equals(config.getNeo4jDatabase())) {
                 neo4jDatabase = projectName;

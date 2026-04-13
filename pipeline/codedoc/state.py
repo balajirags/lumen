@@ -13,6 +13,7 @@ class PipelineState:
 
     # --- Inputs ---
     repo_path: str = ""
+    repo_name: str = ""
     output_dir: str = ""
     repo_metrics: dict[str, Any] | None = None
 

@@ -95,10 +95,10 @@ def log_to_console(stage: str, message: str, ts: str) -> None:
 # Pipeline-level banners
 # ---------------------------------------------------------------------------
 
-def print_pipeline_start(repo: str, output_dir: str) -> None:  # noqa: ARG001
+def print_pipeline_start(repo: str, output_dir: str, *, repo_name: str = "") -> None:  # noqa: ARG001
     from pathlib import Path
 
-    repo_name = Path(repo).name
+    display_name = repo_name or Path(repo).name
     intro = (
         "Illuminate any codebase. lumen reverse-engineers a source repository into a full "
         "documentation site — architecture diagrams, domain model, migration roadmap — "
@@ -107,7 +107,7 @@ def print_pipeline_start(repo: str, output_dir: str) -> None:  # noqa: ARG001
     details = Table.grid(padding=(0, 2))
     details.add_column(style="dim", no_wrap=True)
     details.add_column()
-    details.add_row("Repo", repo_name)
+    details.add_row("Repo", display_name)
     details.add_row("Source", str(repo))
     details.add_row("Output", str(output_dir))
     header = Group(
@@ -124,7 +124,7 @@ def print_pipeline_start(repo: str, output_dir: str) -> None:  # noqa: ARG001
             title="[bold cyan] Lumen [/bold cyan]",
         )
     )
-    console.print(Rule(f"Lumen · {repo_name}", style="bold cyan"))
+    console.print(Rule(f"Lumen · {display_name}", style="bold cyan"))
 
 
 def print_stage_header(n: int, name: str) -> None:
@@ -592,9 +592,9 @@ def print_failure_panel(
     )
 
 
-def print_mcp_panel(db_path: str, command: str, snippets: dict[str, str]) -> None:
+def print_mcp_panel(db_path: str, command: str, snippets: dict[str, str], repo_name: str = "") -> None:
     from codedoc.mcp_server import format_server_identity
-    identity = format_server_identity(db_path)
+    identity = format_server_identity(db_path, repo_name=repo_name)
     lines = [
         f"[dim]Repo    [/dim]  {identity['repo_name']}",
         f"[dim]Kuzu DB [/dim]  {db_path}",
@@ -611,9 +611,10 @@ def print_mcp_http_panel(
     command: str,
     docker_command: str,
     snippets: dict[str, str],
+    repo_name: str = "",
 ) -> None:
     from codedoc.mcp_server import format_server_identity
-    identity = format_server_identity(db_path)
+    identity = format_server_identity(db_path, repo_name=repo_name)
     lines = [
         f"[dim]Repo[/dim]    {identity['repo_name']}",
         f"[dim]DB[/dim]      {db_path}",

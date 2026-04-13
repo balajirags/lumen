@@ -46,6 +46,7 @@ def run_mcp_http_pipeline(
         verbose=verbose,
         timeout_explicit=timeout_explicit,
         indexer_bin_dir=indexer_bin_dir,
+        repo_name=resolved_repo_name,
     )
     log_pipeline_start(state, repo_path=str(repo), run_dir=run_dir, label="MCP HTTP pipeline")
 

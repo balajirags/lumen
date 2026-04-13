@@ -15,7 +15,9 @@ def _pipeline_dir() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _repo_label(db_path: str, repo_path: str = "") -> str:
+def _repo_label(db_path: str, repo_path: str = "", repo_name: str = "") -> str:
+    if repo_name:
+        return repo_name
     if repo_path:
         return Path(repo_path).name or "unknown-repo"
     db_name = Path(db_path).name
@@ -24,8 +26,8 @@ def _repo_label(db_path: str, repo_path: str = "") -> str:
     return db_name or "unknown-repo"
 
 
-def format_server_identity(db_path: str, repo_path: str = "") -> dict[str, str]:
-    repo_name = _repo_label(db_path, repo_path)
+def format_server_identity(db_path: str, repo_path: str = "", repo_name: str = "") -> dict[str, str]:
+    repo_name = _repo_label(db_path, repo_path, repo_name)
     return {
         "repo_name": repo_name,
         "repo_path": repo_path or "",
@@ -174,8 +176,8 @@ def format_mcp_http_docker_command(
     return " ".join(parts)
 
 
-def format_client_snippets(db_path: str, repo_path: str = "") -> dict[str, str]:
-    identity = format_server_identity(db_path, repo_path)
+def format_client_snippets(db_path: str, repo_path: str = "", repo_name: str = "") -> dict[str, str]:
+    identity = format_server_identity(db_path, repo_path, repo_name)
     pipeline_dir = str(_pipeline_dir())
     uv_args = ["--directory", pipeline_dir, "run", "lumen", "mcp", "--db-path", db_path]
     global_args = ["mcp", "--db-path", db_path]
@@ -232,8 +234,8 @@ def format_client_snippets(db_path: str, repo_path: str = "") -> dict[str, str]:
     }
 
 
-def format_http_client_snippets(url: str, db_path: str = "", repo_path: str = "") -> dict[str, str]:
-    identity = format_server_identity(db_path, repo_path) if db_path or repo_path else {"server_name": "lumen"}
+def format_http_client_snippets(url: str, db_path: str = "", repo_path: str = "", repo_name: str = "") -> dict[str, str]:
+    identity = format_server_identity(db_path, repo_path, repo_name) if db_path or repo_path or repo_name else {"server_name": "lumen"}
     return {
         "VS Code / Claude Desktop (HTTP)": (
             "{\n"

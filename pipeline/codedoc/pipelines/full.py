@@ -65,6 +65,7 @@ def run_pipeline(
         agent_prompt=agent_prompt,
         build_script=build_script,
         site_dir=str(Path(output_dir) / "doc-site"),
+        repo_name=resolved_repo_name,
     )
     log_pipeline_start(state, repo_path=str(repo), run_dir=run_dir, label="pipeline")
 

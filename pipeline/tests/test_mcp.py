@@ -70,6 +70,23 @@ def test_format_server_identity_falls_back_to_db_name():
     assert identity["repo_name"] == "admin-frontend"
 
 
+def test_format_server_identity_explicit_repo_name_overrides_path():
+    identity = format_server_identity("/tmp/repo-db", "/repo", repo_name="inventory-service")
+    assert identity["repo_name"] == "inventory-service"
+    assert identity["server_name"] == "lumen-inventory-service"
+
+
+def test_format_http_client_snippets_use_repo_name_override():
+    snippets = format_http_client_snippets(
+        "http://127.0.0.1:8765/mcp",
+        "/tmp/repo-db",
+        "/repo",
+        repo_name="inventory-service",
+    )
+    assert "\"lumen-inventory-service\"" in snippets["VS Code / Claude Desktop (HTTP)"]
+    assert "\"name\": \"lumen-inventory-service\"" in snippets["Cursor / Generic MCP (HTTP)"]
+
+
 def test_mcp_cli_requires_repo_or_db():
     runner = CliRunner()
     result = runner.invoke(main, ["mcp"])

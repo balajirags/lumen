@@ -749,17 +749,20 @@ def main():
     parser.add_argument('--neo4j-user', default='neo4j')
     parser.add_argument('--neo4j-password', default='')
     parser.add_argument('--neo4j-database', default='neo4j')
+    parser.add_argument('--repo-name', default=None,
+                        help='Logical repository name (overrides directory name for DB naming)')
     
     args = parser.parse_args()
     root_dir = Path(args.directory).resolve()
 
     # --db-path must be a directory; always generate DB file name inside it
+    repo_name = args.repo_name or root_dir.name
     if args.db_path is None:
         db_dir = Path.cwd() / 'kuzu_db'
     else:
         db_dir = Path(args.db_path)
     db_dir.mkdir(parents=True, exist_ok=True)
-    args.db_path = str(db_dir / f'{root_dir.name}-db')
+    args.db_path = str(db_dir / f'{repo_name}-db')
 
     if not root_dir.exists():
         print(f"Directory not found: {root_dir}", file=sys.stderr)

@@ -987,7 +987,7 @@ function main() {
     }
 
     const rootDir = path.resolve(args[0]);
-    const repoName = path.basename(rootDir);
+    let repoName = null;
     let extensions = DEFAULT_EXTENSIONS;
     let backend = 'kuzu';
     let dbPath = null;
@@ -1007,7 +1007,12 @@ function main() {
             case '--neo4j-user': neo4jUser = args[++i]; break;
             case '--neo4j-password': neo4jPassword = args[++i]; break;
             case '--neo4j-database': neo4jDatabase = args[++i]; break;
+            case '--repo-name': repoName = args[++i]; break;
         }
+    }
+
+    if (!repoName) {
+        repoName = path.basename(rootDir);
     }
 
     // --db-path must be a directory; always generate DB file name inside it

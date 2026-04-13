@@ -38,10 +38,12 @@ def init_state(
     agent_prompt: str = "",
     build_script: str = "",
     site_dir: str = "",
+    repo_name: str = "",
 ) -> PipelineState:
     """Build the initial state shared by all pipeline modes."""
     return PipelineState(
         repo_path=repo_path,
+        repo_name=repo_name,
         output_dir=str(run_dir),
         model=model,
         provider=provider,
@@ -71,7 +73,7 @@ def log_pipeline_start(state: PipelineState, *, repo_path: str, run_dir: Path, l
     """Emit standard startup logs for a pipeline run."""
     from codedoc import log as _log
 
-    _log.print_pipeline_start(repo_path, str(run_dir))
+    _log.print_pipeline_start(repo_path, str(run_dir), repo_name=state.repo_name)
     state.log("pipeline", f"Starting {label} for {repo_path}")
     state.log("pipeline", f"Output directory: {run_dir}")
 
