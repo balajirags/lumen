@@ -24,6 +24,9 @@ This is a monorepo containing two sub-projects:
 
 ## How to install and run
 
+Three modes: Docker, build-from-source, and pre-built native bundle.
+Set provider credentials via `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` environment variables.
+
 ### Docker (recommended — no local prerequisites)
 
 ```bash
@@ -36,8 +39,6 @@ make lumen-docker-run REPO=/path/to/repo \
   ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
 
 make lumen-docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
-make lumen-docker-docs
-
 make lumen-docker-docs  # serve generated doc-site → http://localhost:8081
 ```
 
@@ -53,18 +54,44 @@ Set `--allow-xlarge` if you explicitly want to continue the full docs pipeline a
 `make lumen-docker-docs` is the only supported docs viewer path. It rebuilds the doc-site from
 the existing `./output` directory before serving, so pipeline reruns are not required for docs refreshes.
 
-### Native install
+### Build from source (developer)
+
+Requires Java 21, Node 20, Python 3.11+, and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-make lumen-install-indexer   # runs indexer/install.sh — requires Java 21, Node 18, Python 3
-make lumen-install-pipeline  # cd pipeline && uv sync
+make lumen-install          # builds indexer + installs pipeline via uv
 
-# Run the pipeline (ARGS required: specify provider + model)
+# Run the pipeline
 make lumen-run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
 make lumen-run REPO=/path/to/repo ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'
+
+# Or invoke lumen directly
+cd pipeline && uv run lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
 ```
 
-Set provider credentials via environment variables such as `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
+### Native bundle (no Docker, no dev tools)
+
+Pre-built tarballs bundle JRE + Node + Python venv. Only `graphviz` is needed on the target.
+
+One-line install (downloads latest release from GitHub):
+```bash
+curl -fsSL https://raw.githubusercontent.com/<owner>/lumen/main/scripts/install-lumen.sh | bash
+```
+
+Build a native tarball from source:
+```bash
+make lumen-native-build                    # uses version from pyproject.toml
+make lumen-native-build VERSION=v1.2.3     # override version
+```
+
+Output: `releases/lumen-<version>-<os>-<arch>.tar.gz` with `.sha256` checksum.
+The bundle includes `verify.sh` (SHA256 integrity check) and `install.sh` (symlinks into `~/.local/bin`).
+
+After install:
+```bash
+lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
+lumen mcp /path/to/repo    # HTTP MCP server
+```
 
 ---
 
@@ -258,6 +285,23 @@ Release packaging:
 - `TAG` is only used for release bundle naming
 - it does not create git tags automatically
 
+Native distribution:
+- `scripts/build-native.sh` builds a self-contained platform tarball (JRE + Node + Python venv + all parsers)
+- `scripts/install-lumen.sh` is a secure one-line installer: detects OS/arch, downloads from GitHub Releases, verifies SHA256, extracts to `~/.local/share/lumen/`, symlinks to `~/.local/bin/lumen`
+- `make lumen-native-build` invokes `build-native.sh`; supports `VERSION=v1.2.3` override
+- `.github/workflows/release.yml` builds platform tarballs on `v*` tags for macOS (arm64, amd64) and Linux (amd64, arm64 via QEMU)
+- `.github/dependabot.yml` runs weekly dependency update PRs for Gradle, npm, pip, and GitHub Actions
+- Bundle includes `verify.sh` (SHA256 integrity check) and `install.sh` (symlink into `~/.local/bin`)
+- The `lumen` launcher in the bundle auto-generates `.codedoc.toml` with correct absolute paths and warns if graphviz is missing
+
+Release workflow:
+- Version source of truth: `pipeline/pyproject.toml` (`version = "X.Y.Z"`)
+- Also updated by bump script: `indexer/parsers/javascript/package.json`, `pipeline/uv.lock`
+- `scripts/bump-version.sh <version>` updates all version files and regenerates `uv.lock`
+- `make release VERSION=0.2.0` bumps versions, commits, tags — then prints the push command
+- `.github/workflows/release.yml` validates tag matches `pyproject.toml` before building
+- `lumen --version` reports the installed version via `importlib.metadata`
+
 ---
 
 ## KuzuDB conventions (used across all sub-projects)
@@ -319,3 +363,18 @@ Release packaging:
 | Android repos fail fast | `AndroidManifest.xml` detected up to 8 directory levels deep; exits before indexing with a clear message rather than producing a partial/confusing graph. |
 | `make lumen-install` rebuilds the JAR | `install.sh` runs `./gradlew shadowJar`. Must be re-run after any Java/Kotlin indexer code change to update `cmg-java`. Gradle's incremental build skips recompilation if no sources changed. |
 | Analyst prompts reference pre-loaded orientation sections | Prompts say "if Orientation Summary does NOT contain `## Pre-computed Domains`, call `get_domains` first" — the literal heading is the fallback trigger, not a subjective existence judgement. |
+| `npm ci` instead of `npm install` in `indexer/install.sh` | Reproducible builds from the tracked `package-lock.json`; prevents silent dependency drift |
+| `package-lock.json` tracked in git | Was gitignored; highest-risk supply chain gap. Now committed so `npm ci` enforces exact versions with SHA512 integrity |
+| `uv export --frozen` in `build-native.sh` | Ensures the native bundle installs exact pinned versions from `uv.lock` rather than resolving fresh |
+| Upper bounds on Python dependencies | Prevents silent major-version upgrades that could break the pipeline at install time |
+| Gradle wrapper SHA256 verification | `distributionSha256Sum` in `gradle-wrapper.properties` detects tampered Gradle distributions |
+| Dependabot for all ecosystems | Weekly PRs for Gradle, npm, pip, and GitHub Actions keep dependencies current without manual tracking |
+| `build-native.sh` reads version from `pyproject.toml` | Single source of truth; `--version` flag lets CI override for tagged releases |
+| SHA256SUMS manifest + `verify.sh` in bundle | Lets users verify integrity of all critical binaries after download or transfer |
+| Native `lumen` launcher regenerates `.codedoc.toml` on every run | Bundle stays functional after being moved or renamed — mirrors Docker's `/workspace/.codedoc.toml` mechanism |
+| `install-lumen.sh` verifies SHA256 of downloaded tarball | HTTPS + checksum verification; no `eval`, `set -euo pipefail`, supports `VERSION` pinning and custom `LUMEN_INSTALL_DIR` |
+| GitHub Actions release workflow on `v*` tags | Builds macOS arm64/amd64 + Linux amd64 natively; Linux arm64 via QEMU. Creates draft GitHub Release with checksums |
+| `scripts/bump-version.sh` syncs all version files | Updates pyproject.toml, package.json, regenerates uv.lock, validates all match — single command for version bumps |
+| `make release` does NOT auto-push | Pushing tags triggers CI and is irreversible; user confirms manually with the printed command |
+| CI version guard in release.yml | `validate-version` job compares tag vs pyproject.toml before building; blocks mismatched releases early |
+| `lumen --version` via `importlib.metadata` | Reports the installed package version; closes the verification loop for end users and support |

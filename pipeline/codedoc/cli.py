@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,7 @@ from codedoc.pipelines.mcp import run_mcp_pipeline
 
 
 @click.group()
+@click.version_option(version=importlib.metadata.version("lumen"), prog_name="lumen")
 def main() -> None:
     """Code Intelligence Pipeline — generate docs from source code."""
 

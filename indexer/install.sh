@@ -31,7 +31,7 @@ fi
 # --- JavaScript / TypeScript ---
 echo "--- Setting up JavaScript parser ---"
 if command -v node >/dev/null 2>&1; then
-    (cd "$SCRIPT_DIR/parsers/javascript" && npm install --silent 2>/dev/null)
+    (cd "$SCRIPT_DIR/parsers/javascript" && npm ci --omit=dev --silent 2>/dev/null)
     cat > "$BIN_DIR/cmg-js" <<EOF
 #!/usr/bin/env bash
 NODE_ARGS=()

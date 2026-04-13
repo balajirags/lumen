@@ -137,173 +137,218 @@ metadata to read only the exact method body (50–600 tokens), not the whole fil
 | Strangler Fig Plan | Ordered extraction plan with seam identification and routing strategy |
 | Repo Metrics | Preflight LOC / file-count / language-mix assessment with size/risk classification |
 
-## Quickstart (Docker — recommended)
+## Getting Started
+
+Set your LLM provider credentials:
+
+```bash
+export ANTHROPIC_API_KEY=...   # or: export OPENAI_API_KEY=...
+```
+
+lumen can be installed and run in three ways. Pick the one that fits your setup.
+
+---
+
+### Mode 1: Docker (recommended)
+
+No local toolchain required — just Docker.
+
+#### Install
 
 ```bash
 git clone <repo-url> lumen && cd lumen
 make lumen-docker-build
-export ANTHROPIC_API_KEY=...
-# or: export OPENAI_API_KEY=...
 ```
 
-### 1. lumen-docker-run
+#### Run the full pipeline
 
 ```bash
-make lumen-docker-run REPO=/path/to/your/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
+make lumen-docker-run REPO=/path/to/repo \
+  ARGS='--provider anthropic --model claude-sonnet-4-6'
 ```
 
-If preflight classifies the repo as `xlarge`, `lumen-docker-run` stops before indexing and
-walks you to MCP mode instead. In that case, continue with:
-
-```bash
-make lumen-docker-mcp REPO=/path/to/your/repo
-```
-
-Step by step for `xlarge` repos:
-
-1. Run `make lumen-docker-run ...` as usual.
-2. If Lumen stops after preflight, do not rerun `lumen-docker-run`.
-3. Start MCP mode with `make lumen-docker-mcp REPO=/path/to/your/repo`.
-4. Let MCP mode perform indexing and expose `http://127.0.0.1:8765/mcp`.
-5. Connect your LLM client to that MCP URL and ask focused questions.
-
-Repo metrics are otherwise informational. The hard stop is only the full pipeline's
-`xlarge` guardrail.
-
-If you explicitly want to force the full docs pipeline anyway, use:
-
-```bash
-make lumen-docker-run REPO=/path/to/your/repo \
-  ARGS='--allow-xlarge --provider anthropic --model claude-sonnet-4-6'
-```
-
-### With a local Ollama model
-
-Inside Docker, `localhost` is the container — not your machine. Use
-`host.docker.internal` to reach your host's Ollama:
+For local Ollama models, use `host.docker.internal` to reach the host network:
 
 ```bash
 # Mac/Windows: host.docker.internal is automatic
-# Linux: the Docker wrapper scripts already add host.docker.internal:host-gateway
-
+# Linux: the wrapper scripts add host.docker.internal:host-gateway
 make lumen-docker-run REPO=/path/to/repo \
-  ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
+  ARGS='--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1'
 ```
 
-### 2. lumen-docker-mcp
+#### MCP mode
 
-If the pipeline output is good enough, stop there. If you want to keep asking questions over MCP,
-reuse the same `lumen` image against the DB from that pipeline run:
+Serve an existing Kuzu DB over HTTP MCP:
 
 ```bash
 make lumen-docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
 ```
 
-`PORT` defaults to `8765`.
-
-If you do not already have pipeline output, this also works:
+Or index a new repo and serve it directly:
 
 ```bash
 make lumen-docker-mcp REPO=/path/to/repo
 ```
 
-That flow:
+MCP is exposed at `http://127.0.0.1:8765/mcp`. Connect any MCP-capable client to that URL.
 
-1. runs preflight
-2. indexes the repo
-3. exposes a local HTTP MCP server on `http://127.0.0.1:8765/mcp`
-
-
-### 3. lumen-docker-docs
-
-Rebuild and serve the generated site from the same `lumen` image:
+#### View docs
 
 ```bash
-make lumen-docker-docs
+make lumen-docker-docs    # → http://localhost:8081
 ```
 
-This is the supported docs viewer path. It rebuilds the MkDocs site from the existing
-`./output` directory, so you do not need to rerun the pipeline just to refresh docs rendering.
+Rebuilds the MkDocs site from the existing `./output` directory — no pipeline rerun needed.
+The doc-site **accumulates** across runs, so every analysed repo appears as a tab.
 
-### Release candidate bundle
+#### xlarge repos
+
+If preflight classifies the repo as `xlarge`, `lumen-docker-run` stops before indexing and
+directs you to MCP mode:
+
+1. Run `make lumen-docker-run ...` as usual.
+2. If lumen stops after preflight, do not rerun `lumen-docker-run`.
+3. Start MCP mode: `make lumen-docker-mcp REPO=/path/to/your/repo`.
+4. Connect your LLM client to `http://127.0.0.1:8765/mcp` and ask focused questions.
+
+To force the full docs pipeline on an xlarge repo:
+
+```bash
+make lumen-docker-run REPO=/path/to/repo \
+  ARGS='--allow-xlarge --provider anthropic --model claude-sonnet-4-6'
+```
+
+#### Release candidate bundle
 
 ```bash
 TAG=v0.1.0 scripts/lumen-docker-release.sh
 ```
 
-Current behavior:
-
-- always packages the local image `lumen:latest`
-- if that image is missing, runs `make lumen-docker-build`
-- if `TAG` is provided, it is used only for release bundle naming
-- creates a bundle under `releases/`
-- packages the Docker image tar, runtime scripts, checksums, and a final `.tar.gz`
-
-The script does not create git tags automatically. Create or push tags manually before packaging if you want the bundle to correspond to a tagged release.
+Packages the local `lumen:latest` Docker image into `releases/`. If the image is missing,
+it runs `make lumen-docker-build` first. `TAG` is used for bundle naming only — create
+and push git tags manually.
 
 ---
 
-## Viewing results
+### Mode 2: Build Locally (Developer)
 
-Output lands in `./output/` after every run.
+Clone the repo and build everything from source. Requires Java 21, Node 20, Python 3.11+,
+and [uv](https://docs.astral.sh/uv/).
 
-| Service | URL | Command |
-|---|---|---|
-| MkDocs doc-site (Docker) | http://localhost:8081 | `make lumen-docker-docs` |
-| MCP HTTP (Docker) | http://localhost:8765/mcp | `make lumen-docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db` |
-### Doc-site
+#### Install
 
 ```bash
-# Docker
-make lumen-docker-docs     # → http://localhost:8081
+git clone <repo-url> lumen && cd lumen
+make lumen-install          # builds indexer (Java fat JAR + parsers) + installs pipeline via uv
 ```
 
-The doc-site **accumulates** across runs — every repo you analyse appears as a top-level
-tab in the navigation. Run against multiple repos and browse them all at once.
+This runs `indexer/install.sh` (Gradle shadowJar, npm ci, parser wrappers) and `uv sync`
+in `pipeline/`. Re-run after any indexer code change.
 
----
-
-## Native Mode
-
-### 1. Prerequisites
-
-- Java 21
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/)
-
-Install and configure:
+#### Run the full pipeline
 
 ```bash
-export ANTHROPIC_API_KEY=...
-# or: export OPENAI_API_KEY=...
-make lumen-install            # builds indexer + installs pipeline via uv
+make lumen-run REPO=/path/to/repo \
+  ARGS='--provider anthropic --model claude-sonnet-4-6'
 ```
 
-### 2. Run with `lumen`
-
-`lumen` is the native CLI. `make` is just a repo-local wrapper around it.
+Or invoke `lumen` directly via uv:
 
 ```bash
-# Anthropic Claude
 cd pipeline
 uv run lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
-
-# Ollama (local model)
 uv run lumen run /path/to/repo --provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1
-
-# OpenAI
 uv run lumen run /path/to/repo --provider openai --model gpt-4o
 ```
 
-Equivalent `make` wrapper:
+#### MCP mode
 
 ```bash
-make lumen-run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
-make lumen-run REPO=/path/to/repo ARGS='--provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1'
-make lumen-run REPO=/path/to/repo ARGS='--provider openai --model gpt-4o'
+make lumen-mcp REPO=/path/to/repo
+# or with an existing DB:
+make lumen-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
 ```
 
-## CLI options
+#### View docs
+
+```bash
+make lumen-docker-docs    # → http://localhost:8081 (uses Docker for serving)
+```
+
+---
+
+### Mode 3: Native Bundle (No Docker, No Dev Tools)
+
+Pre-built platform tarballs bundle a JRE, Node binary, and Python venv — the only runtime
+prerequisite is `graphviz`.
+
+#### One-line install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/<owner>/lumen/main/scripts/install-lumen.sh | bash
+```
+
+Or review before running:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/<owner>/lumen/main/scripts/install-lumen.sh -o install-lumen.sh
+less install-lumen.sh
+bash install-lumen.sh
+```
+
+Pin a specific version:
+
+```bash
+VERSION=v0.1.0 bash install-lumen.sh
+```
+
+After install, `~/.local/bin/lumen` is ready.
+
+#### Run
+
+```bash
+lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
+lumen run /path/to/repo --provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1
+```
+
+#### MCP mode
+
+```bash
+lumen mcp /path/to/repo
+# or with an existing DB:
+lumen mcp --db-path /path/to/output/<run>/index.kuzu/<repo>-db
+```
+
+#### Manual tarball install
+
+Download a release tarball from GitHub Releases, verify, and extract:
+
+```bash
+tar -xzf lumen-0.1.0-darwin-arm64.tar.gz
+cd lumen-0.1.0-darwin-arm64
+./verify.sh          # checks SHA256 of all critical binaries
+./install.sh         # symlinks lumen into ~/.local/bin
+```
+
+#### Build a native tarball from source
+
+```bash
+make lumen-native-build                    # uses version from pyproject.toml
+make lumen-native-build VERSION=v1.2.3     # override version
+```
+
+Output: `releases/lumen-<version>-<os>-<arch>.tar.gz` plus `.sha256` checksum.
+
+#### graphviz requirement
+
+Docs generation needs graphviz (`dot`). The launcher warns if it is missing.
+
+- macOS: `brew install graphviz`
+- Linux: `apt install graphviz` or `yum install graphviz`
+
+---
+
+## CLI Reference
 
 ```
 lumen run REPO_PATH [OPTIONS]
@@ -315,6 +360,7 @@ lumen run REPO_PATH [OPTIONS]
   --output-dir TEXT   Output directory (default: ./codedoc-output)
   --max-turns INT     Max LLM turns per phase (default: 60)
   --repo-size-check   off | warn | strict (default: warn)
+  --allow-xlarge      Force full pipeline on xlarge repos
   --verbose           Stream logs as the pipeline runs
 ```
 
@@ -330,16 +376,6 @@ lumen mcp [REPO_PATH] [OPTIONS]
   --print-config         Print MCP client config snippets and exit
   --verbose              Stream logs as the pipeline runs
 ```
-
-Docker convenience:
-
-```bash
-make lumen-docker-run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
-make lumen-docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
-make lumen-docker-docs
-```
-`make lumen-mcp` starts the HTTP MCP server directly.
-Use `--print-config` only when you want client config output without keeping the server running.
 
 ---
 

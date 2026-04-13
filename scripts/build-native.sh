@@ -37,8 +37,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# ── Version (keep in sync with pipeline/pyproject.toml) ──────────────────────
-VERSION="0.1.0"
+# ── Version: read from pyproject.toml (single source of truth) ───────────────
+# Override with: bash build-native.sh --version v1.2.3
+PYPROJECT_VERSION="$(grep -m1 '^version' "$REPO_ROOT/pipeline/pyproject.toml" \
+                     | sed 's/.*= *"\(.*\)"/\1/')"
+VERSION="${PYPROJECT_VERSION}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --version) VERSION="${2#v}"; shift 2 ;;  # strip leading 'v' if present
+    *) echo "Unknown flag: $1"; exit 1 ;;
+  esac
+done
 
 # ── PlantUML pinned release (keep in sync with Dockerfile) ───────────────────
 PLANTUML_VERSION="1.2026.2"
@@ -81,7 +91,7 @@ verify_sha256() {
 # ── Prerequisite checks ───────────────────────────────────────────────────────
 echo "==> Checking prerequisites..."
 missing=0
-for cmd_label in "java:Java 21 JDK" "node:Node 20" "python3:Python 3.11+" "curl:curl"; do
+for cmd_label in "java:Java 21 JDK" "node:Node 20" "python3:Python 3.11+" "uv:uv (astral.sh/uv)" "curl:curl"; do
   cmd="${cmd_label%%:*}"
   label="${cmd_label#*:}"
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -104,10 +114,10 @@ rm -rf "$DIST_DIR"
 mkdir -p \
   "$DIST_DIR/bin" \
   "$DIST_DIR/lib" \
-  "$DIST_DIR/jre" \
   "$DIST_DIR/node/bin" \
   "$DIST_DIR/indexer/parsers" \
   "$DIST_DIR/scripts"
+# NOTE: $DIST_DIR/jre is NOT pre-created — jlink requires --output to be a new directory
 
 # ── Step 1: Java fat JAR ──────────────────────────────────────────────────────
 echo "--- Step 1: Building Java fat JAR ---"
@@ -169,7 +179,8 @@ echo "--- Step 5: Installing JS parser ---"
        -o -name example -o -name examples -o -name docs -o -name doc \) \
        -exec rm -rf {} + 2>/dev/null || true && \
   find node_modules -type f \( -name "*.md" -o -name "*.ts" -o -name "CHANGELOG*" \
-       -o -name "*.map" \) -delete 2>/dev/null || true)
+       -o -name "*.map" \) -delete 2>/dev/null || true && \
+  rm -rf node_modules/.bin 2>/dev/null || true)
 cp -r "$REPO_ROOT/indexer/parsers/javascript" "$DIST_DIR/indexer/parsers/javascript"
 echo "  ✓ indexer/parsers/javascript/"
 
@@ -180,11 +191,24 @@ echo "  ✓ indexer/parsers/python/"
 
 # ── Step 7: Python venv + lumen ───────────────────────────────────────────────
 echo "--- Step 7: Creating Python venv and installing lumen ---"
+# Export locked dependencies from uv.lock so the bundle gets exact pinned versions.
+FROZEN_REQS="$(mktemp)"
+(cd "$REPO_ROOT/pipeline" && uv export --frozen --no-hashes --no-emit-project > "$FROZEN_REQS")
 python3 -m venv "$DIST_DIR/venv"
 "$DIST_DIR/venv/bin/pip" install --quiet --upgrade pip
-"$DIST_DIR/venv/bin/pip" install --quiet "$REPO_ROOT/pipeline/"
+# pygraphviz needs graphviz C headers; auto-detect Homebrew/system paths
+if command -v brew >/dev/null 2>&1; then
+  GV_PREFIX="$(brew --prefix graphviz 2>/dev/null || true)"
+  if [ -n "$GV_PREFIX" ] && [ -d "$GV_PREFIX/include" ]; then
+    export CFLAGS="-I${GV_PREFIX}/include"
+    export LDFLAGS="-L${GV_PREFIX}/lib"
+  fi
+fi
+"$DIST_DIR/venv/bin/pip" install --quiet -r "$FROZEN_REQS"
+"$DIST_DIR/venv/bin/pip" install --quiet --no-deps "$REPO_ROOT/pipeline/"
 "$DIST_DIR/venv/bin/pip" install --quiet \
   -r "$REPO_ROOT/indexer/parsers/python/requirements.txt"
+rm -f "$FROZEN_REQS"
 # Strip cache/stubs that are not needed at runtime
 find "$DIST_DIR/venv" -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 find "$DIST_DIR/venv" \( -name "*.pyc" -o -name "*.pyo" \) -delete 2>/dev/null || true
@@ -259,6 +283,15 @@ TOML
 # Put bundled bin/ first so plantuml and cmg-* wrappers shadow any system versions.
 export PATH="$BUNDLE_DIR/bin:$PATH"
 
+# Warn if graphviz is missing — needed for docs generation (PlantUML + pygraphviz).
+if ! command -v dot >/dev/null 2>&1; then
+  echo "WARNING: graphviz not found — docs generation may fail." >&2
+  case "$(uname -s)" in
+    Darwin) echo "  Install: brew install graphviz" >&2 ;;
+    Linux)  echo "  Install: sudo apt install graphviz  (or: sudo yum install graphviz)" >&2 ;;
+  esac
+fi
+
 # cd to bundle root so config.py's CWD-based .codedoc.toml lookup succeeds.
 cd "$BUNDLE_DIR"
 exec "$BUNDLE_DIR/venv/bin/lumen" "$@"
@@ -286,8 +319,80 @@ INST
 chmod +x "$DIST_DIR/install.sh"
 echo "  ✓ install.sh"
 
-# ── Step 12: Package ──────────────────────────────────────────────────────────
-echo "--- Step 12: Packaging ---"
+# ── Step 12: Internal SHA256SUMS + verify.sh ──────────────────────────────────
+echo "--- Step 12: Generating internal checksums ---"
+(cd "$DIST_DIR" && {
+  sha256_manifest=""
+  for f in \
+    lib/code-mem-graph.jar \
+    lib/plantuml.jar \
+    node/bin/node \
+    lumen \
+    bin/cmg-java \
+    bin/cmg-js \
+    bin/cmg-python \
+    bin/plantuml; do
+    [ -f "$f" ] && sha256_manifest+="$(sha256_file "$f")  $f"$'\n'
+  done
+  # Include kuzu native addon if present
+  while IFS= read -r -d '' kuzufile; do
+    sha256_manifest+="$(sha256_file "$kuzufile")  $kuzufile"$'\n'
+  done < <(find indexer/parsers/javascript/node_modules -name "kuzujs.node" -print0 2>/dev/null || true)
+  printf '%s' "$sha256_manifest" > SHA256SUMS
+})
+echo "  ✓ SHA256SUMS ($(wc -l < "$DIST_DIR/SHA256SUMS") entries)"
+
+cat > "$DIST_DIR/verify.sh" <<'VERIFY'
+#!/usr/bin/env bash
+# Verify the integrity of all critical binaries in this bundle.
+set -euo pipefail
+BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SUMS_FILE="$BUNDLE_DIR/SHA256SUMS"
+[ -f "$SUMS_FILE" ] || { echo "ERROR: SHA256SUMS not found in bundle"; exit 1; }
+
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
+failed=0
+while IFS='  ' read -r expected path; do
+  [ -z "$expected" ] && continue
+  full="$BUNDLE_DIR/$path"
+  if [ ! -f "$full" ]; then
+    echo "MISSING: $path"
+    failed=1
+    continue
+  fi
+  actual="$(sha256_file "$full")"
+  if [ "$actual" = "$expected" ]; then
+    echo "  OK: $path"
+  else
+    echo "  FAIL: $path"
+    echo "    expected: $expected"
+    echo "    actual:   $actual"
+    failed=1
+  fi
+done < "$SUMS_FILE"
+
+if [ "$failed" -eq 0 ]; then
+  echo ""
+  echo "All checksums verified."
+else
+  echo ""
+  echo "ERROR: One or more checksums failed."
+  exit 1
+fi
+VERIFY
+
+chmod +x "$DIST_DIR/verify.sh"
+echo "  ✓ verify.sh"
+
+# ── Step 13: Package ──────────────────────────────────────────────────────────
+echo "--- Step 13: Packaging ---"
 mkdir -p "$RELEASES_DIR"
 TARBALL="$RELEASES_DIR/${BUNDLE_NAME}.tar.gz"
 tar -czf "$TARBALL" -C "$REPO_ROOT/dist" "$BUNDLE_NAME"

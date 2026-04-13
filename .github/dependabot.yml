@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # Java / Gradle
+  - package-ecosystem: "gradle"
+    directory: "/indexer"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # Node / npm (JS parser)
+  - package-ecosystem: "npm"
+    directory: "/indexer/parsers/javascript"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # Python pipeline (uv / pip)
+  - package-ecosystem: "pip"
+    directory: "/pipeline"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5

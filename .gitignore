@@ -5,6 +5,7 @@ pipeline/*.egg-info/
 pipeline/**/*.egg-info/
 pipeline/.venv/
 pipeline/venv/
+pipeline/build/
 pipeline/codedoc-output/
 pipeline/output/
 pipeline/output_old/
@@ -23,7 +24,6 @@ indexer/**/*.class
 ui/node_modules/
 ui/dist/
 indexer/parsers/javascript/node_modules/
-indexer/parsers/javascript/package-lock.json
 
 # Common
 .DS_Store

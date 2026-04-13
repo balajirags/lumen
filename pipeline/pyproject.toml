@@ -8,14 +8,14 @@ version = "0.1.0"
 description = "CLI pipeline: index repo → agent analysis → docs site"
 requires-python = ">=3.11"
 dependencies = [
-    "click>=8.1",
-    "kuzu>=0.7",
-    "mcp>=1.0.0",
-    "anthropic>=0.39",
-    "openai>=1.0",
-    "mkdocs-material>=9.0",
-    "mkdocs-build-plantuml-plugin>=0.10",
-    "rich>=13.0",
+    "click>=8.1,<9",
+    "kuzu>=0.7,<1",
+    "mcp>=1.0.0,<2",
+    "anthropic>=0.39,<1",
+    "openai>=1.0,<3",
+    "mkdocs-material>=9.0,<10",
+    "mkdocs-build-plantuml-plugin>=0.10,<3",
+    "rich>=13.0,<15",
 ]
 
 [project.optional-dependencies]

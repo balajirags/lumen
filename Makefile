@@ -1,6 +1,7 @@
 .PHONY: lumen-help lumen-install lumen-install-indexer lumen-install-pipeline lumen-run \
         lumen-mcp lumen-test lumen-docker-build lumen-docker-rebuild \
-        lumen-docker-run lumen-docker-mcp lumen-docker-docs
+        lumen-docker-run lumen-docker-mcp lumen-docker-docs lumen-native-build \
+        release
 
 
 # -- Docker Mode --
@@ -30,6 +31,21 @@ lumen-docker-mcp:
 
 lumen-docker-docs:
 	OUTPUT_PATH="$(PWD)/output" DOCKER_IMAGE="$(DOCKER_IMAGE)" PORT="$${PORT:-8081}" ./scripts/lumen-docker-docs.sh
+
+# -- Native distribution tarball --
+lumen-native-build:
+	bash scripts/build-native.sh $(if $(VERSION),--version $(VERSION))
+
+# -- Release: bump version, commit, tag --
+release:
+	@if [ -z "$(VERSION)" ]; then echo "Usage: make release VERSION=0.2.0"; exit 1; fi
+	bash scripts/bump-version.sh "$(VERSION)"
+	git add pipeline/pyproject.toml indexer/parsers/javascript/package.json pipeline/uv.lock
+	git commit -m "release: v$(VERSION)"
+	git tag "v$(VERSION)"
+	@echo ""
+	@echo "Tagged v$(VERSION). Push to trigger CI release:"
+	@echo "  git push origin main v$(VERSION)"
 
 # -- Native install (requires Java 21, Node 18, Python 3.11) --
 lumen-install: lumen-install-indexer lumen-install-pipeline
@@ -170,6 +186,8 @@ lumen-help:
 	  echo "Native:"; \
 	  echo "  make lumen-install"; \
 	  echo "    Build indexers and sync the Python pipeline environment."; \
+	  echo "  make lumen-native-build [VERSION=x.y.z]"; \
+	  echo "    Build a self-contained platform tarball in releases/."; \
 	  echo "  make lumen-run REPO=/path/to/repo ARGS='--provider <p> --model <m> [--base-url <url>]'"; \
 	  echo "    Run the full Lumen pipeline natively."; \
 	  echo "  make lumen-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db"; \
