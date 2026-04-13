@@ -6,13 +6,14 @@
 
 # -- Docker Mode --
 DOCKER_IMAGE ?= lumen
+LUMEN_VERSION := $(shell grep '^version = "' pipeline/pyproject.toml | sed 's/version = "\(.*\)"/\1/')
 
 lumen-docker-build:
-	docker build -t $(DOCKER_IMAGE) .
+	docker build -t $(DOCKER_IMAGE) -t $(DOCKER_IMAGE):$(LUMEN_VERSION) .
 	docker image prune -f
 
 lumen-docker-rebuild:
-	docker build --no-cache -t $(DOCKER_IMAGE) .
+	docker build --no-cache -t $(DOCKER_IMAGE) -t $(DOCKER_IMAGE):$(LUMEN_VERSION) .
 	docker image prune -f
 
 lumen-docker-run:
