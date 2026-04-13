@@ -9,7 +9,7 @@ description = "CLI pipeline: index repo → agent analysis → docs site"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1,<9",
-    "kuzu>=0.7,<1",
+    "kuzu>=0.11.3,<1",
     "mcp>=1.0.0,<2",
     "anthropic>=0.39,<1",
     "openai>=1.0,<3",
