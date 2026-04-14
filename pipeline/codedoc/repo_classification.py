@@ -9,7 +9,10 @@ from codedoc.artifact_planner import infer_capabilities
 from codedoc.language_registry import LANGUAGE_CATEGORIES, category_for_suffix
 
 
-IGNORED_PARTS = {"node_modules", "__pycache__", "venv", ".venv", "build", "dist", "target"}
+IGNORED_PARTS = {"node_modules", "__pycache__", "venv", ".venv"}
+# These directories are only ignored at the repo root (depth 0) — they can
+# legitimately appear as Java/Kotlin package names deeper in the tree.
+IGNORED_ROOT_DIRS = {"build", "dist", "target"}
 
 FRONTEND_DEP_MARKERS = {
     "@angular/core",
@@ -62,7 +65,16 @@ JS_API_ROUTE_PATH_PATTERNS = (
 
 
 def is_ignored_path(path: Path) -> bool:
-    return any(part.startswith(".") or part in IGNORED_PARTS for part in path.parts)
+    parts = path.parts
+    if not parts:
+        return False
+    # Always-ignored directories at any depth
+    if any(part.startswith(".") or part in IGNORED_PARTS for part in parts):
+        return True
+    # Build output directories ignored only at repo root (first component)
+    if parts[0] in IGNORED_ROOT_DIRS:
+        return True
+    return False
 
 
 def _iter_source_files(repo: Path):
