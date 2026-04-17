@@ -654,12 +654,20 @@ class CpgEnhancer:
 def collect_python_files(root_dir: Path) -> List[Path]:
     """Recursively collect all Python files."""
     files = []
-    skip_dirs = {"__pycache__", ".git", "venv", ".venv", "env", ".env", 
-                 "node_modules", "build", "dist", ".tox", ".pytest_cache"}
+    # Directories to always skip at any depth
+    always_skip = {"__pycache__", ".git", "venv", ".venv", "env", ".env",
+                   "node_modules", ".tox", ".pytest_cache"}
+    # Directories to skip only when directly under the repo root
+    root_only_skip = {"build", "dist", "target"}
     
     for path in root_dir.rglob("*.py"):
-        # Skip files in excluded directories
-        if any(skip in path.parts for skip in skip_dirs):
+        rel = path.relative_to(root_dir)
+        parts = rel.parts
+        # Skip files in always-excluded directories
+        if any(skip in parts for skip in always_skip):
+            continue
+        # Skip files under root-only excluded directories
+        if parts and parts[0] in root_only_skip:
             continue
         files.append(path)
     

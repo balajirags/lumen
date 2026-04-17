@@ -411,12 +411,16 @@ class CpgEnhancer {
     }
 }
 
+/** Directories to always skip at any depth. */
 const SKIP_DIRS = new Set([
-    'node_modules', 'dist', 'build', 'coverage', 'target',
+    'node_modules', 'coverage',
     '__pycache__', 'venv', '.venv', '.gradle',
     '.tox', '.pytest_cache',
     'vendor', 'fixtures', '__fixtures__', '__snapshots__',
 ]);
+
+/** Directories to skip only when they appear directly under the repo root. */
+const ROOT_ONLY_SKIP_DIRS = new Set(['dist', 'build', 'target']);
 
 function collectFiles(dir, extensions) {
     const files = [];
@@ -427,7 +431,9 @@ function collectFiles(dir, extensions) {
             const fullPath = path.join(currentDir, entry.name);
             if (entry.isDirectory()) {
                 // Skip dot-directories, node_modules, build outputs, etc.
-                if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) {
+                const isRoot = currentDir === dir;
+                if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name) ||
+                    (isRoot && ROOT_ONLY_SKIP_DIRS.has(entry.name))) {
                     continue;
                 }
                 walk(fullPath);

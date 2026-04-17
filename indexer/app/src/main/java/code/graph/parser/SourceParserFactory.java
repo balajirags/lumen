@@ -50,7 +50,7 @@ public class SourceParserFactory {
         // Count files by language
         try (Stream<Path> walk = Files.walk(rootDir)) {
             walk.filter(Files::isRegularFile)
-                .filter(p -> !isIgnoredPath(p))
+                .filter(p -> !isIgnoredPath(p, rootDir))
                 .forEach(path -> {
                     String fileName = path.getFileName().toString();
                     for (Language lang : Language.values()) {
@@ -85,7 +85,7 @@ public class SourceParserFactory {
         
         try (Stream<Path> walk = Files.walk(rootDir)) {
             walk.filter(Files::isRegularFile)
-                .filter(p -> !isIgnoredPath(p))
+                .filter(p -> !isIgnoredPath(p, rootDir))
                 .forEach(path -> {
                     String fileName = path.getFileName().toString();
                     for (Language lang : Language.values()) {
@@ -173,16 +173,24 @@ public class SourceParserFactory {
         };
     }
 
-    private static boolean isIgnoredPath(Path path) {
-        String pathStr = path.toString();
-        return pathStr.contains("node_modules") ||
-               pathStr.contains(".git") ||
-               pathStr.contains("__pycache__") ||
-               pathStr.contains("venv") ||
-               pathStr.contains(".venv") ||
-               pathStr.contains("/build/") ||
-               pathStr.contains("/dist/") ||
-               pathStr.contains("/target/") ||
-               pathStr.contains("/.gradle/");
+    /** Directories to always skip at any depth. */
+    private static final Set<String> ALWAYS_IGNORED = Set.of(
+            "node_modules", ".git", "__pycache__", "venv", ".venv", ".gradle");
+
+    /** Directories to skip only when they appear directly under the repo root. */
+    private static final Set<String> ROOT_ONLY_IGNORED = Set.of("build", "dist", "target");
+
+    private static boolean isIgnoredPath(Path path, Path rootDir) {
+        Path relative = rootDir.relativize(path);
+        for (int i = 0; i < relative.getNameCount(); i++) {
+            String part = relative.getName(i).toString();
+            if (ALWAYS_IGNORED.contains(part)) {
+                return true;
+            }
+            if (i == 0 && ROOT_ONLY_IGNORED.contains(part)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
