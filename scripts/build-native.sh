@@ -271,13 +271,18 @@ cat > "$DIST_DIR/lumen" <<'LAUNCHER'
 # then delegates to the bundled Python venv entry point.
 set -euo pipefail
 BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INVOCATION_DIR="$(pwd)"  # capture before cd so output_dir is relative to where lumen was run
 
 # Regenerate runtime config so config.py picks up correct indexer_bin_dir
 # and build_script regardless of where the bundle lives on disk.
+# output_dir defaults to lumen-output in the invocation directory; --output-dir flag overrides.
 cat > "$BUNDLE_DIR/.codedoc.toml" << TOML
 [paths]
 indexer_bin_dir = "$BUNDLE_DIR/bin"
 build_script    = "$BUNDLE_DIR/scripts/build-docs-site.sh"
+
+[pipeline]
+output_dir = "$INVOCATION_DIR/lumen-output"
 TOML
 
 # Put bundled bin/ first so plantuml and cmg-* wrappers shadow any system versions.
