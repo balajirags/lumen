@@ -36,7 +36,31 @@ fi
 mkdir -p "${IMAGES_DIR}" "${RUNTIME_DIR}" "${SCRIPTS_DIR}" "${CHECKSUMS_DIR}"
 
 echo "Saving image archive to ${IMAGE_TAR}"
-docker save "${IMAGE_REF}" -o "${IMAGE_TAR}"
+# docker save omits layer blobs when Docker uses a containerd-backed storage driver (Colima,
+# some Docker Desktop configs), producing a ~12 KB stub instead of the full image.
+# docker buildx build with type=docker output always includes all layers.
+# Prefer host buildx; fall back to buildx inside the Colima VM if available.
+if docker buildx version >/dev/null 2>&1; then
+  (
+    cd "${ROOT_DIR}"
+    docker buildx build \
+      --output "type=docker,name=${IMAGE_REF},dest=${IMAGE_TAR}" \
+      .
+  )
+elif command -v colima >/dev/null 2>&1 && colima ssh -- docker buildx version >/dev/null 2>&1; then
+  echo "Host docker buildx not found; using buildx inside Colima VM"
+  colima ssh -- docker buildx build \
+    --output "type=docker,name=${IMAGE_REF},dest=${IMAGE_TAR}" \
+    "${ROOT_DIR}"
+else
+  echo "ERROR: docker buildx is required for reliable image export with containerd storage."
+  echo "Install on Mac:"
+  echo "  brew install docker-buildx"
+  echo "  mkdir -p ~/.docker/cli-plugins"
+  # shellcheck disable=SC2016
+  echo '  ln -sfn $(brew --prefix)/opt/docker-buildx/bin/docker-buildx ~/.docker/cli-plugins/docker-buildx'
+  exit 1
+fi
 
 echo "Copying runtime files"
 cp "${ROOT_DIR}/Makefile" "${RUNTIME_DIR}/Makefile"

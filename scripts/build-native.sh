@@ -335,9 +335,9 @@ echo "--- Step 12: Generating internal checksums ---"
     [ -f "$f" ] && sha256_manifest+="$(sha256_file "$f")  $f"$'\n'
   done
   # Include kuzu native addon if present
-  while IFS= read -r -d '' kuzufile; do
+  for kuzufile in $(find indexer/parsers/javascript/node_modules -name "kuzujs.node" 2>/dev/null); do
     sha256_manifest+="$(sha256_file "$kuzufile")  $kuzufile"$'\n'
-  done < <(find indexer/parsers/javascript/node_modules -name "kuzujs.node" -print0 2>/dev/null || true)
+  done
   printf '%s' "$sha256_manifest" > SHA256SUMS
 })
 echo "  ✓ SHA256SUMS ($(wc -l < "$DIST_DIR/SHA256SUMS") entries)"
