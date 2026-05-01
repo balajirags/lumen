@@ -303,5 +303,49 @@ def mcp_http(
     )
 
 
+@main.command()
+@click.option("--output-dir", type=click.Path(), default=None, help="lumen output root directory (default: ./lumen-output)")
+@click.option("--port", type=int, default=8081, show_default=True, help="HTTP port for the docs server")
+@click.option("--no-serve", is_flag=True, default=False, help="Build site without starting the HTTP server")
+def docs(
+    output_dir: str | None,
+    port: int,
+    no_serve: bool,
+) -> None:
+    """Build and serve the generated documentation site.
+
+    Rebuilds the MkDocs site from all runs in the output directory, then
+    serves it at http://localhost:PORT (Ctrl+C to stop).
+    """
+    import subprocess
+
+    cfg = load_config({"output_dir": output_dir})
+    output_path = Path(cfg.output_dir).resolve()
+    site_dir = output_path / "doc-site"
+    build_script = Path(cfg.build_script)
+
+    if not output_path.exists():
+        raise click.ClickException(
+            f"Output directory not found: {output_path}\nRun 'lumen run /path/to/repo' first."
+        )
+
+    click.echo(f"Building docs from {output_path} ...")
+    result = subprocess.run([
+        "bash", str(build_script),
+        "--output-dir", str(output_path),
+        "--site-dir", str(site_dir),
+        "--title", "lumen Docs",
+    ])
+    if result.returncode != 0:
+        raise click.ClickException("Docs build failed.")
+
+    if no_serve:
+        click.echo(f"Site built at {site_dir}")
+        return
+
+    click.echo(f"Serving docs at http://localhost:{port}  (Ctrl+C to stop)")
+    subprocess.run(["python", "-m", "http.server", str(port), "--directory", str(site_dir)])
+
+
 if __name__ == "__main__":
     main()
