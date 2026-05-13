@@ -103,7 +103,8 @@ jobs:
             eclipse-temurin:21-jdk-jammy \
             bash -c '
               set -euo pipefail
-              apt-get update -qq && apt-get install -y -qq curl python3 python3-venv python3-pip nodejs npm graphviz libgraphviz-dev > /dev/null
+              apt-get update -qq && apt-get install -y -qq curl python3.11 python3.11-venv python3.11-dev nodejs npm graphviz libgraphviz-dev > /dev/null
+              update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
               curl -LsSf https://astral.sh/uv/install.sh | sh
               export PATH="$HOME/.local/bin:$PATH"
               bash scripts/build-native.sh --version "${{ github.ref_name }}"
@@ -139,6 +140,21 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      # Pre-build the fat JAR natively on the amd64 runner to avoid Java TLS
+      # failures when ./gradlew runs inside QEMU-emulated arm64 during Docker build.
+      # The JAR is included in the build context via .dockerignore negation rule,
+      # and the Dockerfile skips Gradle when the JAR is already present.
+      - name: Set up Java 21 (for pre-building JAR)
+        if: matrix.arch == 'arm64'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Pre-build JAR natively (arm64 only)
+        if: matrix.arch == 'arm64'
+        run: cd indexer && ./gradlew shadowJar --no-daemon -q
 
       - name: Build Docker release tarball
         run: ARCH=${{ matrix.arch }} bash scripts/lumen-docker-release.sh

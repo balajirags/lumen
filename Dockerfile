@@ -32,12 +32,9 @@ ARG PLANTUML_SHA256=3cdce52133c424dea22425b947ae9d47f2167b0866dfcf99e714d4ea1689
 WORKDIR /build
 COPY indexer/ .
 
-# /dev/urandom avoids entropy starvation in QEMU arm64 cross-compilation,
-# which can cause Java's TLS stack to hang or fail during the Gradle download.
-ENV GRADLE_OPTS="-Djava.security.egd=file:/dev/./urandom"
-
-# Build the fat JAR (Gradle wrapper downloads Gradle on first run)
-RUN ./gradlew shadowJar --no-daemon -q
+# Build the fat JAR. If already pre-built into the context (CI pre-builds
+# natively on amd64 to avoid Java TLS failures under QEMU arm64), skip Gradle.
+RUN test -f app/build/libs/code-mem-graph.jar || ./gradlew shadowJar --no-daemon -q
 
 # The Docker image only needs Linux Kuzu JNI binaries.
 # Removing macOS/Windows/Android payloads cuts hundreds of MB from the fat JAR.
