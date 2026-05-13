@@ -16,7 +16,7 @@ case "${ARCH}" in
   x86_64|amd64)  DOCKER_PLATFORM="linux/amd64" ;;
   *)             DOCKER_PLATFORM="linux/${ARCH}" ;;
 esac
-RC_NAME="${RC_NAME:-${DOCKER_IMAGE}-rc-${VERSION}-${ARCH}}"
+RC_NAME="${RC_NAME:-${DOCKER_IMAGE}-docker-${VERSION}-${ARCH}}"
 RC_DIR="${RELEASE_DIR}/${RC_NAME}"
 IMAGES_DIR="${RC_DIR}/images"
 RUNTIME_DIR="${RC_DIR}/runtime"
