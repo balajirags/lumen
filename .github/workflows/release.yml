@@ -81,7 +81,7 @@ jobs:
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: native-${{ matrix.name }}
+          name: lumen-native-${{ matrix.name }}
           path: |
             releases/*.tar.gz
             releases/*.sha256
@@ -117,7 +117,7 @@ jobs:
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: native-linux-arm64
+          name: lumen-native-linux-arm64
           path: |
             releases/*.tar.gz
             releases/*.sha256
@@ -168,7 +168,7 @@ jobs:
       - name: Upload Docker release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: docker-linux-${{ matrix.arch }}
+          name: lumen-docker-linux-${{ matrix.arch }}
           path: |
             releases/*.tar.gz
             releases/*.sha256
@@ -183,7 +183,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: "{native-*,docker-*}"
+          pattern: "lumen-*"
           merge-multiple: true
 
       - name: Generate CHECKSUMS.txt
