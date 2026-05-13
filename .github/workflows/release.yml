@@ -103,10 +103,11 @@ jobs:
             eclipse-temurin:21-jdk-jammy \
             bash -c '
               set -euo pipefail
-              apt-get update -qq && apt-get install -y -qq curl python3.11 python3.11-venv python3.11-dev nodejs npm graphviz libgraphviz-dev > /dev/null
-              update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+              apt-get update -qq && apt-get install -y -qq curl python3 python3-venv nodejs npm graphviz libgraphviz-dev > /dev/null
               curl -LsSf https://astral.sh/uv/install.sh | sh
               export PATH="$HOME/.local/bin:$PATH"
+              uv python install 3.11
+              ln -sf "$(uv python find 3.11)" /usr/local/bin/python3
               bash scripts/build-native.sh --version "${{ github.ref_name }}"
             '
 
