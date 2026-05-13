@@ -64,3 +64,5 @@ output_v3.0/
 output_v4.0/
 output_v5.0/
 
+docker-buildx
+

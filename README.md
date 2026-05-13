@@ -153,6 +153,13 @@ lumen can be installed and run in three ways. Pick the one that fits your setup.
 
 No local toolchain required — just Docker.
 
+> **Docker runtime resources**
+> The indexer and KuzuDB are memory-intensive. Configure your Docker runtime with at least
+> **4 CPUs and 8 GB RAM** before running lumen.
+>
+> - **Docker Desktop** (Mac/Windows): Settings → Resources → set CPUs ≥ 4, Memory ≥ 8 GB
+> - **Colima**: `colima start --cpu 4 --memory 8`
+
 #### Install
 
 ```bash

@@ -207,7 +207,17 @@ def format_client_snippets(db_path: str, repo_path: str = "", repo_name: str = "
     global_args_json = ", ".join(f"\"{arg}\"" for arg in global_args)
     docker_args_json = ", ".join(f"\"{arg}\"" for arg in docker_args)
     return {
-        "VS Code / Claude Desktop (uv)": (
+        "VS Code (.vscode/mcp.json)": (
+            "{\n"
+            "  \"servers\": {\n"
+            f"    \"{identity['server_name']}\": {{\n"
+            "      \"command\": \"uv\",\n"
+            f"      \"args\": [{uv_args_json}]\n"
+            "    }\n"
+            "  }\n"
+            "}"
+        ),
+        "Claude Desktop": (
             "{\n"
             "  \"mcpServers\": {\n"
             f"    \"{identity['server_name']}\": {{\n"
@@ -237,7 +247,17 @@ def format_client_snippets(db_path: str, repo_path: str = "", repo_name: str = "
 def format_http_client_snippets(url: str, db_path: str = "", repo_path: str = "", repo_name: str = "") -> dict[str, str]:
     identity = format_server_identity(db_path, repo_path, repo_name) if db_path or repo_path or repo_name else {"server_name": "lumen"}
     return {
-        "VS Code / Claude Desktop (HTTP)": (
+        "VS Code (.vscode/mcp.json)": (
+            "{\n"
+            "  \"servers\": {\n"
+            f"    \"{identity['server_name']}\": {{\n"
+            "      \"type\": \"http\",\n"
+            f"      \"url\": \"{url}\"\n"
+            "    }\n"
+            "  }\n"
+            "}"
+        ),
+        "Claude Desktop": (
             "{\n"
             "  \"mcpServers\": {\n"
             f"    \"{identity['server_name']}\": {{\n"

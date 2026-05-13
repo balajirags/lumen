@@ -603,6 +603,11 @@ def print_mcp_panel(db_path: str, command: str, snippets: dict[str, str], repo_n
     ]
     console.print()
     console.print(Panel("\n".join(lines), title="[bold cyan] MCP Ready [/bold cyan]", border_style="cyan"))
+    for name, snippet in snippets.items():
+        console.print()
+        console.rule(f"[bold cyan]{name}[/bold cyan]", style="cyan")
+        console.print(snippet)
+        console.rule(style="cyan")
 
 
 def print_mcp_http_panel(
@@ -628,10 +633,10 @@ def print_mcp_http_panel(
         "[bold]Docker[/bold]",
         docker_command,
     ]
-    for title, snippet in snippets.items():
-        lines.extend(["", f"[bold]{title}[/bold]", snippet])
     console.print()
     console.print(Panel("\n".join(lines), title="[bold cyan] MCP HTTP Ready [/bold cyan]", border_style="cyan"))
     for name, snippet in snippets.items():
         console.print()
-        console.print(Panel(snippet, title=f"[bold]{name}[/bold]", border_style="blue"))
+        console.rule(f"[bold cyan]{name}[/bold cyan]", style="cyan")
+        console.print(snippet)
+        console.rule(style="cyan")
