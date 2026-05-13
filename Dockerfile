@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # lumen — multi-stage Docker build
 #
-# Stage 1 (java-builder)      : Gradle install (curl) + shadowJar + jlink minimal JRE
+# Stage 1 (java-builder)      : Gradle shadowJar + jlink minimal JRE
 # Stage 2 (node-builder)      : npm install (production) for JS parser
 # Stage 3 (python-deps-builder): pip-compile all Python deps (incl. pygraphviz)
 # Stage 4 (final)             : python:3.11-slim + JRE + Node binary + pip deps
@@ -26,30 +26,18 @@
 # ── Stage 1: Java fat JAR + custom minimal JRE via jlink ─────────────────────
 FROM eclipse-temurin:21-jdk-jammy@sha256:f780cc415d168cad9f6a41607092b67fc799f7d4f6237fab6e4f4ff31ee77938 AS java-builder
 
-ARG GRADLE_VERSION=9.2.0
-ARG GRADLE_SHA256=df67a32e86e3276d011735facb1535f64d0d88df84fa87521e90becc2d735444
 ARG PLANTUML_VERSION=1.2026.2
 ARG PLANTUML_SHA256=3cdce52133c424dea22425b947ae9d47f2167b0866dfcf99e714d4ea1689975c
-
-# Install Gradle via curl+unzip so the download uses the system TLS stack
-# (OpenSSL) rather than Java's — avoids SSL handshake failures under QEMU
-# arm64 cross-compilation in CI.
-RUN apt-get update -qq && apt-get install -y --no-install-recommends unzip \
-    && curl -fsSL \
-       "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
-       -o /tmp/gradle.zip \
-    && echo "${GRADLE_SHA256}  /tmp/gradle.zip" | sha256sum -c - \
-    && unzip -q /tmp/gradle.zip -d /opt \
-    && rm /tmp/gradle.zip \
-    && apt-get purge -y --auto-remove unzip \
-    && rm -rf /var/lib/apt/lists/*
-ENV PATH="/opt/gradle-${GRADLE_VERSION}/bin:${PATH}"
 
 WORKDIR /build
 COPY indexer/ .
 
-# Build the fat JAR using the system-installed Gradle (bypasses gradlew download)
-RUN gradle shadowJar --no-daemon -q
+# /dev/urandom avoids entropy starvation in QEMU arm64 cross-compilation,
+# which can cause Java's TLS stack to hang or fail during the Gradle download.
+ENV GRADLE_OPTS="-Djava.security.egd=file:/dev/./urandom"
+
+# Build the fat JAR (Gradle wrapper downloads Gradle on first run)
+RUN ./gradlew shadowJar --no-daemon -q
 
 # The Docker image only needs Linux Kuzu JNI binaries.
 # Removing macOS/Windows/Android payloads cuts hundreds of MB from the fat JAR.
