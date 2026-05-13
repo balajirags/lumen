@@ -35,10 +35,13 @@ jobs:
         include:
           - os: macos-latest      # Apple Silicon
             arch: arm64
+            name: darwin-arm64
           - os: macos-13          # Intel Mac
             arch: amd64
+            name: darwin-amd64
           - os: ubuntu-latest     # Linux x86_64
             arch: amd64
+            name: linux-amd64
 
     runs-on: ${{ matrix.os }}
 
@@ -78,7 +81,7 @@ jobs:
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.os }}-${{ matrix.arch }}
+          name: native-${{ matrix.name }}
           path: |
             releases/*.tar.gz
             releases/*.sha256
@@ -114,7 +117,7 @@ jobs:
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-linux-arm64
+          name: native-linux-arm64
           path: |
             releases/*.tar.gz
             releases/*.sha256
@@ -165,7 +168,7 @@ jobs:
       - name: Upload Docker release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-docker-linux-${{ matrix.arch }}
+          name: docker-linux-${{ matrix.arch }}
           path: |
             releases/*.tar.gz
             releases/*.sha256
@@ -180,7 +183,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: release-*
+          pattern: "{native-*,docker-*}"
           merge-multiple: true
 
       - name: Generate CHECKSUMS.txt
