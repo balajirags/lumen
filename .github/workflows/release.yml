@@ -159,6 +159,18 @@ jobs:
         with:
           draft: true
           generate_release_notes: true
+          body: |
+            ## Artifacts
+
+            | Artifact | Chip | OS |
+            |---|---|---|
+            | `lumen-native-darwin-arm64` | Apple Silicon (M1/M2/M3/M4) | macOS |
+            | `lumen-native-linux-amd64` | Intel / AMD x86_64 | Linux |
+            | `lumen-docker-linux-arm64` | Apple Silicon (M1/M2/M3/M4) | macOS · Linux arm64 |
+            | `lumen-docker-linux-amd64` | Intel / AMD x86_64 | macOS (Intel) · Linux amd64 |
+
+            Native bundles require only `graphviz` on the target machine — no Docker, no dev tools.
+            Docker bundles require Docker Desktop (Mac) or Docker Engine (Linux).
           files: |
             artifacts/*.tar.gz
             artifacts/*.sha256
