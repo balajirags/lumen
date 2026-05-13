@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lumen"
-version = "1.1.5"
+version = "1.1.6"
 description = "CLI pipeline: index repo → agent analysis → docs site"
 requires-python = ">=3.11"
 dependencies = [
