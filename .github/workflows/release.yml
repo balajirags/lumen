@@ -68,7 +68,7 @@ jobs:
         run: bash scripts/build-native.sh --version "${{ github.ref_name }}"
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.os }}-${{ matrix.arch }}
           path: |
@@ -102,7 +102,7 @@ jobs:
             '
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-linux-arm64
           path: |
@@ -138,7 +138,7 @@ jobs:
           VERSION: ${{ github.ref_name }}
 
       - name: Upload Docker release artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-docker-linux-${{ matrix.arch }}
           path: |
