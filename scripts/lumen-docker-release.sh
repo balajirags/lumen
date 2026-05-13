@@ -6,10 +6,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOCKER_IMAGE="${DOCKER_IMAGE:-lumen}"
 RELEASE_DIR="${RELEASE_DIR:-${ROOT_DIR}/releases}"
 TAG="${TAG:-}"
-DOCKER_TAG="${DOCKER_TAG:-latest}"
-IMAGE_REF="${DOCKER_IMAGE}:${DOCKER_TAG}"
 _PY_VERSION="$(grep '^version = "' "${ROOT_DIR}/pipeline/pyproject.toml" | sed 's/version = "\(.*\)"/\1/')"
 VERSION="${VERSION:-${TAG:-${_PY_VERSION}}}"
+DOCKER_TAG="${DOCKER_TAG:-${VERSION}}"
+IMAGE_REF="${DOCKER_IMAGE}:${DOCKER_TAG}"
 ARCH="${ARCH:-$(uname -m)}"
 case "${ARCH}" in
   arm64|aarch64) DOCKER_PLATFORM="linux/arm64" ;;

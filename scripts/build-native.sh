@@ -270,7 +270,14 @@ cat > "$DIST_DIR/lumen" <<'LAUNCHER'
 # Resolves bundle root, writes .codedoc.toml with correct absolute paths,
 # then delegates to the bundled Python venv entry point.
 set -euo pipefail
-BUNDLE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve symlinks so BUNDLE_DIR is correct even when invoked via ~/.local/bin/lumen
+_SCRIPT="${BASH_SOURCE[0]}"
+while [ -L "$_SCRIPT" ]; do
+  _DIR="$(cd "$(dirname "$_SCRIPT")" && pwd)"
+  _SCRIPT="$(readlink "$_SCRIPT")"
+  [[ "$_SCRIPT" != /* ]] && _SCRIPT="$_DIR/$_SCRIPT"
+done
+BUNDLE_DIR="$(cd "$(dirname "$_SCRIPT")" && pwd)"
 INVOCATION_DIR="$(pwd)"  # capture before cd so output_dir is relative to where lumen was run
 
 # Regenerate runtime config so config.py picks up correct indexer_bin_dir
