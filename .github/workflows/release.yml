@@ -64,6 +64,14 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
+      - name: Install graphviz (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends graphviz libgraphviz-dev
+
+      - name: Install graphviz (macOS)
+        if: runner.os == 'macOS'
+        run: brew install graphviz
+
       - name: Build native tarball
         run: bash scripts/build-native.sh --version "${{ github.ref_name }}"
 
@@ -95,7 +103,7 @@ jobs:
             eclipse-temurin:21-jdk-jammy \
             bash -c '
               set -euo pipefail
-              apt-get update -qq && apt-get install -y -qq curl python3 python3-venv python3-pip nodejs npm > /dev/null
+              apt-get update -qq && apt-get install -y -qq curl python3 python3-venv python3-pip nodejs npm graphviz libgraphviz-dev > /dev/null
               curl -LsSf https://astral.sh/uv/install.sh | sh
               export PATH="$HOME/.local/bin:$PATH"
               bash scripts/build-native.sh --version "${{ github.ref_name }}"
