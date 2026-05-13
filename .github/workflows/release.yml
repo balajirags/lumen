@@ -109,9 +109,45 @@ jobs:
             releases/*.tar.gz
             releases/*.sha256
 
+  build-docker:
+    needs: validate-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+          - arch: arm64
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker release tarball
+        run: ARCH=${{ matrix.arch }} bash scripts/lumen-docker-release.sh
+        env:
+          VERSION: ${{ github.ref_name }}
+
+      - name: Upload Docker release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-docker-linux-${{ matrix.arch }}
+          path: |
+            releases/*.tar.gz
+            releases/*.sha256
+
   publish:
-    needs: [validate-version, build, build-linux-arm64]
-    if: always() && needs.build.result == 'success'
+    needs: [validate-version, build, build-linux-arm64, build-docker]
+    if: always() && needs.build.result == 'success' && needs.build-docker.result == 'success'
     runs-on: ubuntu-latest
 
     steps:

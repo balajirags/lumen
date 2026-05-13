@@ -11,6 +11,11 @@ IMAGE_REF="${DOCKER_IMAGE}:${DOCKER_TAG}"
 _PY_VERSION="$(grep '^version = "' "${ROOT_DIR}/pipeline/pyproject.toml" | sed 's/version = "\(.*\)"/\1/')"
 VERSION="${VERSION:-${TAG:-${_PY_VERSION}}}"
 ARCH="${ARCH:-$(uname -m)}"
+case "${ARCH}" in
+  arm64|aarch64) DOCKER_PLATFORM="linux/arm64" ;;
+  x86_64|amd64)  DOCKER_PLATFORM="linux/amd64" ;;
+  *)             DOCKER_PLATFORM="linux/${ARCH}" ;;
+esac
 RC_NAME="${RC_NAME:-${DOCKER_IMAGE}-rc-${VERSION}-${ARCH}}"
 RC_DIR="${RELEASE_DIR}/${RC_NAME}"
 IMAGES_DIR="${RC_DIR}/images"
@@ -44,12 +49,14 @@ if docker buildx version >/dev/null 2>&1; then
   (
     cd "${ROOT_DIR}"
     docker buildx build \
+      --platform "${DOCKER_PLATFORM}" \
       --output "type=docker,name=${IMAGE_REF},dest=${IMAGE_TAR}" \
       .
   )
 elif command -v colima >/dev/null 2>&1 && colima ssh -- docker buildx version >/dev/null 2>&1; then
   echo "Host docker buildx not found; using buildx inside Colima VM"
   colima ssh -- docker buildx build \
+    --platform "${DOCKER_PLATFORM}" \
     --output "type=docker,name=${IMAGE_REF},dest=${IMAGE_TAR}" \
     "${ROOT_DIR}"
 else
