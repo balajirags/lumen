@@ -33,13 +33,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest      # Apple Silicon
+          - os: macos-latest      # Apple Silicon — native bundle
             arch: arm64
             name: darwin-arm64
-          - os: macos-13          # Intel Mac
-            arch: amd64
-            name: darwin-amd64
-          - os: ubuntu-latest     # Linux x86_64
+          - os: ubuntu-latest     # Linux x86_64 — native bundle
             arch: amd64
             name: linux-amd64
 
@@ -82,42 +79,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lumen-native-${{ matrix.name }}
-          path: |
-            releases/*.tar.gz
-            releases/*.sha256
-
-  # Optional: Linux arm64 via QEMU (slower, may be removed if too slow)
-  build-linux-arm64:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-
-      - name: Build in arm64 container
-        run: |
-          docker run --rm --platform linux/arm64 \
-            -v "${{ github.workspace }}:/workspace" \
-            -w /workspace \
-            eclipse-temurin:21-jdk-jammy \
-            bash -c '
-              set -euo pipefail
-              apt-get update -qq && apt-get install -y -qq curl python3 python3-venv nodejs npm graphviz libgraphviz-dev > /dev/null
-              curl -LsSf https://astral.sh/uv/install.sh | sh
-              export PATH="$HOME/.local/bin:$PATH"
-              uv python install 3.11
-              ln -sf "$(uv python find 3.11)" /usr/local/bin/python3
-              bash scripts/build-native.sh --version "${{ github.ref_name }}"
-            '
-
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: lumen-native-linux-arm64
           path: |
             releases/*.tar.gz
             releases/*.sha256
@@ -174,7 +135,7 @@ jobs:
             releases/*.sha256
 
   publish:
-    needs: [validate-version, build, build-linux-arm64, build-docker]
+    needs: [validate-version, build, build-docker]
     if: always() && needs.build.result == 'success' && needs.build-docker.result == 'success'
     runs-on: ubuntu-latest
 
