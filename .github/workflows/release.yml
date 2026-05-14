@@ -140,10 +140,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Compute version number
-        id: ver
-        run: echo "num=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -168,10 +164,10 @@ jobs:
 
             | Artifact | Chip | OS | Type |
             |---|---|---|---|
-            | [lumen-${{ steps.ver.outputs.num }}-darwin-arm64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/lumen-${{ steps.ver.outputs.num }}-darwin-arm64.tar.gz) | Apple Silicon (M1/M2/M3/M4) | macOS | Native |
-            | [lumen-${{ steps.ver.outputs.num }}-linux-amd64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/lumen-${{ steps.ver.outputs.num }}-linux-amd64.tar.gz) | Intel / AMD x86_64 | Linux | Native |
-            | [lumen-docker-${{ steps.ver.outputs.num }}-arm64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/lumen-docker-${{ steps.ver.outputs.num }}-arm64.tar.gz) | Apple Silicon (M1/M2/M3/M4) | macOS · Linux arm64 | Docker |
-            | [lumen-docker-${{ steps.ver.outputs.num }}-amd64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/lumen-docker-${{ steps.ver.outputs.num }}-amd64.tar.gz) | Intel / AMD x86_64 | macOS (Intel) · Linux amd64 | Docker |
+            | [lumen-${{ github.ref_name }}-darwin-arm64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/lumen-${{ github.ref_name }}-darwin-arm64.tar.gz) | Apple Silicon (M1/M2/M3/M4) | macOS | Native |
+            | [lumen-${{ github.ref_name }}-linux-amd64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/lumen-${{ github.ref_name }}-linux-amd64.tar.gz) | Intel / AMD x86_64 | Linux | Native |
+            | [lumen-docker-${{ github.ref_name }}-arm64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/lumen-docker-${{ github.ref_name }}-arm64.tar.gz) | Apple Silicon (M1/M2/M3/M4) | macOS · Linux arm64 | Docker |
+            | [lumen-docker-${{ github.ref_name }}-amd64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/lumen-docker-${{ github.ref_name }}-amd64.tar.gz) | Intel / AMD x86_64 | macOS (Intel) · Linux amd64 | Docker |
 
             ---
 
@@ -179,11 +175,11 @@ jobs:
 
             ```bash
             # 1. Untar
-            tar -xzf lumen-docker-${{ steps.ver.outputs.num }}-<arch>.tar.gz
-            cd lumen-docker-${{ steps.ver.outputs.num }}-<arch>/runtime
+            tar -xzf lumen-docker-${{ github.ref_name }}-<arch>.tar.gz
+            cd lumen-docker-${{ github.ref_name }}-<arch>/runtime
 
-            # 2. Load image (produces lumen:${{ steps.ver.outputs.num }} + lumen:latest)
-            ./scripts/lumen-docker-load.sh ../images/lumen-${{ steps.ver.outputs.num }}-<arch>.tar
+            # 2. Load image (produces lumen:${{ github.ref_name }} + lumen:latest)
+            ./scripts/lumen-docker-load.sh ../images/lumen-${{ github.ref_name }}-<arch>.tar
 
             # 3. Run full pipeline
             export ANTHROPIC_API_KEY=...
@@ -209,8 +205,8 @@ jobs:
 
             ```bash
             # 1. Untar
-            tar -xzf lumen-${{ steps.ver.outputs.num }}-<os>-<arch>.tar.gz
-            cd lumen-${{ steps.ver.outputs.num }}-<os>-<arch>
+            tar -xzf lumen-${{ github.ref_name }}-<os>-<arch>.tar.gz
+            cd lumen-${{ github.ref_name }}-<os>-<arch>
 
             # 2. (Optional) verify bundle integrity
             ./verify.sh
