@@ -14,9 +14,14 @@ public class KuzuGraphStore implements GraphStore {
     private final Database database;
     private final Connection connection;
 
+    // 512 MB buffer pool cap. KuzuDB's default (bufferPoolSize=0) auto-sizes from
+    // available system memory, which triggers OOM kills in memory-constrained Docker
+    // containers. 512 MB is sufficient for code-graph workloads.
+    private static final long BUFFER_POOL_BYTES = 512L * 1024 * 1024;
+
     public KuzuGraphStore(String dbPath) {
         System.out.printf("KuzuDB: opening database at %s%n", java.nio.file.Path.of(dbPath).toAbsolutePath().normalize());
-        this.database = new Database(dbPath);
+        this.database = new Database(dbPath, BUFFER_POOL_BYTES, true, false, 0, true, -1);
         this.connection = new Connection(database);
     }
 
