@@ -122,7 +122,9 @@ class KuzuStore:
         import kuzu
         self.db_path = os.path.abspath(db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        self.db = kuzu.Database(self.db_path)
+        # Cap buffer pool at 512 MB; default (0) uses ~80% of system memory
+        # which causes OOM kills in memory-constrained Docker environments.
+        self.db = kuzu.Database(self.db_path, buffer_pool_size=512 * 1024 * 1024)
         self.conn = kuzu.Connection(self.db)
         print(f"KuzuDB: opening database at {self.db_path}", file=__import__('sys').stderr)
 

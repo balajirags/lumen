@@ -48,7 +48,9 @@ class KuzuStore {
         this.dbPath = path.resolve(dbPath);
         fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
         const kuzu = require('kuzu');
-        this.db = new kuzu.Database(this.dbPath);
+        // Cap buffer pool at 512 MB; default (0) uses ~80% of system memory
+        // which causes OOM kills in memory-constrained Docker environments.
+        this.db = new kuzu.Database(this.dbPath, 512 * 1024 * 1024);
         this.conn = new kuzu.Connection(this.db);
         console.error(`KuzuDB: opening database at ${this.dbPath}`);
     }
