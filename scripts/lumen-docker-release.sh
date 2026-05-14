@@ -8,6 +8,7 @@ RELEASE_DIR="${RELEASE_DIR:-${ROOT_DIR}/releases}"
 TAG="${TAG:-}"
 _PY_VERSION="$(grep '^version = "' "${ROOT_DIR}/pipeline/pyproject.toml" | sed 's/version = "\(.*\)"/\1/')"
 VERSION="${VERSION:-${TAG:-${_PY_VERSION}}}"
+VERSION="${VERSION#v}"  # strip leading 'v' for consistent naming with native bundles
 DOCKER_TAG="${DOCKER_TAG:-${VERSION}}"
 IMAGE_REF="${DOCKER_IMAGE}:${DOCKER_TAG}"
 ARCH="${ARCH:-$(uname -m)}"

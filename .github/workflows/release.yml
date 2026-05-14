@@ -173,8 +173,57 @@ jobs:
             | [lumen-docker-${{ steps.ver.outputs.num }}-arm64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/lumen-docker-${{ steps.ver.outputs.num }}-arm64.tar.gz) | Apple Silicon (M1/M2/M3/M4) | macOS · Linux arm64 | Docker |
             | [lumen-docker-${{ steps.ver.outputs.num }}-amd64.tar.gz](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/lumen-docker-${{ steps.ver.outputs.num }}-amd64.tar.gz) | Intel / AMD x86_64 | macOS (Intel) · Linux amd64 | Docker |
 
-            Native bundles require only `graphviz` on the target machine — no Docker, no dev tools.
-            Docker bundles require Docker Desktop (Mac) or Docker Engine (Linux).
+            ---
+
+            ## Docker bundle — quick start
+
+            ```bash
+            # 1. Untar
+            tar -xzf lumen-docker-${{ steps.ver.outputs.num }}-<arch>.tar.gz
+            cd lumen-docker-${{ steps.ver.outputs.num }}-<arch>/runtime
+
+            # 2. Load image (produces lumen:${{ steps.ver.outputs.num }} + lumen:latest)
+            ./scripts/lumen-docker-load.sh ../images/lumen-${{ steps.ver.outputs.num }}-<arch>.tar
+
+            # 3. Run full pipeline
+            export ANTHROPIC_API_KEY=...
+            make lumen-docker-run REPO=/path/to/repo \
+              ARGS='--provider anthropic --model claude-sonnet-4-6'
+
+            # 3b. Or use a local Ollama model
+            make lumen-docker-run REPO=/path/to/repo \
+              ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
+
+            # MCP mode
+            make lumen-docker-mcp REPO=/path/to/repo   # → http://127.0.0.1:8765/mcp
+            ```
+
+            > Replace `<arch>` with `arm64` (Apple Silicon / Linux ARM) or `amd64` (Intel/AMD).
+
+            ---
+
+            ## Native bundle — quick start
+
+            > Requires only `graphviz` — no Docker, no Java, no Node, no Python.
+            > Install: `brew install graphviz` (macOS) or `sudo apt install graphviz` (Linux)
+
+            ```bash
+            # 1. Untar
+            tar -xzf lumen-${{ steps.ver.outputs.num }}-<os>-<arch>.tar.gz
+            cd lumen-${{ steps.ver.outputs.num }}-<os>-<arch>
+
+            # 2. (Optional) verify bundle integrity
+            ./verify.sh
+
+            # 3. Install — symlinks lumen into ~/.local/bin
+            ./install.sh
+
+            # 4. Run
+            lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
+            lumen mcp /path/to/repo   # MCP mode → http://127.0.0.1:8765/mcp
+            ```
+
+            > Replace `<os>-<arch>` with `darwin-arm64` (Apple Silicon) or `linux-amd64` (Linux x86_64).
           files: |
             artifacts/*.tar.gz
             artifacts/*.sha256

@@ -1,54 +1,27 @@
 # Run Lumen Offline
 
-This guide explains how to run Lumen on a laptop or VM where pulling images from a central registry is not allowed.
+This guide explains how to run Lumen from a release bundle on a machine where pulling images from a registry is not available.
 
-## 1. Use a release bundle
+---
 
-If you received a release candidate, unpack it first:
+## Docker bundle
 
-```bash
-tar -xzf lumen-rc-<version>-<arch>.tar.gz
-cd lumen-rc-<version>-<arch>/runtime
-```
-
-The unpacked bundle includes:
-
-- `../images/<image>.tar`
-- `Makefile`
-- `run-lumen.md`
-- `docker-source.md`
-- `scripts/lumen-docker-load.sh`
-- `scripts/lumen-docker-run.sh`
-- `scripts/lumen-docker-mcp.sh`
-- `scripts/lumen-docker-docs.sh`
-- `release.txt`
-- `../checksums/SHA256SUMS`
-
-Optional checksum verification:
+### 1. Untar and load
 
 ```bash
-cd ..
-shasum -a 256 -c checksums/SHA256SUMS
-cd runtime
+tar -xzf lumen-docker-<version>-<arch>.tar.gz
+cd lumen-docker-<version>-<arch>/runtime
+
+./scripts/lumen-docker-load.sh ../images/lumen-<version>-<arch>.tar
 ```
 
-## 2. Load the image
-
-```bash
-./scripts/lumen-docker-load.sh ../images/lumen-0.1.0-amd64.tar
-```
-
-## 3. Verify the image
+Verify the image loaded:
 
 ```bash
 docker images | grep lumen
 ```
 
-Expected result:
-
-- A local `lumen` image should appear in the image list.
-
-## 4. Run the full pipeline
+### 2. Run the full pipeline
 
 ```bash
 export ANTHROPIC_API_KEY=...
@@ -65,9 +38,9 @@ make lumen-docker-run REPO=/path/to/repo \
   ARGS="--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1"
 ```
 
-## 5. Run MCP mode
+### 3. MCP mode
 
-Use an existing DB:
+Serve an existing DB:
 
 ```bash
 make lumen-docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
@@ -79,28 +52,72 @@ Or index a repo and serve MCP directly:
 make lumen-docker-mcp REPO=/path/to/repo
 ```
 
-Default MCP URL:
+MCP endpoint: `http://127.0.0.1:8765/mcp`
 
-- `http://127.0.0.1:8765/mcp`
-
-## 6. Serve generated docs
+### 4. Serve generated docs
 
 ```bash
-make lumen-docker-docs
+make lumen-docker-docs    # → http://localhost:8081
 ```
 
-Default docs URL:
+---
 
-- `http://localhost:8081`
+## Native bundle
+
+### 1. Untar and install
+
+```bash
+tar -xzf lumen-<version>-<os>-<arch>.tar.gz
+cd lumen-<version>-<os>-<arch>
+
+./install.sh          # symlinks lumen into ~/.local/bin
+```
+
+Make sure `~/.local/bin` is on your PATH:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Optionally verify bundle integrity before installing:
+
+```bash
+./verify.sh
+```
+
+### 2. Prerequisites
+
+Only `graphviz` is required — no Docker, no Java, no Node, no Python needed.
+
+```bash
+# macOS
+brew install graphviz
+
+# Linux
+sudo apt install graphviz   # or: sudo yum install graphviz
+```
+
+### 3. Run
+
+```bash
+lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
+lumen run /path/to/repo --provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1
+
+# MCP mode
+lumen mcp /path/to/repo
+```
+
+---
 
 ## Outputs
 
-- Generated output is written to `./output`
-- Docs site is written under `./output/doc-site`
+- Pipeline output: `./lumen-output/` (relative to where `lumen` was invoked)
+- Docker pipeline output: `./output/` (relative to where `make` was run)
 
 ## Troubleshooting
 
-- If `docker load` fails, confirm the archive matches the target machine architecture.
-- If the image is not found, confirm `docker images` shows `lumen`.
-- If Ollama is running on the host, use `host.docker.internal` as the Docker-side hostname.
-- If hosted models are used, confirm the required API key environment variable is set before running `make`.
+- **Docker image not found**: confirm `docker images` shows `lumen` after running `lumen-docker-load.sh`
+- **Architecture mismatch**: use the bundle that matches your machine — `arm64` for Apple Silicon, `amd64` for Intel/AMD
+- **Ollama on host**: use `host.docker.internal` as the hostname in `--base-url`
+- **API key missing**: set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` before running `make`
+- **graphviz missing** (native): docs generation requires `graphviz`; install via brew/apt
