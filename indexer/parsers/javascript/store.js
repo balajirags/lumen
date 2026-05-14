@@ -5,6 +5,18 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+
+const KUZU_MAX_BUFFER_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB ceiling
+const KUZU_MIN_BUFFER_BYTES = 512 * 1024 * 1024;       // 512 MB floor
+function kuzuBufferPoolSize() {
+    try {
+        const total = os.totalmem();
+        return Math.max(KUZU_MIN_BUFFER_BYTES, Math.min(Math.floor(total * 0.8), KUZU_MAX_BUFFER_BYTES));
+    } catch (e) {
+        return KUZU_MIN_BUFFER_BYTES;
+    }
+}
 
 function withNormalizedRelProps(definition) {
     const idx = definition.lastIndexOf(')');
@@ -48,9 +60,8 @@ class KuzuStore {
         this.dbPath = path.resolve(dbPath);
         fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
         const kuzu = require('kuzu');
-        // Cap buffer pool at 512 MB; default (0) uses ~80% of system memory
-        // which causes OOM kills in memory-constrained Docker environments.
-        this.db = new kuzu.Database(this.dbPath, 512 * 1024 * 1024);
+        const bufferPool = kuzuBufferPoolSize();
+        this.db = new kuzu.Database(this.dbPath, bufferPool);
         this.conn = new kuzu.Connection(this.db);
         console.error(`KuzuDB: opening database at ${this.dbPath}`);
     }

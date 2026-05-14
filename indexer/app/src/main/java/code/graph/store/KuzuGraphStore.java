@@ -14,14 +14,34 @@ public class KuzuGraphStore implements GraphStore {
     private final Database database;
     private final Connection connection;
 
-    // 512 MB buffer pool cap. KuzuDB's default (bufferPoolSize=0) auto-sizes from
-    // available system memory, which triggers OOM kills in memory-constrained Docker
-    // containers. 512 MB is sufficient for code-graph workloads.
-    private static final long BUFFER_POOL_BYTES = 512L * 1024 * 1024;
+    private static final long MAX_BUFFER_POOL_BYTES = 2L * 1024 * 1024 * 1024; // 2 GB ceiling
+    private static final long MIN_BUFFER_POOL_BYTES = 512L * 1024 * 1024;       // 512 MB floor
+
+    // Scale with available memory but cap at 2 GB. Reads /proc/meminfo on Linux
+    // (works inside Docker without extra JDK modules). Falls back to 512 MB on
+    // other platforms or read failure. Avoids KuzuDB's default of auto-sizing to
+    // ~80% of system memory, which causes OOM kills in shared/constrained environments.
+    private static long computeBufferPoolSize() {
+        try {
+            java.nio.file.Path meminfo = java.nio.file.Path.of("/proc/meminfo");
+            if (java.nio.file.Files.exists(meminfo)) {
+                for (String line : java.nio.file.Files.readAllLines(meminfo)) {
+                    if (line.startsWith("MemTotal:")) {
+                        long kb = Long.parseLong(line.trim().split("\\s+")[1]);
+                        long total = kb * 1024L;
+                        return Math.max(MIN_BUFFER_POOL_BYTES, Math.min((long)(total * 0.8), MAX_BUFFER_POOL_BYTES));
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return MIN_BUFFER_POOL_BYTES;
+    }
 
     public KuzuGraphStore(String dbPath) {
-        System.out.printf("KuzuDB: opening database at %s%n", java.nio.file.Path.of(dbPath).toAbsolutePath().normalize());
-        this.database = new Database(dbPath, BUFFER_POOL_BYTES, true, false, 0, true, -1);
+        long bufferPool = computeBufferPoolSize();
+        System.out.printf("KuzuDB: opening database at %s (buffer pool: %d MB)%n",
+            java.nio.file.Path.of(dbPath).toAbsolutePath().normalize(), bufferPool / (1024 * 1024));
+        this.database = new Database(dbPath, bufferPool, true, false, 0, true, -1);
         this.connection = new Connection(database);
     }
 

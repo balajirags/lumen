@@ -5,6 +5,18 @@ Supports KuzuDB (embedded) and Neo4j backends.
 
 import os
 
+_KUZU_MAX_BUFFER_BYTES = 2 * 1024 ** 3  # 2 GB ceiling
+_KUZU_MIN_BUFFER_BYTES = 512 * 1024 ** 2  # 512 MB floor
+
+def _kuzu_buffer_pool_size() -> int:
+    try:
+        total = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
+        if total > 0:
+            return max(_KUZU_MIN_BUFFER_BYTES, min(int(total * 0.8), _KUZU_MAX_BUFFER_BYTES))
+    except Exception:
+        pass
+    return _KUZU_MIN_BUFFER_BYTES
+
 
 def with_normalized_rel_props(definition):
     idx = definition.rfind(')')
@@ -122,9 +134,7 @@ class KuzuStore:
         import kuzu
         self.db_path = os.path.abspath(db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        # Cap buffer pool at 512 MB; default (0) uses ~80% of system memory
-        # which causes OOM kills in memory-constrained Docker environments.
-        self.db = kuzu.Database(self.db_path, buffer_pool_size=512 * 1024 * 1024)
+        self.db = kuzu.Database(self.db_path, buffer_pool_size=_kuzu_buffer_pool_size())
         self.conn = kuzu.Connection(self.db)
         print(f"KuzuDB: opening database at {self.db_path}", file=__import__('sys').stderr)
 
