@@ -130,8 +130,13 @@ def run_indexer(state: PipelineState) -> PipelineState:
 
             if proc.returncode != 0:
                 _log.update_indexer_progress(display, "failed")
+                hint = (
+                    "\nProcess was killed (SIGKILL) — likely out of memory. "
+                    "Increase Docker Desktop memory to at least 8 GB (Settings → Resources → Memory)."
+                    if proc.returncode == -9 else ""
+                )
                 raise RuntimeError(
-                    f"{binary_name} exited with code {proc.returncode}.\n{_stderr_excerpt(proc.stderr)}"
+                    f"{binary_name} exited with code {proc.returncode}.{hint}\n{_stderr_excerpt(proc.stderr)}"
                 )
 
             _log.update_indexer_progress(display, "done")
