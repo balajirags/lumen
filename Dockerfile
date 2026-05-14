@@ -180,7 +180,7 @@ RUN chmod +x /opt/lumen/scripts/build-docs-site.sh \
       /opt/lumen/scripts/run-docs-server.sh
 
 # ── Wrapper scripts + runtime config (single layer) ──
-RUN printf '#!/bin/sh\nexec /opt/jre/bin/java -jar /opt/cmg/code-mem-graph.jar "$@"\n' \
+RUN printf '#!/bin/sh\nexec /opt/jre/bin/java -Xmx2g -jar /opt/cmg/code-mem-graph.jar "$@"\n' \
       > /usr/local/bin/cmg-java \
     && printf '#!/bin/sh\nif [ -n "${CMG_JS_HEAP_MB:-}" ]; then exec node --max-old-space-size="$CMG_JS_HEAP_MB" /opt/cmg-js/parse.js "$@"; else exec node /opt/cmg-js/parse.js "$@"; fi\n' \
       > /usr/local/bin/cmg-js \
