@@ -41,7 +41,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Override with: bash build-native.sh --version v1.2.3
 PYPROJECT_VERSION="$(grep -m1 '^version' "$REPO_ROOT/pipeline/pyproject.toml" \
                      | sed 's/.*= *"\(.*\)"/\1/')"
-VERSION="${PYPROJECT_VERSION}"
+VERSION="v${PYPROJECT_VERSION}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
