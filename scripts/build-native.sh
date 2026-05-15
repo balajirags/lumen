@@ -282,14 +282,10 @@ INVOCATION_DIR="$(pwd)"  # capture before cd so output_dir is relative to where 
 
 # Regenerate runtime config so config.py picks up correct indexer_bin_dir
 # and build_script regardless of where the bundle lives on disk.
-# output_dir defaults to lumen-output in the invocation directory; --output-dir flag overrides.
 cat > "$BUNDLE_DIR/.codedoc.toml" << TOML
 [paths]
 indexer_bin_dir = "$BUNDLE_DIR/bin"
 build_script    = "$BUNDLE_DIR/scripts/build-docs-site.sh"
-
-[pipeline]
-output_dir = "$INVOCATION_DIR/lumen-output"
 TOML
 
 # Put bundled bin/ first so plantuml and cmg-* wrappers shadow any system versions.
@@ -306,7 +302,18 @@ fi
 
 # cd to bundle root so config.py's CWD-based .codedoc.toml lookup succeeds.
 cd "$BUNDLE_DIR"
-exec "$BUNDLE_DIR/venv/bin/lumen" "$@"
+
+# Inject --output-dir pointing back to the invocation directory unless the
+# caller already passed it. This mirrors Docker's ./output convention.
+has_output_dir=0
+for arg in "$@"; do
+  [ "$arg" = "--output-dir" ] && has_output_dir=1 && break
+done
+if [ "$has_output_dir" -eq 0 ]; then
+  exec "$BUNDLE_DIR/venv/bin/lumen" --output-dir "$INVOCATION_DIR/output" "$@"
+else
+  exec "$BUNDLE_DIR/venv/bin/lumen" "$@"
+fi
 LAUNCHER
 
 chmod +x "$DIST_DIR/lumen"

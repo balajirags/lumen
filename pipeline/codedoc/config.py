@@ -16,7 +16,7 @@ from typing import Any
 
 
 _DEFAULTS = {
-    "output_dir": "./codedoc-output",
+    "output_dir": "./output",
     "model": "claude-sonnet-4-6",
     "provider": "auto",
     "base_url": "",

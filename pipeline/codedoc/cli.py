@@ -32,7 +32,7 @@ def main() -> None:
 
 @main.command()
 @click.argument("repo_path", type=click.Path(exists=True, file_okay=False))
-@click.option("--output-dir", type=click.Path(), default=None, help="Output directory (default: ./codedoc-output)")
+@click.option("--output-dir", type=click.Path(), default=None, help="Output directory (default: ./output)")
 @click.option("--repo-name", default=None, help="Override repository name used in output directory (useful when repo is mounted at a generic path like /repo)")
 @click.option("--model", default=None, help="Model name (default: claude-sonnet-4-6). For Ollama use tool-capable models: llama3.1, qwen2.5, mistral.")
 @click.option("--provider", default=None, type=click.Choice(["auto", "anthropic", "ollama", "openai"]), help="LLM provider (default: auto-detect from model name)")
@@ -138,7 +138,7 @@ def run(
 @click.argument("repo_path", required=False, type=click.Path(exists=True, file_okay=False))
 @click.option("--db-path", default=None, type=click.Path(exists=True), help="Serve an existing Kuzu DB directly")
 @click.option("--repo-path", "served_repo_path", default=None, type=click.Path(exists=True, file_okay=False), help="Optional source repo path when serving an existing DB")
-@click.option("--output-dir", type=click.Path(), default=None, help="Output directory (default: ./codedoc-output)")
+@click.option("--output-dir", type=click.Path(), default=None, help="Output directory (default: ./output)")
 @click.option("--repo-name", default=None, help="Override repository name used in output directory")
 @click.option("--timeout", type=int, default=None, help="Per-stage timeout in seconds (default: 300)")
 @click.option("--repo-size-check", default=None, type=click.Choice(["off", "warn", "strict"]), help="Repo size guardrail mode (default: warn)")
@@ -208,7 +208,7 @@ def mcp(
 @click.argument("repo_path", required=False, type=click.Path(exists=True, file_okay=False))
 @click.option("--db-path", default=None, type=click.Path(exists=True), help="Serve an existing Kuzu DB directly")
 @click.option("--repo-path", "served_repo_path", default=None, type=click.Path(exists=True, file_okay=False), help="Optional source repo path when serving an existing DB")
-@click.option("--output-dir", type=click.Path(), default=None, help="Output directory (default: ./codedoc-output)")
+@click.option("--output-dir", type=click.Path(), default=None, help="Output directory (default: ./output)")
 @click.option("--repo-name", default=None, help="Override repository name used in output directory")
 @click.option("--timeout", type=int, default=None, help="Per-stage timeout in seconds (default: 300)")
 @click.option("--repo-size-check", default=None, type=click.Choice(["off", "warn", "strict"]), help="Repo size guardrail mode (default: warn)")
@@ -304,7 +304,7 @@ def mcp_http(
 
 
 @main.command()
-@click.option("--output-dir", type=click.Path(), default=None, help="lumen output root directory (default: ./lumen-output)")
+@click.option("--output-dir", type=click.Path(), default=None, help="lumen output root directory (default: ./output)")
 @click.option("--port", type=int, default=8081, show_default=True, help="HTTP port for the docs server")
 @click.option("--no-serve", is_flag=True, default=False, help="Build site without starting the HTTP server")
 def docs(

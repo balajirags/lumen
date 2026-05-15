@@ -198,8 +198,8 @@ def main() -> None:
         description="Index a source repo into a KuzuDB code property graph."
     )
     parser.add_argument("repo_path", help="Path to the source code repository")
-    parser.add_argument("--output-dir", default="./codedoc-output",
-                        help="Output directory (default: ./codedoc-output)")
+    parser.add_argument("--output-dir", default="./output",
+                        help="Output directory (default: ./output)")
     parser.add_argument("--bin-dir", default="",
                         help="Directory containing cmg-* binaries")
     parser.add_argument("--timeout", type=int, default=300,

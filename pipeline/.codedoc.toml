@@ -2,7 +2,7 @@
 # Values here are overridden by CLI flags.
 
 [pipeline]
-output_dir    = "./codedoc-output"
+output_dir    = "./output"
 model         = "claude-sonnet-4-6"
 # provider: "auto" detects from model name. Options: anthropic, ollama, openai
 provider      = "auto"
