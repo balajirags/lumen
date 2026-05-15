@@ -1,6 +1,6 @@
 {
   "name": "code-mem-graph-js-parser",
-  "version": "1.1.13",
+  "version": "1.1.14",
   "private": true,
   "description": "JavaScript/React/TypeScript parser for code-mem-graph",
   "dependencies": {
