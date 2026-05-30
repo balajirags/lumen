@@ -1,0 +1,15 @@
+{
+    "name": "lumen/php-parser",
+    "description": "PHP source code parser for lumen code graph",
+    "type": "project",
+    "require": {
+        "php": ">=7.4",
+        "nikic/php-parser": "^4.19"
+    },
+    "autoload": {
+        "psr-4": {}
+    },
+    "config": {
+        "optimize-autoloader": true
+    }
+}

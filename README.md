@@ -61,6 +61,7 @@ lumen currently supports:
 - Java / Kotlin
 - JavaScript / TypeScript (JSX, TSX, ES modules)
 - Python
+- PHP (Laravel, raw PHP)
 
 Multi-language repos are indexed in one run when supported language slices are present.
 
@@ -86,7 +87,7 @@ In practice, that gives you:
 
 ### Why it is different
 
-- **Multi-language indexing per run** — supported Java/Kotlin, JS/TS, and Python slices are all indexed in the same run when present.
+- **Multi-language indexing per run** — supported Java/Kotlin, JS/TS, Python, and PHP slices are all indexed in the same run when present.
 - **Normalized graph metadata** — nodes and edges carry `language`, `kind`, and `normKind` so tooling can reason across language-specific parser outputs more consistently.
 - **Three-tier CALL confidence** — CALLS edges carry `confidence` (0.95 same-file / 0.90 import-resolved / 0.50 global) and `reason` so downstream analysis can filter to reliable edges only.
 - **Workflow and Domain post-processing** — the indexer derives Workflow nodes (HTTP entry → repository/event terminal) and Domain nodes (functional clusters with cohesion scores) as a post-processing pass, then pre-fetches them into agent orientation for immediate use.
@@ -240,7 +241,7 @@ and push git tags manually.
 ### Mode 2: Build Locally (Developer)
 
 Clone the repo and build everything from source. Requires Java 21, Node 20, Python 3.11+,
-and [uv](https://docs.astral.sh/uv/).
+and [uv](https://docs.astral.sh/uv/). PHP support additionally requires PHP 7.4+ and [Composer](https://getcomposer.org/).
 
 #### Install
 

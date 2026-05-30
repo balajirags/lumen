@@ -25,6 +25,9 @@ ui/node_modules/
 ui/dist/
 indexer/parsers/javascript/node_modules/
 
+# PHP (indexer/parsers/php/)
+indexer/parsers/php/vendor/
+
 # Common
 .DS_Store
 .env

@@ -10,12 +10,15 @@ import java.util.stream.Collectors;
  * Post-processing step that traces end-to-end execution paths through the call graph
  * and materialises them as Workflow nodes with WORKFLOW_STEP edges.
  *
- * <p>Two strategies are applied based on detected language(s):
+ * <p>Three strategies are applied based on detected language(s):
  * <ul>
  *   <li><b>JVM (Java/Kotlin)</b>: entry points are HTTP-annotated Controller methods;
  *       terminals are Repository methods or event-producer calls.</li>
  *   <li><b>React (JS/TS)</b>: entry points are root Component nodes (no incoming RENDERS);
  *       terminals are leaf AsyncFunction/ArrowFunction nodes with no outgoing calls.</li>
+ *   <li><b>PHP (Laravel/raw)</b>: entry points are controller methods annotated by the route
+ *       extractor (GetMapping/PostMapping/etc.) or methods that access HTTP superglobals;
+ *       terminals are Eloquent model queries, Repository classes, or raw DB/PDO calls.</li>
  * </ul>
  */
 public class WorkflowBuilder {
@@ -26,13 +29,16 @@ public class WorkflowBuilder {
     );
 
     public void build(CodeGraph graph) {
-        boolean hasJvm = graph.getNodes().values().stream()
+        boolean hasPhp = graph.getNodes().values().stream()
+                .anyMatch(n -> "php".equals(n.properties().get("language")));
+        boolean hasJvm = !hasPhp && graph.getNodes().values().stream()
                 .anyMatch(n -> n.type() == NodeType.CLASS || n.type() == NodeType.METHOD);
-        boolean hasJs = graph.getNodes().values().stream()
+        boolean hasJs  = graph.getNodes().values().stream()
                 .anyMatch(n -> n.type() == NodeType.COMPONENT || n.type() == NodeType.ASYNC_FUNCTION);
 
         if (hasJvm) buildJvmWorkflows(graph);
         if (hasJs)  buildReactWorkflows(graph);
+        if (hasPhp) buildPhpWorkflows(graph);
     }
 
     // -------------------------------------------------------------------------
@@ -104,6 +110,85 @@ public class WorkflowBuilder {
                n.name().toLowerCase().contains("kafkatemplate") ||
                qn.contains("KafkaProducer") ||
                qn.contains("EventPublisher");
+    }
+
+    // -------------------------------------------------------------------------
+    // PHP strategy (Laravel + raw PHP)
+    // -------------------------------------------------------------------------
+
+    private void buildPhpWorkflows(CodeGraph graph) {
+        Map<String, Map<String, String>> annotationsByNode = buildAnnotationIndex(graph);
+
+        Set<String> entryPoints = graph.getNodes().values().stream()
+                .filter(n -> n.type() == NodeType.METHOD)
+                .filter(n -> "php".equals(n.properties().get("language")))
+                .filter(n -> hasHttpAnnotation(annotationsByNode, n.id()))
+                .map(CodeNode::id)
+                .collect(Collectors.toSet());
+
+        for (String entryId : entryPoints) {
+            String httpMethod = resolveHttpMethod(annotationsByNode, entryId);
+            String httpPath   = resolveHttpPath(annotationsByNode, entryId);
+            bfsAndEmit(graph, entryId, this::isPhpTerminal, httpMethod, httpPath, "php");
+        }
+    }
+
+    private static final Set<String> PHP_DB_CLASSES = Set.of(
+            "DB", "PDO", "Database", "QueryBuilder", "Builder", "Connection",
+            "MySQLi", "Mysqli", "mysqli"
+    );
+    private static final Set<String> PHP_DB_METHODS = Set.of(
+            "query", "execute", "select", "insert", "update", "delete",
+            "find", "findOrFail", "all", "get", "first", "firstOrFail",
+            "save", "create", "destroy"
+    );
+
+    private boolean isPhpTerminal(CodeGraph graph, String nodeId) {
+        CodeNode n = graph.getNode(nodeId);
+        if (n == null) return false;
+        String qn   = n.qualifiedName() != null ? n.qualifiedName() : "";
+        String name = n.name() != null ? n.name() : "";
+
+        // Repository class pattern (same as JVM)
+        if (qn.toLowerCase().contains("repository")) return true;
+
+        // Eloquent Model — class that EXTENDS a class named "Model"
+        if (n.type() == NodeType.METHOD && isEloquentModel(graph, qn)) return true;
+
+        // Raw DB/PDO call — method on a known DB utility class
+        String parentClass = extractClassName(qn);
+        if (PHP_DB_CLASSES.contains(parentClass) && PHP_DB_METHODS.contains(name)) return true;
+
+        return false;
+    }
+
+    private boolean isEloquentModel(CodeGraph graph, String methodQn) {
+        int dot = methodQn.lastIndexOf('.');
+        if (dot < 0) return false;
+        String currentId = "class:" + methodQn.substring(0, dot);
+        // Walk EXTENDS chain up to 5 hops
+        for (int hops = 0; hops < 5; hops++) {
+            if (graph.getNode(currentId) == null) break;
+            final String lookupId = currentId;
+            String parentId = graph.getRelationships().stream()
+                    .filter(r -> r.sourceId().equals(lookupId) && r.type() == RelationshipType.EXTENDS)
+                    .map(CodeRelationship::targetId)
+                    .findFirst().orElse(null);
+            if (parentId == null) break;
+            CodeNode parent = graph.getNode(parentId);
+            if (parent != null && "Model".equals(parent.name())) return true;
+            currentId = parentId;
+        }
+        return false;
+    }
+
+    private static String extractClassName(String qualifiedName) {
+        if (qualifiedName == null) return "";
+        int dot = qualifiedName.lastIndexOf('.');
+        if (dot < 0) return qualifiedName;
+        String classPath = qualifiedName.substring(0, dot);
+        int lastSep = Math.max(classPath.lastIndexOf('.'), classPath.lastIndexOf('\\'));
+        return lastSep >= 0 ? classPath.substring(lastSep + 1) : classPath;
     }
 
     // -------------------------------------------------------------------------

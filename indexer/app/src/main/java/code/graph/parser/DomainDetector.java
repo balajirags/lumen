@@ -29,6 +29,12 @@ public class DomainDetector {
             "Configuration",  "Configuration"
     );
 
+    /** PHP HTTP route annotations injected by the route extractor. */
+    private static final Set<String> PHP_HTTP_ANNOTATIONS = Set.of(
+            "GetMapping", "PostMapping", "PutMapping", "DeleteMapping",
+            "PatchMapping", "RequestMapping"
+    );
+
     public void detect(CodeGraph graph) {
         Set<String> productionNodes = getProductionNodes(graph);
         if (productionNodes.isEmpty()) return;
@@ -121,9 +127,10 @@ public class DomainDetector {
     private boolean isTestNode(CodeNode n) {
         String path = n.properties().get("path") instanceof String s ? s : null;
         String qn   = n.qualifiedName() != null ? n.qualifiedName() : "";
-        return (path != null && path.contains("/test/")) ||
+        return (path != null && (path.contains("/test/") || path.contains("/tests/"))) ||
                qn.endsWith("Test") || qn.endsWith("IT") || qn.endsWith("Spec") ||
-               qn.contains("Test.") || qn.contains(".test.");
+               qn.contains("Test.") || qn.contains(".test.") ||
+               (path != null && (path.startsWith("tests/") || path.startsWith("test/")));
     }
 
     // -------------------------------------------------------------------------
@@ -222,6 +229,43 @@ public class DomainDetector {
 
     private String deriveHeuristicLabel(CodeGraph graph, List<String> members) {
         String language = deriveLanguage(graph, members);
+
+        if ("php".equals(language)) {
+            // Detect PHP architectural layer from class name conventions and HTTP annotations
+            long controllerCount = members.stream().map(graph::getNode).filter(Objects::nonNull)
+                    .filter(n -> {
+                        String qn = n.qualifiedName() != null ? n.qualifiedName() : "";
+                        return qn.contains("Controller") || qn.contains("controller");
+                    }).count();
+            long serviceCount = members.stream().map(graph::getNode).filter(Objects::nonNull)
+                    .filter(n -> {
+                        String qn = n.qualifiedName() != null ? n.qualifiedName() : "";
+                        return qn.contains("Service") || qn.contains("service");
+                    }).count();
+            long repositoryCount = members.stream().map(graph::getNode).filter(Objects::nonNull)
+                    .filter(n -> {
+                        String qn = n.qualifiedName() != null ? n.qualifiedName() : "";
+                        return qn.contains("Repository") || qn.contains("Repo");
+                    }).count();
+            long modelCount = members.stream().map(graph::getNode).filter(Objects::nonNull)
+                    .filter(n -> {
+                        String qn = n.qualifiedName() != null ? n.qualifiedName() : "";
+                        return qn.contains("Model") || qn.contains("\\Models\\");
+                    }).count();
+            // Check for HTTP route annotations (controller layer)
+            boolean hasHttpAnnotation = graph.getRelationships().stream()
+                    .filter(r -> r.type() == RelationshipType.HAS_ANNOTATION && members.contains(r.sourceId()))
+                    .anyMatch(r -> {
+                        CodeNode ann = graph.getNode(r.targetId());
+                        return ann != null && PHP_HTTP_ANNOTATIONS.contains(ann.name());
+                    });
+            if (hasHttpAnnotation || controllerCount > serviceCount && controllerCount > repositoryCount)
+                return "Controller";
+            if (repositoryCount > 0 && repositoryCount >= serviceCount) return "Repository";
+            if (serviceCount > 0) return "Service";
+            if (modelCount > 0) return "Model";
+            return "Mixed";
+        }
 
         if ("java".equals(language) || "kotlin".equals(language)) {
             // Tier 1: Spring stereotype annotation scan

@@ -18,7 +18,7 @@ This is a monorepo containing two sub-projects:
 | Directory | Former repo | Purpose |
 |---|---|---|
 | `pipeline/` | `reverse-eng-agent` | Python LLM pipeline: indexer stage, agent (supervisor+subagents), MkDocs builder |
-| `indexer/` | `code-mem-graph` | Indexer runtimes: Java fat JAR, JS parser, Python parser |
+| `indexer/` | `code-mem-graph` | Indexer runtimes: Java fat JAR, JS parser, Python parser, PHP parser |
 
 ---
 
@@ -130,14 +130,15 @@ If `timeout` or `max_turns` is explicitly set in `.codedoc.toml` or via CLI, tha
 | `Dockerfile` | Multi-stage pipeline image: jlink JRE + pip-installed lumen runtime + Node JS parser |
 | `scripts/lumen-docker-*.sh` | Script-backed Docker entrypoints for pipeline, MCP, docs, image load, and release bundling |
 
-### Dockerfile (pipeline) — 4 stages
+### Dockerfile (pipeline) — 5 stages
 
 | Stage | Base | Output |
 |---|---|---|
 | `java-builder` | `eclipse-temurin:21-jdk-jammy` | Gradle shadowJar + jlink minimal JRE (~70 MB) |
 | `node-builder` | `node:20-slim` | `npm install --omit=dev` for JS parser |
+| `php-builder` | `php:8.2-cli-slim` | `composer install --no-dev` for PHP parser vendor |
 | `python-deps-builder` | `python:3.11-slim` | `pip install --prefix=/deps` for lumen + cmg-python deps |
-| final | `python:3.11-slim` | All artifacts assembled; Node binary copied from `node:20-slim` |
+| final | `python:3.11-slim` | All artifacts assembled; Node binary + PHP CLI + vendor copied in |
 
 Using `python:3.11-slim` as the final base (instead of `node:20-slim`) avoids GLIBC mismatches
 on aarch64 where `python:3.11-slim` requires GLIBC_2.38 but `node:20-slim` only has 2.36.
@@ -258,12 +259,13 @@ manifests/artifacts.json          ← machine-generated index of all artifacts w
 Gradle multi-project (Java + embedded JS/Python parsers). Builds wrapper scripts in `indexer/bin/`.
 
 Key files:
-- `indexer/install.sh` — builds all runtimes, generates `bin/cmg-{java,js,python}` wrappers. Run `make lumen-install` after any indexer code change to rebuild the fat JAR (`./gradlew shadowJar`).
+- `indexer/install.sh` — builds all runtimes, generates `bin/cmg-{java,js,python,php}` wrappers. Run `make lumen-install` after any indexer code change to rebuild the fat JAR (`./gradlew shadowJar`).
 - `indexer/app/` — Java/Kotlin fat JAR (Gradle Shadow, main: `code.graph.App`)
-- `indexer/app/src/main/java/code/graph/parser/WorkflowBuilder.java` — post-processing: traces HTTP entry points → repository/event terminals via BFS over CALLS edges; emits `Workflow` + `WORKFLOW_STEP` nodes
+- `indexer/app/src/main/java/code/graph/parser/WorkflowBuilder.java` — post-processing: traces HTTP entry points → repository/event terminals via BFS over CALLS edges; emits `Workflow` + `WORKFLOW_STEP` nodes; includes PHP strategy (Laravel routes + raw PHP superglobals → Eloquent/Repository/DB terminals)
 - `indexer/app/src/main/java/code/graph/parser/DomainDetector.java` — post-processing: label propagation over CALLS+CONTAINS graph to cluster cohesive classes; emits `Domain` + `IN_DOMAIN` nodes
 - `indexer/parsers/javascript/parse.js` — Babel-based JS/TS parser; creates `Field` nodes for TypeScript class properties and interface members
 - `indexer/parsers/python/parse.py` — Python AST parser; creates `Field` nodes for annotated class variables and ORM column assignments
+- `indexer/parsers/php/parse.php` — PHP AST parser (nikic/php-parser); extracts classes, interfaces, traits, methods, fields; detects Laravel routes in `routes/*.php` and emits synthetic HTTP annotations so WorkflowBuilder can trace controller→DB paths
 
 `install.sh` uses `$SCRIPT_DIR` — re-run after cloning or moving the repo. Generated
 `indexer/bin/` wrappers contain absolute paths and are gitignored.
@@ -276,6 +278,7 @@ Current indexing behavior:
 - Post-processing runs after all language parsers complete: `WorkflowBuilder` then `DomainDetector` operate on the merged graph.
 - JS/TS: TypeScript class property declarations and interface member signatures produce `Field` nodes for ER diagram support.
 - JS/TS: For repos with no ORM annotations, `get_domain_model()` falls back to module-path and naming-convention entity detection.
+- PHP: Classes, interfaces, traits (emitted as CLASS with `phpKind: "trait"`), methods, and properties are extracted. Laravel routes in `routes/*.php` are parsed to emit `HAS_ANNOTATION` edges (GetMapping/PostMapping/etc.) on controller methods. WorkflowBuilder's PHP strategy traces from annotated controller methods to Eloquent Model, Repository, and raw DB/PDO terminals.
 - Route-map and component-boundaries artifacts are suppressed for JS-frontend repos (sparse call graph makes them unreliable).
 
 Release packaging:
@@ -378,3 +381,8 @@ Release workflow:
 | `make release` does NOT auto-push | Pushing tags triggers CI and is irreversible; user confirms manually with the printed command |
 | CI version guard in release.yml | `validate-version` job compares tag vs pyproject.toml before building; blocks mismatched releases early |
 | `lumen --version` via `importlib.metadata` | Reports the installed package version; closes the verification loop for end users and support |
+| PHP traits emitted as CLASS with `phpKind: "trait"` | Avoids adding a new KuzuDB table; DomainDetector clusters traits via existing CLASS branch; `phpKind` property preserves the distinction for consumers that need it |
+| PHP parser emits synthetic HTTP annotations (GetMapping etc.) | Route definitions in Laravel's `routes/*.php` are converted to the same annotation format used by JVM controllers; WorkflowBuilder's existing `buildJvmWorkflows()` logic is reused via a separate `buildPhpWorkflows()` that calls the same BFS with PHP-specific terminal detection |
+| `nikic/php-parser` via Composer | Industry-standard PHP AST library (20M+ monthly downloads); same approach as Babel for JS — external library, no built-in PHP tokenizer limitations; `composer.lock` committed for reproducibility |
+| PHP `vendor/` directory in `ALWAYS_IGNORED` | Prevents indexing of Composer dependencies (same rationale as `node_modules` for JS) |
+| install.sh skips Composer if `vendor/` already present | Allows offline use and avoids requiring Composer on machines where the vendor directory was pre-installed (e.g., from a git-committed vendor or Docker layer) |
