@@ -29,12 +29,12 @@ use PhpParser\Error;
 // ---------------------------------------------------------------------------
 
 function parseArgs(array $argv): array {
-    $args = ['directory' => null, 'backend' => 'json', 'db_path' => null,
+    $args = ['directory' => null, 'backend' => 'kuzu', 'db_path' => null,
              'clear' => false, 'repo_name' => null];
     $i = 1;
     while ($i < count($argv)) {
         $a = $argv[$i];
-        if ($a === '--backend')      { $args['backend']   = $argv[++$i] ?? 'json'; }
+        if ($a === '--backend')      { $args['backend']   = $argv[++$i] ?? 'kuzu'; }
         elseif ($a === '--db-path')  { $args['db_path']   = $argv[++$i] ?? null; }
         elseif ($a === '--clear')    { $args['clear']     = true; }
         elseif ($a === '--repo-name'){ $args['repo_name'] = $argv[++$i] ?? null; }
@@ -669,12 +669,13 @@ function parseDirectory(string $rootDir): CodeGraphBuilder {
             $actionMethod  = $route['actionMethod'];
             $methodNodeId  = 'method:' . $controllerFqn . '.' . $actionMethod;
 
-            // Emit DECORATOR node (canonical per annotation name)
+            // Emit ANNOTATION_TYPE node (canonical per annotation name).
+            // ANNOTATION_TYPE is required by the HAS_ANNOTATION schema (Method → AnnotationType).
             $annId = 'annotation:' . $route['annName'];
             if (!$graph->hasNode($annId)) {
-                $graph->addNode($annId, 'DECORATOR', $route['annName'],
+                $graph->addNode($annId, 'ANNOTATION_TYPE', $route['annName'],
                     $route['annName'],
-                    ['language' => 'php', 'kind' => 'Decorator',
+                    ['language' => 'php', 'kind' => 'AnnotationType',
                      'normKind' => 'AnnotationLike', 'external' => false, 'path' => '']);
             }
 
@@ -729,7 +730,20 @@ $graph = parseDirectory($rootDir);
 if ($args['backend'] === 'json') {
     echo json_encode($graph->toJson(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
     echo "\n";
+} elseif ($args['backend'] === 'kuzu') {
+    if (empty($args['db_path'])) {
+        fwrite(STDERR, "Error: --db-path is required when using --backend kuzu\n");
+        exit(1);
+    }
+    // Match the Python/JS convention: --db-path is the parent directory;
+    // the actual DB lives at <db-path>/<repo-name>-db
+    $repoName = $args['repo_name'] ?? basename($rootDir);
+    $dbPath   = rtrim($args['db_path'], DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . $repoName . '-db';
+
+    require_once __DIR__ . '/store.php';
+    $store = create_store('kuzu', $dbPath, $args['clear']);
+    $store->save($graph->toJson());
 } else {
-    fwrite(STDERR, "Backend '{$args['backend']}' not yet supported by PHP parser (use --backend json)\n");
+    fwrite(STDERR, "Error: unsupported backend '{$args['backend']}'. Supported: kuzu, json\n");
     exit(1);
 }

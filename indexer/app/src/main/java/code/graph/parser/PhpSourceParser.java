@@ -167,7 +167,8 @@ public class PhpSourceParser implements SourceParser {
             case "CONSTRUCTOR" -> NodeType.CONSTRUCTOR;
             case "FIELD"       -> NodeType.FIELD;
             case "FILE"        -> NodeType.FILE;
-            case "DECORATOR"   -> NodeType.DECORATOR;
+            case "DECORATOR"        -> NodeType.DECORATOR;
+            case "ANNOTATION_TYPE" -> NodeType.ANNOTATION_TYPE;
             default -> {
                 System.err.printf("Warning: unknown PHP node type '%s', skipping%n", type);
                 yield null;

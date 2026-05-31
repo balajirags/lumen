@@ -45,9 +45,9 @@ LANGUAGE_CATEGORIES: tuple[LanguageCategoryDefinition, ...] = (
     LanguageCategoryDefinition(
         key="php",
         display_name="PHP",
-        binary_name="cmg-java",   # PHP parsing runs through cmg-java (PhpSourceParser → KuzuDB)
+        binary_name="cmg-php",
         compat_alias="php",
-        cli_language="php",       # passed as --language php to cmg-java
+        cli_language=None,
         extensions=frozenset({".php", ".phtml", ".php5", ".php7", ".php8"}),
         flavors=frozenset({"php"}),
     ),
