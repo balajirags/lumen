@@ -98,7 +98,7 @@ public class PhpSourceParser implements SourceParser {
 
             CodeNode codeNode = new CodeNode(id, type, name, qualifiedName);
 
-            if (node.has("properties")) {
+            if (node.has("properties") && node.get("properties").isJsonObject()) {
                 JsonObject props = node.getAsJsonObject("properties");
                 for (Map.Entry<String, JsonElement> entry : props.entrySet()) {
                     JsonElement value = entry.getValue();
@@ -132,7 +132,7 @@ public class PhpSourceParser implements SourceParser {
 
             CodeRelationship codeRel = new CodeRelationship(sourceId, targetId, type);
 
-            if (rel.has("properties")) {
+            if (rel.has("properties") && rel.get("properties").isJsonObject()) {
                 JsonObject props = rel.getAsJsonObject("properties");
                 for (Map.Entry<String, JsonElement> entry : props.entrySet()) {
                     JsonElement value = entry.getValue();
@@ -193,7 +193,8 @@ public class PhpSourceParser implements SourceParser {
     }
 
     private String findPhpCommand() {
-        for (String cmd : new String[]{"php", "php8", "php8.2", "php8.1", "php7.4"}) {
+        for (String cmd : new String[]{"php", "php8", "php8.2", "php8.1", "php7.4",
+                                       "/opt/homebrew/bin/php", "/usr/local/bin/php"}) {
             try {
                 ProcessBuilder pb = new ProcessBuilder(cmd, "--version");
                 Process p = pb.start();
@@ -215,13 +216,31 @@ public class PhpSourceParser implements SourceParser {
     }
 
     private Path findParserScript() throws IOException {
+        // 1. Relative to workspaceRoot (developer: running cmg-java from indexer/)
         Path scriptPath = workspaceRoot.resolve(PARSER_SCRIPT);
         if (Files.exists(scriptPath)) return scriptPath;
 
+        // 2. CWD absolute fallback
         scriptPath = Path.of(PARSER_SCRIPT).toAbsolutePath();
         if (Files.exists(scriptPath)) return scriptPath;
 
-        throw new IOException("Cannot find PHP parser at " + PARSER_SCRIPT);
+        // 3. Relative to the JAR file (production monorepo: JAR is at indexer/app/build/libs/)
+        try {
+            java.net.URL loc = PhpSourceParser.class.getProtectionDomain().getCodeSource().getLocation();
+            if (loc != null) {
+                Path jarDir = Path.of(loc.toURI()).getParent();
+                // indexer/app/build/libs/ → ../../../ → indexer/ → parsers/php/parse.php
+                Path fromJar = jarDir.getParent().getParent().getParent().resolve(PARSER_SCRIPT);
+                if (Files.exists(fromJar)) return fromJar.toAbsolutePath();
+            }
+        } catch (Exception ignored) {}
+
+        // 4. Docker installation path
+        Path dockerPath = Path.of("/opt/cmg-php-src/parse.php");
+        if (Files.exists(dockerPath)) return dockerPath;
+
+        throw new IOException("Cannot find PHP parser at " + PARSER_SCRIPT
+                + ". Ensure 'make lumen-install' has been run.");
     }
 
     @Override

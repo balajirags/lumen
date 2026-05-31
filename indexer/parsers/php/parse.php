@@ -63,7 +63,8 @@ class CodeGraphBuilder {
                 'type'          => $type,
                 'name'          => $name,
                 'qualifiedName' => $qualifiedName,
-                'properties'    => $props,
+                // Use stdClass for empty props so json_encode emits {} not []
+                'properties'    => empty($props) ? new \stdClass() : $props,
             ];
         }
     }
@@ -74,7 +75,8 @@ class CodeGraphBuilder {
             'sourceId'   => $sourceId,
             'targetId'   => $targetId,
             'type'       => $type,
-            'properties' => $props,
+            // Use stdClass for empty props so json_encode emits {} not []
+            'properties' => empty($props) ? new \stdClass() : $props,
         ];
     }
 

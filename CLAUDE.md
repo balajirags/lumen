@@ -382,6 +382,7 @@ Release workflow:
 | CI version guard in release.yml | `validate-version` job compares tag vs pyproject.toml before building; blocks mismatched releases early |
 | `lumen --version` via `importlib.metadata` | Reports the installed package version; closes the verification loop for end users and support |
 | PHP traits emitted as CLASS with `phpKind: "trait"` | Avoids adding a new KuzuDB table; DomainDetector clusters traits via existing CLASS branch; `phpKind` property preserves the distinction for consumers that need it |
+| PHP parser routes through `cmg-java --language php` | PHP has no native KuzuDB SDK; `PhpSourceParser.java` inside the Java app calls `parse.php --backend json`, parses the output, and writes to KuzuDB via `KuzuGraphStore`. The pipeline `language_registry.py` sets `binary_name="cmg-java"` and `cli_language="php"` for this reason |
 | PHP parser emits synthetic HTTP annotations (GetMapping etc.) | Route definitions in Laravel's `routes/*.php` are converted to the same annotation format used by JVM controllers; WorkflowBuilder's existing `buildJvmWorkflows()` logic is reused via a separate `buildPhpWorkflows()` that calls the same BFS with PHP-specific terminal detection |
 | `nikic/php-parser` via Composer | Industry-standard PHP AST library (20M+ monthly downloads); same approach as Babel for JS — external library, no built-in PHP tokenizer limitations; `composer.lock` committed for reproducibility |
 | PHP `vendor/` directory in `ALWAYS_IGNORED` | Prevents indexing of Composer dependencies (same rationale as `node_modules` for JS) |
