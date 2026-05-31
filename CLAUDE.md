@@ -138,7 +138,7 @@ If `timeout` or `max_turns` is explicitly set in `.codedoc.toml` or via CLI, tha
 | `node-builder` | `node:20-slim` | `npm install --omit=dev` for JS parser |
 | `php-builder` | `php:8.2-cli-slim` | `composer install --no-dev` for PHP parser vendor |
 | `python-deps-builder` | `python:3.11-slim` | `pip install --prefix=/deps` for lumen + cmg-python deps |
-| final | `python:3.11-slim` | All artifacts assembled; Node binary + PHP CLI + vendor copied in |
+| final | `python:3.11-slim` | All artifacts assembled; Node binary + PHP CLI (`php-cli` apt pkg) + vendor copied in; `cmg-php` bridge uses Python already present in the image |
 
 Using `python:3.11-slim` as the final base (instead of `node:20-slim`) avoids GLIBC mismatches
 on aarch64 where `python:3.11-slim` requires GLIBC_2.38 but `node:20-slim` only has 2.36.
@@ -265,7 +265,9 @@ Key files:
 - `indexer/app/src/main/java/code/graph/parser/DomainDetector.java` — post-processing: label propagation over CALLS+CONTAINS graph to cluster cohesive classes; emits `Domain` + `IN_DOMAIN` nodes
 - `indexer/parsers/javascript/parse.js` — Babel-based JS/TS parser; creates `Field` nodes for TypeScript class properties and interface members
 - `indexer/parsers/python/parse.py` — Python AST parser; creates `Field` nodes for annotated class variables and ORM column assignments
-- `indexer/parsers/php/parse.php` — PHP AST parser (nikic/php-parser); extracts classes, interfaces, traits, methods, fields; detects Laravel routes in `routes/*.php` and emits synthetic HTTP annotations so WorkflowBuilder can trace controller→DB paths
+- `indexer/parsers/php/parse.php` — PHP AST parser (nikic/php-parser); extracts classes, interfaces, traits, methods, fields; detects Laravel routes in `routes/*.php` and emits `ANNOTATION_TYPE` nodes + `HAS_ANNOTATION` edges so WorkflowBuilder can trace controller→DB paths; supports `--backend kuzu` (default) and `--backend json`
+- `indexer/parsers/php/store.php` — PHP KuzuDB store; bridges graph output to KuzuDB by shelling out to `kuzu_writer.py` (same pattern as `store.py` / `store.js`)
+- `indexer/parsers/php/kuzu_writer.py` — thin Python bridge that reads a PHP graph JSON file and writes to KuzuDB using the shared `KuzuStore` class from `indexer/parsers/python/store.py`
 
 `install.sh` uses `$SCRIPT_DIR` — re-run after cloning or moving the repo. Generated
 `indexer/bin/` wrappers contain absolute paths and are gitignored.
@@ -278,7 +280,7 @@ Current indexing behavior:
 - Post-processing runs after all language parsers complete: `WorkflowBuilder` then `DomainDetector` operate on the merged graph.
 - JS/TS: TypeScript class property declarations and interface member signatures produce `Field` nodes for ER diagram support.
 - JS/TS: For repos with no ORM annotations, `get_domain_model()` falls back to module-path and naming-convention entity detection.
-- PHP: Classes, interfaces, traits (emitted as CLASS with `phpKind: "trait"`), methods, and properties are extracted. Laravel routes in `routes/*.php` are parsed to emit `HAS_ANNOTATION` edges (GetMapping/PostMapping/etc.) on controller methods. WorkflowBuilder's PHP strategy traces from annotated controller methods to Eloquent Model, Repository, and raw DB/PDO terminals.
+- PHP: Classes, interfaces, traits (emitted as CLASS with `phpKind: "trait"`), methods, and properties are extracted. Laravel routes in `routes/*.php` are parsed and converted to `ANNOTATION_TYPE` nodes + `HAS_ANNOTATION` edges (GetMapping/PostMapping/etc.) on controller methods — matching the same schema `HAS_ANNOTATION` uses for Java Spring annotations. WorkflowBuilder's PHP strategy traces from annotated controller methods to Eloquent Model, Repository, and raw DB/PDO terminals. `cmg-php` writes directly to KuzuDB via `store.php` → `kuzu_writer.py` (Python bridge).
 - Route-map and component-boundaries artifacts are suppressed for JS-frontend repos (sparse call graph makes them unreliable).
 
 Release packaging:
@@ -382,8 +384,8 @@ Release workflow:
 | CI version guard in release.yml | `validate-version` job compares tag vs pyproject.toml before building; blocks mismatched releases early |
 | `lumen --version` via `importlib.metadata` | Reports the installed package version; closes the verification loop for end users and support |
 | PHP traits emitted as CLASS with `phpKind: "trait"` | Avoids adding a new KuzuDB table; DomainDetector clusters traits via existing CLASS branch; `phpKind` property preserves the distinction for consumers that need it |
-| PHP parser routes through `cmg-java --language php` | PHP has no native KuzuDB SDK; `PhpSourceParser.java` inside the Java app calls `parse.php --backend json`, parses the output, and writes to KuzuDB via `KuzuGraphStore`. The pipeline `language_registry.py` sets `binary_name="cmg-java"` and `cli_language="php"` for this reason |
-| PHP parser emits synthetic HTTP annotations (GetMapping etc.) | Route definitions in Laravel's `routes/*.php` are converted to the same annotation format used by JVM controllers; WorkflowBuilder's existing `buildJvmWorkflows()` logic is reused via a separate `buildPhpWorkflows()` that calls the same BFS with PHP-specific terminal detection |
+| PHP store uses a Python bridge (`store.php` → `kuzu_writer.py`) | PHP has no native KuzuDB SDK. Rather than routing through Java, `store.php` shells out to `kuzu_writer.py`, a thin Python script that reuses `KuzuStore` from the Python parser. This keeps `cmg-php` self-contained (same pattern as `cmg-python` / `cmg-js`) and avoids a Java dependency for PHP indexing. Python is always available since it is the pipeline runtime. |
+| PHP route annotations emitted as `ANNOTATION_TYPE` (not `DECORATOR`) | `HAS_ANNOTATION` schema requires `Method → AnnotationType` as the target. Emitting `DECORATOR` type nodes would violate the schema and cause KuzuDB insert failures. Using `ANNOTATION_TYPE` also lets `WorkflowBuilder`'s annotation index work identically to the JVM path. |
 | `nikic/php-parser` via Composer | Industry-standard PHP AST library (20M+ monthly downloads); same approach as Babel for JS — external library, no built-in PHP tokenizer limitations; `composer.lock` committed for reproducibility |
 | PHP `vendor/` directory in `ALWAYS_IGNORED` | Prevents indexing of Composer dependencies (same rationale as `node_modules` for JS) |
 | install.sh skips Composer if `vendor/` already present | Allows offline use and avoids requiring Composer on machines where the vendor directory was pre-installed (e.g., from a git-committed vendor or Docker layer) |

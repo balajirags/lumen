@@ -132,7 +132,7 @@ metadata to read only the exact method body (50–600 tokens), not the whole fil
 | C4 System Context | Integration map — upstream callers + downstream dependencies + protocols (deterministic PlantUML) |
 | Coupling Hotspots | Risk matrix, coupling pairs, dead code candidates, decomposition seam candidates |
 | UI to API Interactions | Which UI routes/components/hooks call which API clients and backend endpoints |
-| ER Diagram | Entity relationships and bounded context ownership (Mermaid). For Java/Spring repos, derived from JPA annotations and class field edges. For JS/TS repos, derived from TypeScript class/interface properties and module-path/naming conventions. |
+| ER Diagram | Entity relationships and bounded context ownership (Mermaid). For Java/Spring repos, derived from JPA annotations and class field edges. For JS/TS repos, derived from TypeScript class/interface properties and module-path/naming conventions. For PHP repos, derived from Eloquent model class fields and ORM conventions. |
 | API Spec | OpenAPI YAML (required for backend/fullstack repos; conditional for large/xlarge) |
 | Bounded Contexts | Bounded context decomposition grounded in coupling + domain evidence |
 | Strangler Fig Plan | Ordered extraction plan with seam identification and routing strategy |
@@ -241,7 +241,9 @@ and push git tags manually.
 ### Mode 2: Build Locally (Developer)
 
 Clone the repo and build everything from source. Requires Java 21, Node 20, Python 3.11+,
-and [uv](https://docs.astral.sh/uv/). PHP support additionally requires PHP 7.4+ and [Composer](https://getcomposer.org/).
+and [uv](https://docs.astral.sh/uv/). To index PHP repos, PHP 7.4+ and
+[Composer](https://getcomposer.org/) are also required (Python is already needed for the pipeline
+and is reused by the PHP store's KuzuDB bridge).
 
 #### Install
 
