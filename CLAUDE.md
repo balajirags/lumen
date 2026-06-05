@@ -71,7 +71,10 @@ cd pipeline && uv run lumen run /path/to/repo --provider anthropic --model claud
 
 ### Native bundle (no Docker, no dev tools)
 
-Pre-built tarballs bundle JRE + Node + Python venv. Only `graphviz` is needed on the target.
+Pre-built tarballs bundle JRE + Node + Python venv + all four language parsers (including the
+PHP parser with its `vendor/` Composer dependencies). Only `graphviz` is needed on the target
+for most repos. PHP repos additionally require a system `php` binary on the target — the PHP
+interpreter cannot be bundled, unlike Java (jlink JRE), Node (static binary), and Python (venv).
 
 One-line install (downloads latest release from GitHub):
 ```bash
@@ -86,11 +89,17 @@ make lumen-native-build VERSION=v1.2.3     # override version
 
 Output: `releases/lumen-<version>-<os>-<arch>.tar.gz` with `.sha256` checksum.
 The bundle includes `verify.sh` (SHA256 integrity check) and `install.sh` (symlinks into `~/.local/bin`).
+`build-native.sh` includes the PHP parser automatically when `vendor/` is present or Composer is
+available; it emits a warning and skips PHP if neither is found.
 
 After install:
 ```bash
 lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
 lumen mcp /path/to/repo    # HTTP MCP server
+
+# PHP repos: also install php on the target
+# macOS: brew install php
+# Linux: sudo apt install php-cli
 ```
 
 ---
@@ -291,13 +300,14 @@ Release packaging:
 - it does not create git tags automatically
 
 Native distribution:
-- `scripts/build-native.sh` builds a self-contained platform tarball (JRE + Node + Python venv + all parsers)
+- `scripts/build-native.sh` builds a self-contained platform tarball (JRE + Node + Python venv + all parsers including PHP); PHP parser `vendor/` is copied from an existing install or re-installed via Composer; skipped with a warning if neither is present
 - `scripts/install-lumen.sh` is a secure one-line installer: detects OS/arch, downloads from GitHub Releases, verifies SHA256, extracts to `~/.local/share/lumen/`, symlinks to `~/.local/bin/lumen`
 - `make lumen-native-build` invokes `build-native.sh`; supports `VERSION=v1.2.3` override
-- `.github/workflows/release.yml` builds platform tarballs on `v*` tags for macOS (arm64, amd64) and Linux (amd64, arm64 via QEMU)
+- `.github/workflows/release.yml` builds platform tarballs on `v*` tags for macOS (arm64, amd64) and Linux (amd64, arm64 via QEMU); the native build job installs PHP+Composer before bundling so the PHP parser is always included in CI-built releases
 - `.github/dependabot.yml` runs weekly dependency update PRs for Gradle, npm, pip, and GitHub Actions
 - Bundle includes `verify.sh` (SHA256 integrity check) and `install.sh` (symlink into `~/.local/bin`)
 - The `lumen` launcher in the bundle auto-generates `.codedoc.toml` with correct absolute paths and warns if graphviz is missing
+- The `cmg-php` wrapper in the bundle prepends `venv/bin` to `PATH` before invoking `php` so `store.php::findPython()` uses the bundled Python (with `kuzu` installed) rather than any system Python
 
 Release workflow:
 - Version source of truth: `pipeline/pyproject.toml` (`version = "X.Y.Z"`)
@@ -389,3 +399,5 @@ Release workflow:
 | `nikic/php-parser` via Composer | Industry-standard PHP AST library (20M+ monthly downloads); same approach as Babel for JS — external library, no built-in PHP tokenizer limitations; `composer.lock` committed for reproducibility |
 | PHP `vendor/` directory in `ALWAYS_IGNORED` | Prevents indexing of Composer dependencies (same rationale as `node_modules` for JS) |
 | install.sh skips Composer if `vendor/` already present | Allows offline use and avoids requiring Composer on machines where the vendor directory was pre-installed (e.g., from a git-committed vendor or Docker layer) |
+| `cmg-php` in native bundle calls system PHP (not bundled) | The PHP interpreter is a compiled binary that varies by OS/arch; jlink solves this for Java, Node ships a single static binary, and Python uses a venv — there is no equivalent portable packaging for PHP. The target machine must have `php` installed for PHP repos. |
+| `cmg-php` prepends `venv/bin` to `PATH` | `store.php::findPython()` probes for `python3` / `python` by name. Prepending the bundled venv's `bin/` to `PATH` ensures it finds the bundled Python (which has `kuzu` installed) rather than any system Python that lacks `kuzu`. No changes to `store.php` needed. |

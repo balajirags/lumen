@@ -287,6 +287,33 @@ make lumen-docker-docs    # → http://localhost:8081 (uses Docker for serving)
 
 ---
 
+### Mode 3: Native Bundle (no Docker, no dev tools)
+
+Pre-built tarballs bundle a JRE, Node binary, Python venv, and all four language parsers.
+`graphviz` is the only runtime requirement for most repos. PHP repos additionally need a
+system `php` binary on the target.
+
+One-line install (downloads latest release from GitHub):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/<owner>/lumen/main/scripts/install-lumen.sh | bash
+```
+
+Or build from source:
+
+```bash
+make lumen-native-build
+```
+
+After install:
+
+```bash
+lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
+lumen mcp /path/to/repo   # MCP mode → http://127.0.0.1:8765/mcp
+```
+
+---
+
 ## CLI Reference
 
 ```
