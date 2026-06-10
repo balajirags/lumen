@@ -16,7 +16,7 @@ pipeline/.tmp/
 indexer/.gradle/
 indexer/build/
 indexer/app/build/
-indexer/bin/based
+indexer/bin/cmg-*
 indexer/kuzu_db/
 indexer/**/*.class
 
