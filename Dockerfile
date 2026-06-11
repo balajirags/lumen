@@ -3,8 +3,9 @@
 #
 # Stage 1 (java-builder)      : Gradle shadowJar + jlink minimal JRE
 # Stage 2 (node-builder)      : npm install (production) for JS parser
-# Stage 3 (python-deps-builder): pip-compile all Python deps (incl. pygraphviz)
-# Stage 4 (final)             : python:3.11-slim + JRE + Node binary + pip deps
+# Stage 3 (php-builder)       : composer install (production) for PHP parser
+# Stage 4 (python-deps-builder): pip-compile all Python deps (incl. pygraphviz)
+# Stage 5 (final)             : python:3.11-slim + JRE + Node binary + PHP + pip deps
 #
 # Using python:3.11-slim as the final base avoids GLIBC mismatches that occur
 # when PyInstaller bundles are run on a different libc than they were built on.
@@ -96,7 +97,21 @@ RUN npm ci --omit=dev --silent \
        -o -name "*.map" \) -delete 2>/dev/null || true
 
 
-# ── Stage 3: Python dependencies (compile wheels incl. pygraphviz) ───────────
+# ── Stage 3: PHP parser dependencies ─────────────────────────────────────────
+FROM php:8.2-cli-slim AS php-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+WORKDIR /php-parser
+COPY indexer/parsers/php/composer.json indexer/parsers/php/composer.lock ./
+RUN composer install --no-dev --no-interaction --no-scripts \
+    && rm -rf /root/.composer
+
+
+# ── Stage 4: Python dependencies (compile wheels incl. pygraphviz) ───────────
 FROM python:3.11-slim@sha256:9358444059ed78e2975ada2c189f1c1a3144a5dab6f35bff8c981afb38946634 AS python-deps-builder
 
 # uv — fast Python package installer (replaces pip)
@@ -143,9 +158,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TMPDIR=/tmp \
     XDG_CACHE_HOME=/tmp/.cache
 
-# Graphviz runtime libs (needed by pygraphviz at runtime; no -dev headers required)
+# Graphviz runtime libs + PHP CLI (for cmg-php parser)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      graphviz \
+      graphviz php-cli \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system --gid 10001 lumen \
@@ -173,6 +188,10 @@ COPY --from=node-builder /build                              /opt/cmg-js/
 # ── cmg-python parser source ──
 COPY indexer/parsers/python/                                 /opt/cmg-python-src/
 
+# ── PHP parser source + vendor (from php-builder) ──
+COPY indexer/parsers/php/parse.php                           /opt/cmg-php-src/parse.php
+COPY --from=php-builder /php-parser/vendor                   /opt/cmg-php-src/vendor
+
 # ── Pipeline scripts ──
 COPY pipeline/scripts/                                       /opt/lumen/scripts/
 RUN chmod +x /opt/lumen/scripts/build-docs-site.sh \
@@ -186,7 +205,9 @@ RUN printf '#!/bin/sh\nexec /opt/jre/bin/java -Xmx2g -jar /opt/cmg/code-mem-grap
       > /usr/local/bin/cmg-js \
     && printf '#!/bin/sh\nexec python /opt/cmg-python-src/parse.py "$@"\n' \
       > /usr/local/bin/cmg-python \
-    && chmod +x /usr/local/bin/cmg-java /usr/local/bin/cmg-js /usr/local/bin/cmg-python \
+    && printf '#!/bin/sh\nexec php -d memory_limit=1G /opt/cmg-php-src/parse.php "$@"\n' \
+      > /usr/local/bin/cmg-php \
+    && chmod +x /usr/local/bin/cmg-java /usr/local/bin/cmg-js /usr/local/bin/cmg-python /usr/local/bin/cmg-php \
     && mkdir -p /workspace && printf '\
 [paths]\n\
 indexer_bin_dir = "/usr/local/bin"\n\

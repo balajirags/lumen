@@ -16,7 +16,7 @@ pipeline/.tmp/
 indexer/.gradle/
 indexer/build/
 indexer/app/build/
-indexer/bin/based
+indexer/bin/cmg-*
 indexer/kuzu_db/
 indexer/**/*.class
 
@@ -24,6 +24,9 @@ indexer/**/*.class
 ui/node_modules/
 ui/dist/
 indexer/parsers/javascript/node_modules/
+
+# PHP (indexer/parsers/php/)
+indexer/parsers/php/vendor/
 
 # Common
 .DS_Store

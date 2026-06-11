@@ -72,6 +72,14 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install graphviz
 
+      - name: Install PHP and Composer (for PHP parser vendor)
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get install -y --no-install-recommends php-cli php-mbstring
+            curl -sSL https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+          fi
+          cd indexer/parsers/php && composer install --no-dev --quiet
+
       - name: Build native tarball
         run: bash scripts/build-native.sh --version "${{ github.ref_name }}"
 

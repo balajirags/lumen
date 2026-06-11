@@ -60,6 +60,38 @@ else
     echo "  ⚠ Python 3 not found — skipping Python setup"
 fi
 
+# --- PHP ---
+echo "--- Setting up PHP parser ---"
+if command -v php >/dev/null 2>&1; then
+    # Prefer already-installed vendor dir (avoid requiring composer at runtime)
+    if [ -d "$SCRIPT_DIR/parsers/php/vendor" ]; then
+        : # vendor already present from a previous composer install
+    elif command -v composer >/dev/null 2>&1; then
+        (cd "$SCRIPT_DIR/parsers/php" && composer install --no-dev --quiet 2>/dev/null) || \
+            echo "  ⚠ composer install failed — install manually: cd parsers/php && composer install"
+    else
+        # Try common Homebrew / user-local paths
+        COMPOSER_BIN=""
+        for _p in /opt/homebrew/bin/composer /usr/local/bin/composer "$HOME/.local/bin/composer"; do
+            [ -f "$_p" ] && { COMPOSER_BIN="$_p"; break; }
+        done
+        if [ -n "$COMPOSER_BIN" ]; then
+            (cd "$SCRIPT_DIR/parsers/php" && php "$COMPOSER_BIN" install --no-dev --quiet 2>/dev/null) || \
+                echo "  ⚠ composer install failed — install manually: cd parsers/php && composer install"
+        else
+            echo "  ⚠ Composer not found — install from https://getcomposer.org and re-run (or pre-install vendor/)"
+        fi
+    fi
+    cat > "$BIN_DIR/cmg-php" <<EOF
+#!/usr/bin/env bash
+exec php -d memory_limit=1G "$SCRIPT_DIR/parsers/php/parse.php" "\$@"
+EOF
+    chmod +x "$BIN_DIR/cmg-php"
+    echo "  ✓ bin/cmg-php"
+else
+    echo "  ⚠ PHP not found — skipping PHP setup"
+fi
+
 echo ""
 echo "==> Done! Executables created in: $BIN_DIR"
 echo ""
@@ -67,6 +99,7 @@ echo "Usage:"
 [ -f "$BIN_DIR/cmg-java" ]   && echo "  cmg-java   /path/to/java/project"
 [ -f "$BIN_DIR/cmg-js" ]     && echo "  cmg-js     /path/to/react/app"
 [ -f "$BIN_DIR/cmg-python" ] && echo "  cmg-python /path/to/flask/app"
+[ -f "$BIN_DIR/cmg-php" ]    && echo "  cmg-php    /path/to/laravel/app"
 echo ""
 echo "Add to your PATH (optional):"
 echo "  export PATH=\"$BIN_DIR:\$PATH\""

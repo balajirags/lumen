@@ -61,6 +61,7 @@ lumen currently supports:
 - Java / Kotlin
 - JavaScript / TypeScript (JSX, TSX, ES modules)
 - Python
+- PHP (Laravel, raw PHP)
 
 Multi-language repos are indexed in one run when supported language slices are present.
 
@@ -86,7 +87,7 @@ In practice, that gives you:
 
 ### Why it is different
 
-- **Multi-language indexing per run** — supported Java/Kotlin, JS/TS, and Python slices are all indexed in the same run when present.
+- **Multi-language indexing per run** — supported Java/Kotlin, JS/TS, Python, and PHP slices are all indexed in the same run when present.
 - **Normalized graph metadata** — nodes and edges carry `language`, `kind`, and `normKind` so tooling can reason across language-specific parser outputs more consistently.
 - **Three-tier CALL confidence** — CALLS edges carry `confidence` (0.95 same-file / 0.90 import-resolved / 0.50 global) and `reason` so downstream analysis can filter to reliable edges only.
 - **Workflow and Domain post-processing** — the indexer derives Workflow nodes (HTTP entry → repository/event terminal) and Domain nodes (functional clusters with cohesion scores) as a post-processing pass, then pre-fetches them into agent orientation for immediate use.
@@ -131,7 +132,7 @@ metadata to read only the exact method body (50–600 tokens), not the whole fil
 | C4 System Context | Integration map — upstream callers + downstream dependencies + protocols (deterministic PlantUML) |
 | Coupling Hotspots | Risk matrix, coupling pairs, dead code candidates, decomposition seam candidates |
 | UI to API Interactions | Which UI routes/components/hooks call which API clients and backend endpoints |
-| ER Diagram | Entity relationships and bounded context ownership (Mermaid). For Java/Spring repos, derived from JPA annotations and class field edges. For JS/TS repos, derived from TypeScript class/interface properties and module-path/naming conventions. |
+| ER Diagram | Entity relationships and bounded context ownership (Mermaid). For Java/Spring repos, derived from JPA annotations and class field edges. For JS/TS repos, derived from TypeScript class/interface properties and module-path/naming conventions. For PHP repos, derived from Eloquent model class fields and ORM conventions. |
 | API Spec | OpenAPI YAML (required for backend/fullstack repos; conditional for large/xlarge) |
 | Bounded Contexts | Bounded context decomposition grounded in coupling + domain evidence |
 | Strangler Fig Plan | Ordered extraction plan with seam identification and routing strategy |
@@ -240,7 +241,9 @@ and push git tags manually.
 ### Mode 2: Build Locally (Developer)
 
 Clone the repo and build everything from source. Requires Java 21, Node 20, Python 3.11+,
-and [uv](https://docs.astral.sh/uv/).
+and [uv](https://docs.astral.sh/uv/). To index PHP repos, PHP 7.4+ and
+[Composer](https://getcomposer.org/) are also required (Python is already needed for the pipeline
+and is reused by the PHP store's KuzuDB bridge).
 
 #### Install
 
@@ -280,6 +283,33 @@ make lumen-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
 
 ```bash
 make lumen-docker-docs    # → http://localhost:8081 (uses Docker for serving)
+```
+
+---
+
+### Mode 3: Native Bundle (no Docker, no dev tools)
+
+Pre-built tarballs bundle a JRE, Node binary, Python venv, and all four language parsers.
+`graphviz` is the only runtime requirement for most repos. PHP repos additionally need a
+system `php` binary on the target.
+
+One-line install (downloads latest release from GitHub):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/<owner>/lumen/main/scripts/install-lumen.sh | bash
+```
+
+Or build from source:
+
+```bash
+make lumen-native-build
+```
+
+After install:
+
+```bash
+lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
+lumen mcp /path/to/repo   # MCP mode → http://127.0.0.1:8765/mcp
 ```
 
 ---

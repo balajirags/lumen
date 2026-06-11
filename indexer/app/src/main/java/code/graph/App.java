@@ -72,7 +72,7 @@ public class App implements Callable<Integer> {
     @Option(names = {"--repo-name"}, description = "Logical repository name (overrides source directory name for DB naming).")
     private String repoName;
 
-    @Option(names = {"-l", "--language"}, description = "Source language: java, javascript, python, kotlin, jvm (default: auto-detect)")
+    @Option(names = {"-l", "--language"}, description = "Source language: java, javascript, python, kotlin, jvm, php (default: auto-detect)")
     private String language;
 
     @Override
@@ -143,7 +143,7 @@ public class App implements Callable<Integer> {
             } else {
                 Optional<Language> parsed = SourceParserFactory.parseLanguage(language);
                 if (parsed.isEmpty()) {
-                    System.err.println("Error: Unknown language: " + language + ". Supported: java, javascript, python, kotlin, jvm");
+                    System.err.println("Error: Unknown language: " + language + ". Supported: java, javascript, python, kotlin, jvm, php");
                     return 1;
                 }
                 parseLanguages.add(parsed.get());
@@ -174,9 +174,10 @@ public class App implements Callable<Integer> {
             if (allLangs.containsKey(Language.JAVA) || allLangs.containsKey(Language.KOTLIN)) {
                 if (allLangs.containsKey(Language.JAVA))   parseLanguages.add(Language.JAVA);
                 if (allLangs.containsKey(Language.KOTLIN)) parseLanguages.add(Language.KOTLIN);
-                // Also include JS/Python modules in the same repo (e.g. frontend alongside backend)
+                // Also include JS/Python/PHP modules in the same repo (e.g. frontend alongside backend)
                 if (allLangs.containsKey(Language.JAVASCRIPT)) parseLanguages.add(Language.JAVASCRIPT);
                 if (allLangs.containsKey(Language.PYTHON))     parseLanguages.add(Language.PYTHON);
+                if (allLangs.containsKey(Language.PHP))        parseLanguages.add(Language.PHP);
                 System.out.printf("Detected languages: %s%n",
                         parseLanguages.stream().map(Language::getDisplayName).toList());
             } else {

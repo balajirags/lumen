@@ -1,2 +1,0 @@
-#!/usr/bin/env bash
-exec java -jar "/Users/gbalaji/projects/personal/lumen/indexer/app/build/libs/code-mem-graph.jar" "$@"

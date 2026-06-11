@@ -18,7 +18,7 @@ This is a monorepo containing two sub-projects:
 | Directory | Former repo | Purpose |
 |---|---|---|
 | `pipeline/` | `reverse-eng-agent` | Python LLM pipeline: indexer stage, agent (supervisor+subagents), MkDocs builder |
-| `indexer/` | `code-mem-graph` | Indexer runtimes: Java fat JAR, JS parser, Python parser |
+| `indexer/` | `code-mem-graph` | Indexer runtimes: Java fat JAR, JS parser, Python parser, PHP parser |
 
 ---
 
@@ -71,7 +71,10 @@ cd pipeline && uv run lumen run /path/to/repo --provider anthropic --model claud
 
 ### Native bundle (no Docker, no dev tools)
 
-Pre-built tarballs bundle JRE + Node + Python venv. Only `graphviz` is needed on the target.
+Pre-built tarballs bundle JRE + Node + Python venv + all four language parsers (including the
+PHP parser with its `vendor/` Composer dependencies). Only `graphviz` is needed on the target
+for most repos. PHP repos additionally require a system `php` binary on the target — the PHP
+interpreter cannot be bundled, unlike Java (jlink JRE), Node (static binary), and Python (venv).
 
 One-line install (downloads latest release from GitHub):
 ```bash
@@ -86,11 +89,17 @@ make lumen-native-build VERSION=v1.2.3     # override version
 
 Output: `releases/lumen-<version>-<os>-<arch>.tar.gz` with `.sha256` checksum.
 The bundle includes `verify.sh` (SHA256 integrity check) and `install.sh` (symlinks into `~/.local/bin`).
+`build-native.sh` includes the PHP parser automatically when `vendor/` is present or Composer is
+available; it emits a warning and skips PHP if neither is found.
 
 After install:
 ```bash
 lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
 lumen mcp /path/to/repo    # HTTP MCP server
+
+# PHP repos: also install php on the target
+# macOS: brew install php
+# Linux: sudo apt install php-cli
 ```
 
 ---
@@ -130,14 +139,15 @@ If `timeout` or `max_turns` is explicitly set in `.codedoc.toml` or via CLI, tha
 | `Dockerfile` | Multi-stage pipeline image: jlink JRE + pip-installed lumen runtime + Node JS parser |
 | `scripts/lumen-docker-*.sh` | Script-backed Docker entrypoints for pipeline, MCP, docs, image load, and release bundling |
 
-### Dockerfile (pipeline) — 4 stages
+### Dockerfile (pipeline) — 5 stages
 
 | Stage | Base | Output |
 |---|---|---|
 | `java-builder` | `eclipse-temurin:21-jdk-jammy` | Gradle shadowJar + jlink minimal JRE (~70 MB) |
 | `node-builder` | `node:20-slim` | `npm install --omit=dev` for JS parser |
+| `php-builder` | `php:8.2-cli-slim` | `composer install --no-dev` for PHP parser vendor |
 | `python-deps-builder` | `python:3.11-slim` | `pip install --prefix=/deps` for lumen + cmg-python deps |
-| final | `python:3.11-slim` | All artifacts assembled; Node binary copied from `node:20-slim` |
+| final | `python:3.11-slim` | All artifacts assembled; Node binary + PHP CLI (`php-cli` apt pkg) + vendor copied in; `cmg-php` bridge uses Python already present in the image |
 
 Using `python:3.11-slim` as the final base (instead of `node:20-slim`) avoids GLIBC mismatches
 on aarch64 where `python:3.11-slim` requires GLIBC_2.38 but `node:20-slim` only has 2.36.
@@ -258,12 +268,15 @@ manifests/artifacts.json          ← machine-generated index of all artifacts w
 Gradle multi-project (Java + embedded JS/Python parsers). Builds wrapper scripts in `indexer/bin/`.
 
 Key files:
-- `indexer/install.sh` — builds all runtimes, generates `bin/cmg-{java,js,python}` wrappers. Run `make lumen-install` after any indexer code change to rebuild the fat JAR (`./gradlew shadowJar`).
+- `indexer/install.sh` — builds all runtimes, generates `bin/cmg-{java,js,python,php}` wrappers. Run `make lumen-install` after any indexer code change to rebuild the fat JAR (`./gradlew shadowJar`).
 - `indexer/app/` — Java/Kotlin fat JAR (Gradle Shadow, main: `code.graph.App`)
-- `indexer/app/src/main/java/code/graph/parser/WorkflowBuilder.java` — post-processing: traces HTTP entry points → repository/event terminals via BFS over CALLS edges; emits `Workflow` + `WORKFLOW_STEP` nodes
+- `indexer/app/src/main/java/code/graph/parser/WorkflowBuilder.java` — post-processing: traces HTTP entry points → repository/event terminals via BFS over CALLS edges; emits `Workflow` + `WORKFLOW_STEP` nodes; includes PHP strategy (Laravel routes + raw PHP superglobals → Eloquent/Repository/DB terminals)
 - `indexer/app/src/main/java/code/graph/parser/DomainDetector.java` — post-processing: label propagation over CALLS+CONTAINS graph to cluster cohesive classes; emits `Domain` + `IN_DOMAIN` nodes
 - `indexer/parsers/javascript/parse.js` — Babel-based JS/TS parser; creates `Field` nodes for TypeScript class properties and interface members
 - `indexer/parsers/python/parse.py` — Python AST parser; creates `Field` nodes for annotated class variables and ORM column assignments
+- `indexer/parsers/php/parse.php` — PHP AST parser (nikic/php-parser); extracts classes, interfaces, traits, methods, fields; detects Laravel routes in `routes/*.php` and emits `ANNOTATION_TYPE` nodes + `HAS_ANNOTATION` edges so WorkflowBuilder can trace controller→DB paths; supports `--backend kuzu` (default) and `--backend json`
+- `indexer/parsers/php/store.php` — PHP KuzuDB store; bridges graph output to KuzuDB by shelling out to `kuzu_writer.py` (same pattern as `store.py` / `store.js`)
+- `indexer/parsers/php/kuzu_writer.py` — thin Python bridge that reads a PHP graph JSON file and writes to KuzuDB using the shared `KuzuStore` class from `indexer/parsers/python/store.py`
 
 `install.sh` uses `$SCRIPT_DIR` — re-run after cloning or moving the repo. Generated
 `indexer/bin/` wrappers contain absolute paths and are gitignored.
@@ -276,6 +289,7 @@ Current indexing behavior:
 - Post-processing runs after all language parsers complete: `WorkflowBuilder` then `DomainDetector` operate on the merged graph.
 - JS/TS: TypeScript class property declarations and interface member signatures produce `Field` nodes for ER diagram support.
 - JS/TS: For repos with no ORM annotations, `get_domain_model()` falls back to module-path and naming-convention entity detection.
+- PHP: Classes, interfaces, traits (emitted as CLASS with `phpKind: "trait"`), methods, and properties are extracted. Laravel routes in `routes/*.php` are parsed and converted to `ANNOTATION_TYPE` nodes + `HAS_ANNOTATION` edges (GetMapping/PostMapping/etc.) on controller methods — matching the same schema `HAS_ANNOTATION` uses for Java Spring annotations. WorkflowBuilder's PHP strategy traces from annotated controller methods to Eloquent Model, Repository, and raw DB/PDO terminals. `cmg-php` writes directly to KuzuDB via `store.php` → `kuzu_writer.py` (Python bridge).
 - Route-map and component-boundaries artifacts are suppressed for JS-frontend repos (sparse call graph makes them unreliable).
 
 Release packaging:
@@ -286,13 +300,14 @@ Release packaging:
 - it does not create git tags automatically
 
 Native distribution:
-- `scripts/build-native.sh` builds a self-contained platform tarball (JRE + Node + Python venv + all parsers)
+- `scripts/build-native.sh` builds a self-contained platform tarball (JRE + Node + Python venv + all parsers including PHP); PHP parser `vendor/` is copied from an existing install or re-installed via Composer; skipped with a warning if neither is present
 - `scripts/install-lumen.sh` is a secure one-line installer: detects OS/arch, downloads from GitHub Releases, verifies SHA256, extracts to `~/.local/share/lumen/`, symlinks to `~/.local/bin/lumen`
 - `make lumen-native-build` invokes `build-native.sh`; supports `VERSION=v1.2.3` override
-- `.github/workflows/release.yml` builds platform tarballs on `v*` tags for macOS (arm64, amd64) and Linux (amd64, arm64 via QEMU)
+- `.github/workflows/release.yml` builds platform tarballs on `v*` tags for macOS (arm64, amd64) and Linux (amd64, arm64 via QEMU); the native build job installs PHP+Composer before bundling so the PHP parser is always included in CI-built releases
 - `.github/dependabot.yml` runs weekly dependency update PRs for Gradle, npm, pip, and GitHub Actions
 - Bundle includes `verify.sh` (SHA256 integrity check) and `install.sh` (symlink into `~/.local/bin`)
 - The `lumen` launcher in the bundle auto-generates `.codedoc.toml` with correct absolute paths and warns if graphviz is missing
+- The `cmg-php` wrapper in the bundle prepends `venv/bin` to `PATH` before invoking `php` so `store.php::findPython()` uses the bundled Python (with `kuzu` installed) rather than any system Python
 
 Release workflow:
 - Version source of truth: `pipeline/pyproject.toml` (`version = "X.Y.Z"`)
@@ -378,3 +393,11 @@ Release workflow:
 | `make release` does NOT auto-push | Pushing tags triggers CI and is irreversible; user confirms manually with the printed command |
 | CI version guard in release.yml | `validate-version` job compares tag vs pyproject.toml before building; blocks mismatched releases early |
 | `lumen --version` via `importlib.metadata` | Reports the installed package version; closes the verification loop for end users and support |
+| PHP traits emitted as CLASS with `phpKind: "trait"` | Avoids adding a new KuzuDB table; DomainDetector clusters traits via existing CLASS branch; `phpKind` property preserves the distinction for consumers that need it |
+| PHP store uses a Python bridge (`store.php` → `kuzu_writer.py`) | PHP has no native KuzuDB SDK. Rather than routing through Java, `store.php` shells out to `kuzu_writer.py`, a thin Python script that reuses `KuzuStore` from the Python parser. This keeps `cmg-php` self-contained (same pattern as `cmg-python` / `cmg-js`) and avoids a Java dependency for PHP indexing. Python is always available since it is the pipeline runtime. |
+| PHP route annotations emitted as `ANNOTATION_TYPE` (not `DECORATOR`) | `HAS_ANNOTATION` schema requires `Method → AnnotationType` as the target. Emitting `DECORATOR` type nodes would violate the schema and cause KuzuDB insert failures. Using `ANNOTATION_TYPE` also lets `WorkflowBuilder`'s annotation index work identically to the JVM path. |
+| `nikic/php-parser` via Composer | Industry-standard PHP AST library (20M+ monthly downloads); same approach as Babel for JS — external library, no built-in PHP tokenizer limitations; `composer.lock` committed for reproducibility |
+| PHP `vendor/` directory in `ALWAYS_IGNORED` | Prevents indexing of Composer dependencies (same rationale as `node_modules` for JS) |
+| install.sh skips Composer if `vendor/` already present | Allows offline use and avoids requiring Composer on machines where the vendor directory was pre-installed (e.g., from a git-committed vendor or Docker layer) |
+| `cmg-php` in native bundle calls system PHP (not bundled) | The PHP interpreter is a compiled binary that varies by OS/arch; jlink solves this for Java, Node ships a single static binary, and Python uses a venv — there is no equivalent portable packaging for PHP. The target machine must have `php` installed for PHP repos. |
+| `cmg-php` prepends `venv/bin` to `PATH` | `store.php::findPython()` probes for `python3` / `python` by name. Prepending the bundled venv's `bin/` to `PATH` ensures it finds the bundled Python (which has `kuzu` installed) rather than any system Python that lacks `kuzu`. No changes to `store.php` needed. |

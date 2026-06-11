@@ -9,11 +9,11 @@
 #   lumen-{VERSION}-{os}-{arch}/
 #     lumen              ← relocatable shell launcher (add to PATH)
 #     install.sh         ← symlinks lumen into ~/.local/bin
-#     bin/               ← cmg-java, cmg-js, cmg-python, plantuml (relocatable)
+#     bin/               ← cmg-java, cmg-js, cmg-python, cmg-php, plantuml (relocatable)
 #     jre/               ← jlink minimal JRE
 #     lib/               ← code-mem-graph.jar, plantuml.jar
 #     node/bin/node      ← Node binary (for cmg-js parser)
-#     indexer/parsers/   ← JS parser + node_modules, Python parser
+#     indexer/parsers/   ← JS parser + node_modules, Python parser, PHP parser + vendor
 #     venv/              ← Python venv with lumen + all deps
 #     scripts/           ← build-docs-site.sh and other pipeline scripts
 #
@@ -22,11 +22,16 @@
 #   - Node 20      (npm ci for JS parser)
 #   - Python 3.11+ (venv + pip install lumen)
 #   - curl         (PlantUML download)
+#   - PHP + Composer (optional — for PHP repos; vendor/ copied from existing install or
+#                     re-installed via Composer; skipped with a warning if neither present)
 #
-# Runtime prerequisite on target (cannot be bundled):
+# Runtime prerequisites on target (cannot be bundled):
 #   - graphviz (for pygraphviz / PlantUML rendering in docs build)
 #     macOS: brew install graphviz
 #     Linux: apt install graphviz  / yum install graphviz
+#   - php (only for indexing PHP repos — not needed for Java/JS/Python repos)
+#     macOS: brew install php
+#     Linux: apt install php-cli  / yum install php-cli
 #
 # Usage:
 #   bash scripts/build-native.sh
@@ -189,8 +194,28 @@ echo "--- Step 6: Copying Python parser ---"
 cp -r "$REPO_ROOT/indexer/parsers/python" "$DIST_DIR/indexer/parsers/python"
 echo "  ✓ indexer/parsers/python/"
 
-# ── Step 7: Python venv + lumen ───────────────────────────────────────────────
-echo "--- Step 7: Creating Python venv and installing lumen ---"
+# ── Step 7: PHP parser ────────────────────────────────────────────────────────
+echo "--- Step 7: Copying PHP parser ---"
+PHP_SRC="$REPO_ROOT/indexer/parsers/php"
+PHP_INCLUDED=0
+if [ ! -d "$PHP_SRC/vendor" ]; then
+  if command -v composer >/dev/null 2>&1; then
+    echo "  vendor/ not found — running composer install..."
+    (cd "$PHP_SRC" && composer install --no-dev --quiet)
+  else
+    echo "  ⚠ Composer not found and vendor/ missing — PHP parser NOT included in bundle"
+    echo "    Install Composer (https://getcomposer.org) and re-run to include PHP support"
+    PHP_SRC=""
+  fi
+fi
+if [ -n "$PHP_SRC" ] && [ -d "$PHP_SRC/vendor" ]; then
+  cp -r "$PHP_SRC" "$DIST_DIR/indexer/parsers/php"
+  PHP_INCLUDED=1
+  echo "  ✓ indexer/parsers/php/"
+fi
+
+# ── Step 8: Python venv + lumen ───────────────────────────────────────────────
+echo "--- Step 8: Creating Python venv and installing lumen ---"
 # Export locked dependencies from uv.lock so the bundle gets exact pinned versions.
 FROZEN_REQS="$(mktemp)"
 (cd "$REPO_ROOT/pipeline" && uv export --frozen --no-hashes --no-emit-project > "$FROZEN_REQS")
@@ -215,14 +240,14 @@ find "$DIST_DIR/venv" \( -name "*.pyc" -o -name "*.pyo" \) -delete 2>/dev/null |
 find "$DIST_DIR/venv" -name "*.pyi" -delete 2>/dev/null || true
 echo "  ✓ venv/ ($(du -sh "$DIST_DIR/venv" | cut -f1))"
 
-# ── Step 8: Pipeline scripts ──────────────────────────────────────────────────
-echo "--- Step 8: Copying pipeline scripts ---"
+# ── Step 9: Pipeline scripts ──────────────────────────────────────────────────
+echo "--- Step 9: Copying pipeline scripts ---"
 cp -r "$REPO_ROOT/pipeline/scripts/." "$DIST_DIR/scripts/"
 chmod +x "$DIST_DIR/scripts/"*.sh
 echo "  ✓ scripts/"
 
-# ── Step 9: Relocatable CMG wrapper scripts ───────────────────────────────────
-echo "--- Step 9: Writing relocatable CMG wrappers ---"
+# ── Step 10: Relocatable CMG wrapper scripts ──────────────────────────────────
+echo "--- Step 10: Writing relocatable CMG wrappers ---"
 
 # Each wrapper resolves its own location at runtime so the bundle can be
 # placed anywhere without regenerating anything.
@@ -250,16 +275,38 @@ _D="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 exec "$_D/../jre/bin/java" -jar "$_D/../lib/plantuml.jar" "$@"
 WRAPPER
 
+# cmg-php: calls system PHP (PHP binary cannot be bundled); prepends bundled venv/bin to
+# PATH so store.php::findPython() finds the bundled Python (with kuzu) not the system one.
+if [ "$PHP_INCLUDED" -eq 1 ]; then
+  cat > "$DIST_DIR/bin/cmg-php" <<'WRAPPER'
+#!/usr/bin/env bash
+_D="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if ! command -v php >/dev/null 2>&1; then
+  echo "ERROR: PHP is not installed. PHP 8.0+ is required for PHP indexing." >&2
+  echo "  macOS: brew install php" >&2
+  echo "  Linux: sudo apt install php-cli  (or: sudo yum install php-cli)" >&2
+  exit 1
+fi
+export PATH="$_D/../venv/bin:$PATH"
+exec php -d memory_limit=1G "$_D/../indexer/parsers/php/parse.php" "$@"
+WRAPPER
+  chmod +x "$DIST_DIR/bin/cmg-php"
+fi
+
 chmod +x \
   "$DIST_DIR/bin/cmg-java" \
   "$DIST_DIR/bin/cmg-js" \
   "$DIST_DIR/bin/cmg-python" \
   "$DIST_DIR/bin/plantuml"
 
-echo "  ✓ bin/cmg-java  bin/cmg-js  bin/cmg-python  bin/plantuml"
+if [ "$PHP_INCLUDED" -eq 1 ]; then
+  echo "  ✓ bin/cmg-java  bin/cmg-js  bin/cmg-python  bin/cmg-php  bin/plantuml"
+else
+  echo "  ✓ bin/cmg-java  bin/cmg-js  bin/cmg-python  bin/plantuml"
+fi
 
-# ── Step 10: lumen launcher ───────────────────────────────────────────────────
-echo "--- Step 10: Writing lumen launcher ---"
+# ── Step 11: lumen launcher ───────────────────────────────────────────────────
+echo "--- Step 11: Writing lumen launcher ---"
 
 # The launcher regenerates .codedoc.toml with the correct absolute paths every
 # time it runs.  This mirrors Docker's /workspace/.codedoc.toml mechanism and
@@ -319,7 +366,7 @@ LAUNCHER
 chmod +x "$DIST_DIR/lumen"
 echo "  ✓ lumen"
 
-# ── Step 11: install.sh ───────────────────────────────────────────────────────
+# ── Step 12: install.sh ───────────────────────────────────────────────────────
 cat > "$DIST_DIR/install.sh" <<'INST'
 #!/usr/bin/env bash
 # Symlink the lumen launcher into a directory on your PATH.
@@ -338,8 +385,8 @@ INST
 chmod +x "$DIST_DIR/install.sh"
 echo "  ✓ install.sh"
 
-# ── Step 12: Internal SHA256SUMS + verify.sh ──────────────────────────────────
-echo "--- Step 12: Generating internal checksums ---"
+# ── Step 13: Internal SHA256SUMS + verify.sh ──────────────────────────────────
+echo "--- Step 13: Generating internal checksums ---"
 (cd "$DIST_DIR" && {
   sha256_manifest=""
   for f in \
@@ -350,6 +397,7 @@ echo "--- Step 12: Generating internal checksums ---"
     bin/cmg-java \
     bin/cmg-js \
     bin/cmg-python \
+    bin/cmg-php \
     bin/plantuml; do
     [ -f "$f" ] && sha256_manifest+="$(sha256_file "$f")  $f"$'\n'
   done

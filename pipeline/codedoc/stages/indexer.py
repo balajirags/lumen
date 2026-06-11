@@ -24,7 +24,7 @@ def detect_languages(repo_path: str) -> dict[str, int]:
     if not detected:
         raise ValueError(
             f"No supported source files found in {repo_path}. "
-            "Expected Java/Kotlin, JavaScript/TypeScript, or Python files."
+            "Expected Java/Kotlin, JavaScript/TypeScript, Python, or PHP files."
         )
     return detected
 
@@ -63,7 +63,7 @@ def run_indexer(state: PipelineState) -> PipelineState:
     if not detected:
         raise ValueError(
             f"No supported source files found in {repo}. "
-            "Expected Java/Kotlin, JavaScript/TypeScript, or Python files."
+            "Expected Java/Kotlin, JavaScript/TypeScript, Python, or PHP files."
         )
     ordered_languages = [lang for lang, _count in sorted(detected.items(), key=lambda item: (-item[1], item[0]))]
     state.language_categories = ordered_languages

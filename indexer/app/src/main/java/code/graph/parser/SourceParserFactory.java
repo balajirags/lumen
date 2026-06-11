@@ -19,7 +19,8 @@ public class SourceParserFactory {
         JAVA("Java", Set.of(".java")),
         JAVASCRIPT("JavaScript/React", Set.of(".js", ".jsx", ".ts", ".tsx", ".mjs")),
         PYTHON("Python", Set.of(".py", ".pyw")),
-        KOTLIN("Kotlin", Set.of(".kt", ".kts"));
+        KOTLIN("Kotlin", Set.of(".kt", ".kts")),
+        PHP("PHP", Set.of(".php", ".phtml", ".php5", ".php7", ".php8"));
 
         private final String displayName;
         private final Set<String> extensions;
@@ -124,6 +125,7 @@ public class SourceParserFactory {
             case JAVASCRIPT -> new JavaScriptSourceParser(workspaceRoot);
             case PYTHON -> new PythonSourceParser(workspaceRoot);
             case KOTLIN -> new KotlinSourceParser(sourceRoot);
+            case PHP    -> new PhpSourceParser(workspaceRoot);
         };
     }
 
@@ -169,13 +171,14 @@ public class SourceParserFactory {
                 Optional.of(Language.JAVASCRIPT);
             case "python", "py" -> Optional.of(Language.PYTHON);
             case "kotlin", "kt", "kts" -> Optional.of(Language.KOTLIN);
+            case "php"                  -> Optional.of(Language.PHP);
             default -> Optional.empty();
         };
     }
 
     /** Directories to always skip at any depth. */
     private static final Set<String> ALWAYS_IGNORED = Set.of(
-            "node_modules", ".git", "__pycache__", "venv", ".venv", ".gradle");
+            "node_modules", ".git", "__pycache__", "venv", ".venv", ".gradle", "vendor");
 
     /** Directories to skip only when they appear directly under the repo root. */
     private static final Set<String> ROOT_ONLY_IGNORED = Set.of("build", "dist", "target");

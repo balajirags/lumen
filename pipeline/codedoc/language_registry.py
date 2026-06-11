@@ -42,6 +42,15 @@ LANGUAGE_CATEGORIES: tuple[LanguageCategoryDefinition, ...] = (
         extensions=frozenset({".py", ".pyi"}),
         flavors=frozenset({"python"}),
     ),
+    LanguageCategoryDefinition(
+        key="php",
+        display_name="PHP",
+        binary_name="cmg-php",
+        compat_alias="php",
+        cli_language=None,
+        extensions=frozenset({".php", ".phtml", ".php5", ".php7", ".php8"}),
+        flavors=frozenset({"php"}),
+    ),
 )
 
 
