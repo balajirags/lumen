@@ -145,7 +145,7 @@ If `timeout` or `max_turns` is explicitly set in `.codedoc.toml` or via CLI, tha
 |---|---|---|
 | `java-builder` | `eclipse-temurin:21-jdk-jammy` | Gradle shadowJar + jlink minimal JRE (~70 MB) |
 | `node-builder` | `node:20-slim` | `npm install --omit=dev` for JS parser |
-| `php-builder` | `php:8.2-cli-slim` | `composer install --no-dev` for PHP parser vendor |
+| `php-builder` | `php:8.2-cli-alpine` | `composer install --no-dev` for PHP parser vendor |
 | `python-deps-builder` | `python:3.11-slim` | `pip install --prefix=/deps` for lumen + cmg-python deps |
 | final | `python:3.11-slim` | All artifacts assembled; Node binary + PHP CLI (`php-cli` apt pkg) + vendor copied in; `cmg-php` bridge uses Python already present in the image |
 

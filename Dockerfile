@@ -98,10 +98,9 @@ RUN npm ci --omit=dev --silent \
 
 
 # ── Stage 3: PHP parser dependencies ─────────────────────────────────────────
-FROM php:8.2-cli-slim AS php-builder
+FROM php:8.2-cli-alpine AS php-builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends unzip \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache unzip
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
