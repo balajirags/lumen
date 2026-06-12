@@ -39,7 +39,9 @@ output/
 
 #output folder
 output/
+output_old/
 
+demo.txt
 help.txt
 *.tar
 
