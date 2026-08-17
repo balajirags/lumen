@@ -1,4 +1,11 @@
-"""Full Lumen pipeline orchestration."""
+"""Security-audit Lumen pipeline orchestration.
+
+Example of a pluggable pipeline: identical preflight/indexer sequencing to
+``pipelines/full.py``, reusing the exact same shared stages unchanged, but Stage 2 runs
+``stages/security_audit_agent.run_agent`` (fan-out access/dependency reviewers + fan-in
+risk synthesis) instead of the docs pipeline's Analyst+Architect supervisor. There is no
+Stage 3 builder step — artifacts are left as plain markdown under ``artifacts/security/``.
+"""
 
 from __future__ import annotations
 
@@ -14,9 +21,8 @@ from codedoc.pipelines.common import (
     log_pipeline_start,
     should_stop_for_xlarge_repo,
 )
-from codedoc.stages.agent import run_agent
-from codedoc.stages.builder import run_builder
 from codedoc.stages.indexer import run_indexer
+from codedoc.stages.security_audit_agent import run_agent
 from codedoc.state import PipelineState
 
 
@@ -36,11 +42,9 @@ def run_pipeline(
     max_turns_explicit: bool = False,
     verbose: bool = False,
     indexer_bin_dir: str = "",
-    agent_prompt: str = "",
-    build_script: str = "",
     repo_name: str | None = None,
 ) -> PipelineState:
-    """Execute the full pipeline and return final state."""
+    """Execute the security-audit pipeline and return final state."""
     repo = Path(repo_path).resolve()
     resolved_repo_name = repo_name or repo.name
     run_dir = create_run_dir(output_dir, resolved_repo_name)
@@ -48,7 +52,7 @@ def run_pipeline(
     state = init_state(
         repo_path=str(repo),
         run_dir=run_dir,
-        mode="full",
+        mode="security-audit",
         model=model,
         provider=provider,
         base_url=base_url,
@@ -62,12 +66,9 @@ def run_pipeline(
         timeout_explicit=timeout_explicit,
         max_turns_explicit=max_turns_explicit,
         indexer_bin_dir=indexer_bin_dir,
-        agent_prompt=agent_prompt,
-        build_script=build_script,
-        site_dir=str(Path(output_dir) / "doc-site"),
         repo_name=resolved_repo_name,
     )
-    log_pipeline_start(state, repo_path=str(repo), run_dir=run_dir, label="pipeline")
+    log_pipeline_start(state, repo_path=str(repo), run_dir=run_dir, label="security-audit pipeline")
 
     from codedoc import log as _log
 
@@ -81,19 +82,18 @@ def run_pipeline(
         if state.allow_xlarge and str((state.repo_metrics or {}).get("size_band", "")) == "xlarge":
             state.log(
                 "pipeline",
-                "Repo classified as xlarge, but --allow-xlarge is set. Continuing with full pipeline.",
+                "Repo classified as xlarge, but --allow-xlarge is set. Continuing with security-audit pipeline.",
             )
         if should_stop_for_xlarge_repo(state):
             state.status = "stopped"
             state.error = (
-                "Repo classified as xlarge; full pipeline stopped before indexing. "
-                "Use MCP mode for targeted exploration or rerun with --allow-xlarge."
+                "Repo classified as xlarge; security-audit pipeline stopped before indexing. "
+                "Rerun with --allow-xlarge to continue anyway."
             )
             state.log(
                 "pipeline",
-                "Repo classified as xlarge. Stopping full pipeline before indexing and recommending MCP mode.",
+                "Repo classified as xlarge. Stopping security-audit pipeline before indexing.",
             )
-            _log.print_xlarge_mcp_guidance_panel(state.repo_path)
             return state
 
         state.log("pipeline", "=== Stage 1: Indexer ===")
@@ -106,7 +106,7 @@ def run_pipeline(
         if state.status == "failed":
             return state
 
-        state.log("pipeline", "=== Stage 2: Agent ===")
+        state.log("pipeline", "=== Stage 2: Security Audit Agent ===")
         _log.print_stage_header(2, "Agent")
         t0 = time.time()
         state = run_agent(state)
@@ -115,14 +115,6 @@ def run_pipeline(
         _log.print_stage_done(2, "Agent", elapsed2)
         if state.status == "failed":
             return state
-
-        state.log("pipeline", "=== Stage 3: Builder ===")
-        _log.print_stage_header(3, "Builder")
-        t0 = time.time()
-        state = run_builder(state)
-        elapsed3 = time.time() - t0
-        state.log("pipeline", f"Stage 3 (Builder) completed in {elapsed3:.1f}s")
-        _log.print_stage_done(3, "Builder", elapsed3)
 
         state.status = "done"
         pipeline_elapsed = time.time() - pipeline_t0

@@ -88,11 +88,14 @@ def finalize_state(state: PipelineState, run_dir: Path) -> None:
     state.log("pipeline", f"Wrote {pipeline_json}")
 
 
-def should_stop_full_pipeline_for_xlarge_repo(state: PipelineState) -> bool:
-    """Return True when the full pipeline should stop after preflight."""
+def should_stop_for_xlarge_repo(state: PipelineState) -> bool:
+    """Return True when a pipeline should stop after preflight for an xlarge repo.
+
+    Mode-agnostic — any pipeline module can opt into this guardrail by calling it
+    explicitly; it no longer assumes the caller is the full docs pipeline.
+    """
     return (
-        state.mode == "full"
-        and bool(state.repo_metrics)
+        bool(state.repo_metrics)
         and not state.allow_xlarge
         and str(state.repo_metrics.get("size_band", "")) == "xlarge"
     )
@@ -111,8 +114,13 @@ def _runtime_settings_line(state: PipelineState) -> str:
     return "Effective runtime settings — " + ", ".join(parts)
 
 
-def apply_repo_size_runtime_defaults(state: PipelineState) -> PipelineState:
-    """Adjust runtime defaults from repo size when the user did not override them."""
+def apply_repo_size_runtime_defaults(state: PipelineState, *, bump_max_turns: bool = False) -> PipelineState:
+    """Adjust runtime defaults from repo size when the user did not override them.
+
+    ``bump_max_turns`` is opt-in per pipeline: the full docs pipeline needs more turns
+    on large/xlarge repos, but a pipeline without a turn-based agent stage (e.g. mcp)
+    has no use for it.
+    """
     size_band = str((state.repo_metrics or {}).get("size_band", ""))
     if size_band not in {"large", "xlarge"}:
         state.log("pipeline", _runtime_settings_line(state))
@@ -122,7 +130,7 @@ def apply_repo_size_runtime_defaults(state: PipelineState) -> PipelineState:
         state.timeout = 3600
         state.timeout_source = f"adaptive-{size_band}"
 
-    if state.mode == "full" and not state.max_turns_explicit:
+    if bump_max_turns and not state.max_turns_explicit:
         state.max_turns = 100
         state.max_turns_source = f"adaptive-{size_band}"
 
