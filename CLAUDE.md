@@ -10,8 +10,13 @@ large repos, and to reduce follow-up analysis cost when the same indexed repo is
 ```
 Source repo → [preflight + indexer] → KuzuDB graph
                                       ├─ [full pipeline] -> [agent] -> Markdown artifacts -> [builder] -> MkDocs Material site
+                                      ├─ [security-audit pipeline] -> [security-audit agent] -> Markdown artifacts
                                       └─ [mcp pipeline] -> HTTP MCP server
 ```
+
+Preflight and the indexer are shared, unmodified, by every pipeline. Only the agent stage
+(stage 2) is pluggable — new pipelines add a new CLI command + pipeline module + agent-stage
+module and reuse preflight/indexer as-is. See "Pluggable agent-stage pipelines" below.
 
 This is a monorepo containing two sub-projects:
 
@@ -175,15 +180,18 @@ Normal MCP commands already print config snippets before serving; `--print-confi
 Python package named `codedoc` (internal). CLI entry point: `lumen` (via `pyproject.toml`).
 
 Key files:
-- `pipeline/codedoc/cli.py` — Click CLI behind the repo-local `make lumen-run` and `make lumen-mcp` commands
+- `pipeline/codedoc/cli.py` — Click CLI behind the repo-local `make lumen-run` and `make lumen-mcp` commands; `common_pipeline_options` decorator shares the repo/model/provider/etc. option set across `run` and other agent-stage pipeline commands (e.g. `security-audit`)
 - `pipeline/codedoc/config.py` — config loader; defaults use `Path(__file__)` relative paths
 - `pipeline/codedoc/pipelines/full.py` — full docs pipeline: preflight → indexer → agent → builder
 - `pipeline/codedoc/pipelines/mcp.py` — MCP pipeline: preflight → indexer → MCP serve metadata
-- `pipeline/codedoc/pipelines/common.py` — shared run-dir, state-init, and finalization helpers
+- `pipeline/codedoc/pipelines/security_audit.py` — example pluggable pipeline: preflight → indexer (both unchanged) → security-audit agent stage; no builder step
+- `pipeline/codedoc/pipelines/common.py` — shared run-dir, state-init, finalization, and xlarge/runtime-defaults helpers, mode-agnostic (any pipeline module opts in via explicit params, not a hardcoded mode string)
 - `pipeline/codedoc/pipeline.py` — compatibility shim exporting the pipeline entrypoints
 - `pipeline/codedoc/preflight/repo_metrics.py` — native pluggable repo metrics guardrail (LOC, file count, language mix)
 - `pipeline/codedoc/preflight/runner.py` — preflight registry/runner; pipeline core depends on this, not on repo-metrics directly
-- `pipeline/codedoc/stages/agent.py` — supervisor + parallel analysts + architect
+- `pipeline/codedoc/stages/agent.py` — supervisor + parallel analysts + architect; also exports the reusable `run_loop` tool-loop primitive
+- `pipeline/codedoc/stages/parallel.py` — `run_parallel_tasks`, a generic fan-out/fan-in helper (dict of thunks in, dict of results out) any new agent-stage pipeline can reuse
+- `pipeline/codedoc/stages/security_audit_agent.py` — example alternative agent stage: 2 parallel reviewers (access-control, dependency-risk) fan out via `run_parallel_tasks`, then 1 fan-in risk-synthesis `run_loop` call
 - `pipeline/codedoc/log.py` — structured progress logging, indexer progress panel, repo metrics panel, analyst live boxes
 - `pipeline/codedoc/mcp_server.py` — MCP server backed by `kg_tools`; supports the HTTP MCP flow exposed by `make lumen-mcp` and `make lumen-docker-mcp`
 - `pipeline/codedoc/llm.py` — LLM abstraction: `ClaudeProvider`, `OllamaProvider`, `OpenAIProvider`
@@ -195,6 +203,7 @@ Key files:
 - `pipeline/codedoc/prompts/architect.md` — Solution Architect system prompt (writes target-state artifacts; manifest is machine-generated)
 - `pipeline/codedoc/prompts/archetype-*.md` — archetype overlays for `backend-service`, `frontend-app`, `fullstack-app`, and `library`
 - `pipeline/codedoc/prompts/re-prompt.md` — single-agent fallback prompt (monolithic execution path)
+- `pipeline/codedoc/prompts/security-analyst-access.md`, `security-analyst-dependencies.md`, `security-synthesis.md` — prompts for the example `security-audit` pipeline's 2 reviewers + fan-in synthesis
 - `pipeline/scripts/build-docs-site.sh` — builds MkDocs Material site with Mermaid plus deterministic C4 PlantUML for C1 context views; supports multi-repo accumulation
 - `pipeline/.codedoc.toml` — runtime config (`indexer_bin_dir = ../indexer/bin`, `max_turns = 60`, `repo_size_check = "warn"`)
 - `pipeline/pyproject.toml` — package name: `lumen`, entry point: `lumen = "codedoc.cli:main"`, uses `uv`
@@ -260,6 +269,35 @@ target-state/fullstack-boundaries.md ← frontend/backend seam plan (fullstack-a
 target-state/migration-plan.md    ← migration plan (frontend/fullstack/library)
 manifests/artifacts.json          ← machine-generated index of all artifacts written
 ```
+
+### Pluggable agent-stage pipelines
+
+`lumen run` is not the only pipeline — new CLI commands can run an entirely different
+fan-out/fan-in agent stage against the same preflight+indexer flow, without touching
+`stages/agent.py`, the archetype/artifact-plan system, or the docs pipeline in any way.
+`lumen security-audit` (`pipelines/security_audit.py` + `stages/security_audit_agent.py`)
+is a worked example — copy its shape for a new pipeline:
+
+```
+pipelines/<name>.py            ← create_run_dir → init_state(mode="<name>") → run_preflights
+                                  → apply_repo_size_runtime_defaults(state, bump_max_turns=...)
+                                  → run_indexer (unchanged) → stages/<name>_agent.run_agent
+                                  → finalize_state
+stages/<name>_agent.py         ← run_agent(state) -> state; builds its own KuzuBackend +
+                                  ReverseEngineerToolkit + create_provider(...) per task, fans
+                                  out via stages/parallel.run_parallel_tasks, fans in via one
+                                  more stages/agent.run_loop call
+cli.py                          ← @main.command(name="<name>") + @common_pipeline_options
+                                  + a call into pipelines/<name>.run_pipeline
+```
+
+Reusable building blocks (no changes needed to use them): `KuzuBackend`,
+`ReverseEngineerToolkit` (`kg_tools/`), `create_provider` (`llm.py`), `run_loop` and its
+`allowed_artifact_paths`/`phase_label` params (`stages/agent.py`), `run_parallel_tasks`
+(`stages/parallel.py`), `common_pipeline_options` (`cli.py`), and `pipelines/common.py`'s
+run-dir/state/finalization helpers. A new pipeline defines its own prompt files, its own
+small `allowed_artifact_paths` set per `run_loop` call, and its own `run_agent` — there is
+no shared "ArchetypeDefinition"-style plan the new pipeline must conform to.
 
 ---
 
@@ -401,3 +439,8 @@ Release workflow:
 | install.sh skips Composer if `vendor/` already present | Allows offline use and avoids requiring Composer on machines where the vendor directory was pre-installed (e.g., from a git-committed vendor or Docker layer) |
 | `cmg-php` in native bundle calls system PHP (not bundled) | The PHP interpreter is a compiled binary that varies by OS/arch; jlink solves this for Java, Node ships a single static binary, and Python uses a venv — there is no equivalent portable packaging for PHP. The target machine must have `php` installed for PHP repos. |
 | `cmg-php` prepends `venv/bin` to `PATH` | `store.php::findPython()` probes for `python3` / `python` by name. Prepending the bundled venv's `bin/` to `PATH` ensures it finds the bundled Python (which has `kuzu` installed) rather than any system Python that lacks `kuzu`. No changes to `store.php` needed. |
+| `pipelines/common.py` xlarge/runtime-default helpers are mode-agnostic | `should_stop_for_xlarge_repo` and `apply_repo_size_runtime_defaults(state, bump_max_turns=...)` no longer branch on `state.mode == "full"`. New pipelines opt in explicitly via the `bump_max_turns` param instead of requiring an edit to shared code every time a pipeline is added. |
+| `run_parallel_tasks` extracted as a standalone fan-out/fan-in helper | Generalizes the `ThreadPoolExecutor` pattern already used by the docs pipeline's Phase 2 into a ~10-line, domain-agnostic dict-of-thunks-in/dict-of-results-out function (`stages/parallel.py`), reusable by any new agent-stage pipeline without introducing an "analyst"/"archetype" abstraction. |
+| New agent-stage pipelines get their own `run_agent`, not a generalized `run_supervisor_agent` | `run_supervisor_agent`'s `ArchetypeDefinition`/artifact-plan machinery is deeply coupled to the docs pipeline's exact 3-analyst-+-architect contract. Rather than generalizing that (high risk, large surface area), new pipelines write their own small `run_agent(state) -> state` stage module built directly on `KuzuBackend`/`ReverseEngineerToolkit`/`create_provider`/`run_loop`/`run_parallel_tasks` — the docs pipeline stays completely untouched. |
+| `common_pipeline_options` Click decorator shared across pipeline commands | `run` and `security-audit` need the identical repo/model/provider/turns/etc. option set; a decorator avoids re-declaring ~10 `@click.option` lines per new pipeline command. |
+| `security-audit` pipeline has no builder step | Its artifacts (`security/*.md`) are plain markdown, not part of the MkDocs artifact-plan/manifest contract `stages/builder.py` assumes; skipping the builder keeps the example self-contained. |

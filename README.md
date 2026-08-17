@@ -99,6 +99,7 @@ In practice, that gives you:
 - **Improved CLI UX** — indexing shows live per-language progress, the three parallel researchers render as distinct colored live boxes, and a per-researcher tool usage table (highlighting new aggregate tools) prints after each phase.
 - **MCP access** — `lumen mcp` serves the indexed graph over HTTP so other tools and clients can query the repo without rerunning the full docs pipeline.
 - **Split pipeline modules** — the full docs flow and the MCP flow live in separate pipeline modules with shared setup/finalization helpers.
+- **Pluggable agent-stage pipelines** — preflight and indexing are shared and unmodified across pipelines; new CLI commands can run a completely different fan-out/fan-in agent stage against the same indexed graph. `lumen security-audit` is a built-in example (see below).
 
 ### Why a Code Property Graph instead of file reading
 
@@ -137,6 +138,23 @@ metadata to read only the exact method body (50–600 tokens), not the whole fil
 | Bounded Contexts | Bounded context decomposition grounded in coupling + domain evidence |
 | Strangler Fig Plan | Ordered extraction plan with seam identification and routing strategy |
 | Repo Metrics | Preflight LOC / file-count / language-mix assessment with size/risk classification |
+
+### Other pipelines: `lumen security-audit`
+
+`lumen run` isn't the only pipeline. Preflight and indexing are shared and unmodified —
+only the agent stage is swapped. `lumen security-audit` is a built-in example: it reuses
+the same indexed graph, then runs 2 reviewers in parallel (access-control exposure,
+dependency/coupling risk) followed by one fan-in synthesis pass that writes a prioritized
+report:
+
+```bash
+lumen security-audit /path/to/repo --provider anthropic --model claude-sonnet-4-6
+```
+
+Produces `security/access-control-findings.md`, `security/dependency-risk-findings.md`,
+and `security/audit-report.md` under `artifacts/` — no MkDocs build step. It's also the
+reference implementation for adding your own pipeline: a new pipeline module + agent-stage
+module reusing the same graph/provider/tool-loop primitives, plus one new CLI command.
 
 ## Getting Started
 
@@ -327,6 +345,20 @@ lumen run REPO_PATH [OPTIONS]
   --max-turns INT     Max LLM turns per phase (default: 60)
   --repo-size-check   off | warn | strict (default: warn)
   --allow-xlarge      Force full pipeline on xlarge repos
+  --verbose           Stream logs as the pipeline runs
+```
+
+```
+lumen security-audit REPO_PATH [OPTIONS]
+
+  --provider TEXT     auto | anthropic | ollama | openai
+  --model TEXT        LLM model (default: claude-sonnet-4-6)
+  --base-url TEXT     Override API endpoint (e.g. http://localhost:11434/v1)
+  --repo-name TEXT    Override repo name in output dir (useful when mounted at /repo)
+  --output-dir TEXT   Output directory (default: ./codedoc-output)
+  --max-turns INT     Max LLM turns per phase (default: 60)
+  --repo-size-check   off | warn | strict (default: warn)
+  --allow-xlarge      Continue even when preflight classifies the repo as xlarge
   --verbose           Stream logs as the pipeline runs
 ```
 
