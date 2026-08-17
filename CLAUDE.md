@@ -45,6 +45,10 @@ make lumen-docker-run REPO=/path/to/repo \
 
 make lumen-docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
 make lumen-docker-docs  # serve generated doc-site → http://localhost:8081
+
+# security-audit pipeline (fan-out reviewers + risk synthesis, same indexed graph)
+make lumen-docker-security-audit REPO=/path/to/repo \
+  ARGS="--provider anthropic --model claude-sonnet-4-6"
 ```
 
 For `xlarge` repos, `lumen-docker-run` intentionally stops after preflight and recommends
@@ -72,6 +76,10 @@ make lumen-run REPO=/path/to/repo ARGS='--provider ollama --model qwen2.5:32b --
 
 # Or invoke lumen directly
 cd pipeline && uv run lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
+
+# security-audit pipeline
+make lumen-security-audit REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
+cd pipeline && uv run lumen security-audit /path/to/repo --provider anthropic --model claude-sonnet-4-6
 ```
 
 ### Native bundle (no Docker, no dev tools)
@@ -100,6 +108,7 @@ available; it emits a warning and skips PHP if neither is found.
 After install:
 ```bash
 lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
+lumen security-audit /path/to/repo --provider anthropic --model claude-sonnet-4-6
 lumen mcp /path/to/repo    # HTTP MCP server
 
 # PHP repos: also install php on the target
@@ -142,7 +151,7 @@ If `timeout` or `max_turns` is explicitly set in `.codedoc.toml` or via CLI, tha
 | File | Purpose |
 |---|---|
 | `Dockerfile` | Multi-stage pipeline image: jlink JRE + pip-installed lumen runtime + Node JS parser |
-| `scripts/lumen-docker-*.sh` | Script-backed Docker entrypoints for pipeline, MCP, docs, image load, and release bundling |
+| `scripts/lumen-docker-*.sh` | Script-backed Docker entrypoints for pipeline, security-audit, MCP, docs, image load, and release bundling |
 
 ### Dockerfile (pipeline) — 5 stages
 
@@ -163,11 +172,15 @@ on aarch64 where `python:3.11-slim` requires GLIBC_2.38 but `node:20-slim` only 
 | Profile | Command | URL |
 |---|---|---|
 | `run` | `make lumen-docker-run REPO=... ARGS='...'` | — (writes to `./output/`) |
+| `security-audit` | `make lumen-docker-security-audit REPO=... ARGS='...'` | — (writes to `./output/`) |
 | `mcp` | `make lumen-docker-mcp DB=...` | http://localhost:8765/mcp |
 | `docs` | `make lumen-docker-docs` | http://localhost:8081 |
 
-`run`, `mcp`, and `docs` are script-backed `docker run` entrypoints invoked from the Makefile.
-They all use the same `DOCKER_IMAGE` runtime.
+`run`, `security-audit`, `mcp`, and `docs` are script-backed `docker run` entrypoints invoked
+from the Makefile. They all use the same `DOCKER_IMAGE` runtime.
+`scripts/lumen-docker-security-audit.sh` is a byte-for-byte mirror of `lumen-docker-run.sh`
+with only the invoked subcommand changed (`security-audit` instead of `run`) — this is the
+pattern any new pluggable pipeline's Docker wrapper should follow.
 The scripts add `host.docker.internal:host-gateway` so Ollama-on-host works on Linux; on Mac/Windows Docker Desktop, `host.docker.internal` is available automatically.
 `lumen-docker-mcp` prefers serving an existing DB via `DB`, and falls back to repo indexing when `REPO` is provided.
 `lumen-docker-docs` serves `output/doc-site` from the same `lumen` image instead of a separate generic Python image.
@@ -298,6 +311,19 @@ Reusable building blocks (no changes needed to use them): `KuzuBackend`,
 run-dir/state/finalization helpers. A new pipeline defines its own prompt files, its own
 small `allowed_artifact_paths` set per `run_loop` call, and its own `run_agent` — there is
 no shared "ArchetypeDefinition"-style plan the new pipeline must conform to.
+
+Make/Docker/native parity follows the same copy-the-example pattern as `security-audit`:
+- Native + `lumen-install`: nothing to add — `uv run lumen <name>` and the installed
+  `lumen <name>` binary work automatically once the CLI command exists (Click resolves any
+  registered subcommand; `make lumen-<name> REPO=... ARGS='...'` is just a convenience
+  wrapper mirroring `lumen-run`/`lumen-security-audit` in the Makefile).
+- Docker: add `scripts/lumen-docker-<name>.sh` as a byte-for-byte copy of
+  `lumen-docker-run.sh`/`lumen-docker-security-audit.sh` with the subcommand swapped, plus a
+  `lumen-docker-<name>` Makefile target that shells out to it. The Docker image itself needs
+  no changes — `ENTRYPOINT ["lumen"]` already resolves any subcommand; the wrapper script only
+  exists for the `REPO=`/`ARGS=`/volume-mount convenience the Makefile provides.
+- Native bundle build (`build-native.sh`) and the bundle's `lumen` launcher are also
+  subcommand-agnostic — no changes needed there for a new pipeline either.
 
 ---
 
@@ -444,3 +470,4 @@ Release workflow:
 | New agent-stage pipelines get their own `run_agent`, not a generalized `run_supervisor_agent` | `run_supervisor_agent`'s `ArchetypeDefinition`/artifact-plan machinery is deeply coupled to the docs pipeline's exact 3-analyst-+-architect contract. Rather than generalizing that (high risk, large surface area), new pipelines write their own small `run_agent(state) -> state` stage module built directly on `KuzuBackend`/`ReverseEngineerToolkit`/`create_provider`/`run_loop`/`run_parallel_tasks` — the docs pipeline stays completely untouched. |
 | `common_pipeline_options` Click decorator shared across pipeline commands | `run` and `security-audit` need the identical repo/model/provider/turns/etc. option set; a decorator avoids re-declaring ~10 `@click.option` lines per new pipeline command. |
 | `security-audit` pipeline has no builder step | Its artifacts (`security/*.md`) are plain markdown, not part of the MkDocs artifact-plan/manifest contract `stages/builder.py` assumes; skipping the builder keeps the example self-contained. |
+| `lumen-security-audit`/`lumen-docker-security-audit` Makefile targets + `scripts/lumen-docker-security-audit.sh` | Gives the new pipeline make/Docker convenience parity with `run`, matching the existing pattern instead of leaving it reachable only via raw `uv run lumen security-audit` / `docker run ... lumen security-audit`. The Docker wrapper script is a deliberate byte-for-byte copy of `lumen-docker-run.sh` with only the subcommand changed — no generic "any pipeline" Make/Docker abstraction, since `ENTRYPOINT ["lumen"]` and the native launcher are already subcommand-agnostic and copying the ~40-line script per pipeline is simpler than parameterizing it. |

@@ -149,12 +149,17 @@ report:
 
 ```bash
 lumen security-audit /path/to/repo --provider anthropic --model claude-sonnet-4-6
+
+# or via make, both natively and in Docker:
+make lumen-security-audit REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
+make lumen-docker-security-audit REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
 ```
 
 Produces `security/access-control-findings.md`, `security/dependency-risk-findings.md`,
 and `security/audit-report.md` under `artifacts/` — no MkDocs build step. It's also the
 reference implementation for adding your own pipeline: a new pipeline module + agent-stage
-module reusing the same graph/provider/tool-loop primitives, plus one new CLI command.
+module reusing the same graph/provider/tool-loop primitives, plus one new CLI command (and,
+for make/Docker parity, one new Makefile target pair + a copied Docker wrapper script).
 
 ## Getting Started
 
@@ -200,6 +205,16 @@ For local Ollama models, use `host.docker.internal` to reach the host network:
 # Linux: the wrapper scripts add host.docker.internal:host-gateway
 make lumen-docker-run REPO=/path/to/repo \
   ARGS='--provider ollama --model qwen2.5:32b --base-url http://host.docker.internal:11434/v1'
+```
+
+#### Security-audit pipeline
+
+Reuses the same preflight+indexer flow as `run`, but runs a fan-out/fan-in security review
+instead (see [Other pipelines](#other-pipelines-lumen-security-audit) above):
+
+```bash
+make lumen-docker-security-audit REPO=/path/to/repo \
+  ARGS='--provider anthropic --model claude-sonnet-4-6'
 ```
 
 #### MCP mode
@@ -289,6 +304,14 @@ uv run lumen run /path/to/repo --provider ollama --model qwen2.5:32b --base-url 
 uv run lumen run /path/to/repo --provider openai --model gpt-4o
 ```
 
+#### Security-audit pipeline
+
+```bash
+make lumen-security-audit REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
+# or directly:
+cd pipeline && uv run lumen security-audit /path/to/repo --provider anthropic --model claude-sonnet-4-6
+```
+
 #### MCP mode
 
 ```bash
@@ -327,6 +350,7 @@ After install:
 
 ```bash
 lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
+lumen security-audit /path/to/repo --provider anthropic --model claude-sonnet-4-6
 lumen mcp /path/to/repo   # MCP mode → http://127.0.0.1:8765/mcp
 ```
 
