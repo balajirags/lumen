@@ -32,11 +32,13 @@ _STAGE_STYLES: dict[str, str] = {
     "researcher":  "cyan",
 }
 
-# Distinct accent color per analyst — used in live boxes, done lines, tool table
+# Distinct accent color per analyst/role — used in live boxes, done lines, tool table
 _ANALYST_COLORS: dict[str, str] = {
     "analyst/domain": "blue",
     "analyst/flows":  "cyan",
     "analyst/tech":   "yellow",
+    "security/access": "blue",
+    "security/dependencies": "cyan",
 }
 
 def _analyst_color(name: str) -> str:
@@ -228,16 +230,20 @@ def print_supervisor_line(msg: str) -> None:
 
 
 def print_progress_line(tag: str, turn: int, max_turns: int, tool_name: str) -> None:
-    """Dim turn-level progress line emitted by run_loop."""
-    if tag.startswith("analyst/"):
+    """Dim turn-level progress line emitted by run_loop.
+
+    Routes into the live agent/workflow boxes when `tag` (or its prefix before the
+    first "/recovery") matches a name registered via `start_agent_boxes()` for the
+    running pipeline — this is data-driven, not hardcoded to the docs pipeline's
+    analyst/architect/summary names, so any pipeline's role names work automatically.
+    """
+    if tag in _agent_state:
         update_agent_box(tag, status="running", turn=turn, max_turns=max_turns, tool=tool_name)
         return
-    if tag.startswith("architect"):
-        update_workflow_phase("architect", status="running", tool=tool_name, turn=turn, max_turns=max_turns)
-        return
-    if tag.startswith("summary"):
-        update_workflow_phase("summary", status="running", tool=tool_name, turn=turn, max_turns=max_turns)
-        return
+    for phase_key in _workflow_state:
+        if tag == phase_key or tag.startswith(phase_key + "/"):
+            update_workflow_phase(phase_key, status="running", tool=tool_name, turn=turn, max_turns=max_turns)
+            return
     text = Text(style="dim")
     text.append(f"  [{tag}]")
     text.append(f" {turn}/{max_turns}  ")
@@ -391,11 +397,15 @@ def _status_renderable(status: str):
     return Text(f"{char} {status}", style=style)
 
 
+def _agent_box_label(name: str) -> str:
+    short = name.rsplit("/", 1)[-1]
+    return f"{short} researcher" if name.startswith("analyst/") else short
+
+
 def _render_agent_columns() -> Columns:
     panels: list[Panel] = []
-    for name in ("analyst/domain", "analyst/flows", "analyst/tech"):
-        info = _agent_state.get(name, {})
-        label = name.replace("analyst/", "") + " researcher"
+    for name, info in _agent_state.items():
+        label = _agent_box_label(name)
         status = str(info.get("status", "pending"))
         turn = info.get("turn")
         max_turns = info.get("max_turns")
@@ -433,18 +443,13 @@ def _render_workflow_panel() -> Panel:
     table.add_column("Status")
     table.add_column("Activity", overflow="fold")
     table.add_column("Progress", justify="right")
-    for key, label in (
-        ("synthesis", "synthesis"),
-        ("architect", "architect"),
-        ("summary", "summary"),
-    ):
-        info = _workflow_state.get(key, {})
+    for key, info in _workflow_state.items():
         status = str(info.get("status", "pending"))
         tool = str(info.get("tool", "waiting"))
         turn = info.get("turn")
         max_turns = info.get("max_turns")
         progress = f"{turn}/{max_turns}" if turn and max_turns else ""
-        table.add_row(label, _status_renderable(status), tool, progress)
+        table.add_row(key, _status_renderable(status), tool, progress)
     return Panel(table, title="Workflow", border_style="magenta")
 
 
@@ -452,20 +457,27 @@ def _render_agent_dashboard():
     return Group(_render_agent_columns(), _render_workflow_panel())
 
 
-def start_agent_boxes() -> None:
+_DEFAULT_AGENT_NAMES = ["analyst/domain", "analyst/flows", "analyst/tech"]
+_DEFAULT_WORKFLOW_PHASES = ["synthesis", "architect", "summary"]
+
+
+def start_agent_boxes(
+    agent_names: list[str] | None = None,
+    workflow_phases: list[str] | None = None,
+) -> None:
+    """Start the live fan-out/fan-in dashboard.
+
+    Defaults match the docs pipeline's 3 analysts + synthesis/architect/summary phases.
+    Any other pipeline passes its own role names and workflow-phase names here so its
+    fan-out/fan-in progress renders in the same dashboard style.
+    """
     global _agent_live, _agent_state, _workflow_state
     if not console.is_terminal:
         return
-    _agent_state = {
-        "analyst/domain": {"status": "pending", "tool": "waiting"},
-        "analyst/flows": {"status": "pending", "tool": "waiting"},
-        "analyst/tech": {"status": "pending", "tool": "waiting"},
-    }
-    _workflow_state = {
-        "synthesis": {"status": "pending", "tool": "waiting"},
-        "architect": {"status": "pending", "tool": "waiting"},
-        "summary": {"status": "pending", "tool": "waiting"},
-    }
+    names = agent_names or _DEFAULT_AGENT_NAMES
+    phases = workflow_phases or _DEFAULT_WORKFLOW_PHASES
+    _agent_state = {name: {"status": "pending", "tool": "waiting"} for name in names}
+    _workflow_state = {phase: {"status": "pending", "tool": "waiting"} for phase in phases}
     _agent_live = Live(_render_agent_dashboard(), console=console, refresh_per_second=6, transient=False)
     _agent_live.start()
 

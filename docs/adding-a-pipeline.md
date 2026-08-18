@@ -67,6 +67,7 @@ Source repo → [preflight + indexer]  ← SHARED, NEVER MODIFIED for a new pipe
 | `run_parallel_tasks(tasks: dict[str, Callable[[], dict]])` | `codedoc.stages.parallel` | The fan-out/fan-in concurrency helper. Give it a dict of no-arg callables (each one builds its own `KuzuBackend`/`ReverseEngineerToolkit` and calls `run_loop`), get back a dict of their result dicts. |
 | `common_pipeline_options` | `codedoc.cli` | Click decorator bundling the ~10 shared options (`--output-dir`, `--model`, `--provider`, `--max-turns`, `--allow-xlarge`, etc.) that every agent-stage pipeline command exposes identically. |
 | `create_run_dir`, `init_state`, `log_pipeline_start`, `finalize_state`, `apply_repo_size_runtime_defaults(state, bump_max_turns=...)`, `should_stop_for_xlarge_repo(state)` | `codedoc.pipelines.common` | Shared run-dir/state/finalization plumbing every pipeline module calls in the same order. Mode-agnostic — no code here needs editing when you add a pipeline. |
+| `start_agent_boxes(agent_names=[...], workflow_phases=[...])`, `update_agent_box(name, status=, tool=, artifacts=)`, `update_workflow_phase(name, status=, tool=)`, `print_researcher_done(name, n_artifacts)`, `print_tool_usage_table(per_role_tool_counts)`, `print_synthesizer_done(n_artifacts)`, `stop_agent_boxes()` | `codedoc.log` | The live fan-out/fan-in dashboard `lumen run` uses. **Data-driven, not hardcoded** — pass your own role names/phase names to `start_agent_boxes()` and every downstream call (including the per-turn progress line `run_loop` already emits via `phase_label`) routes into your boxes automatically. Skipping this wiring is the #1 way a new pipeline's console output ends up looking inconsistent with `lumen run`. |
 
 ## What NOT to touch
 
@@ -242,9 +243,10 @@ def run_agent(state) -> Any:
 
     events, input_tokens, output_tokens, tool_uses = [], 0, 0, 0
 
+    from codedoc import log as _log
+
     def log(msg: str) -> None:
         events.append(msg)
-        from codedoc import log as _log
         _log.print_supervisor_line(msg)
 
     log("[<name>] Phase 1 — orientation (direct toolkit query)")
@@ -252,8 +254,15 @@ def run_agent(state) -> Any:
 
     role_turns = max(10, max_turns // 3)
     synthesis_turns = max(6, max_turns // 4)
+    role_names = list(_ROLE_PROMPT_FILES)
 
-    log(f"[<name>] Phase 2 — spawning {len(_ROLE_PROMPT_FILES)} roles in parallel")
+    log(f"[<name>] Phase 2 — spawning {len(role_names)} roles in parallel")
+    # start_agent_boxes() is what makes this pipeline's console output look like
+    # `lumen run`'s — pass YOUR role/phase names, don't skip this call.
+    _log.start_agent_boxes(agent_names=role_names, workflow_phases=["<short-name>/synthesis"])
+    for name in role_names:
+        _log.update_agent_box(name, status="running", tool="starting")
+
     tasks = {
         name: _make_role_task(
             name, provider=provider, kuzu_path=kuzu_path, repo_path=repo_path,
@@ -262,35 +271,52 @@ def run_agent(state) -> Any:
             max_context_tokens=max_context_tokens,
             use_anthropic_format=use_anthropic_format, verbose=verbose,
         )
-        for name in _ROLE_PROMPT_FILES
+        for name in role_names
     }
-    results = run_parallel_tasks(tasks)
+    try:
+        results = run_parallel_tasks(tasks)
+    except Exception:
+        _log.stop_agent_boxes()
+        raise
 
     all_artifacts = []
+    role_tool_counts = {}
     for name, result in results.items():
         events.extend(result["events"])
         input_tokens += result["input_tokens"]
         output_tokens += result["output_tokens"]
         tool_uses += result["tool_uses"]
+        role_tool_counts[name] = result.get("tool_call_counts", {})
+        n_artifacts = len(result["artifacts"])
         if result["status"] == "failed":
+            _log.update_agent_box(name, status="failed", tool="error")
             log(f"[<name>] WARNING: {name} failed: {result['error']}")
         else:
             all_artifacts.extend(result["artifacts"])
-            log(f"[<name>] {name} done — {len(result['artifacts'])} artifact(s)")
+            _log.update_agent_box(name, status="done", tool="complete", artifacts=n_artifacts)
+            log(f"[<name>] {name} done — {n_artifacts} artifact(s)")
+        _log.print_researcher_done(name, n_artifacts)
+    _log.print_tool_usage_table(role_tool_counts)
 
     log("[<name>] Phase 3 — running synthesis…")
+    _log.update_workflow_phase("<short-name>/synthesis", status="running", tool="synthesizing")
     synth_backend = KuzuBackend(kuzu_path)
     synth_toolkit = ReverseEngineerToolkit(synth_backend, repo_path=repo_path)
-    synthesis_result = run_loop(
-        provider=provider, toolkit=synth_toolkit,
-        system_prompt=_build_synthesis_prompt(artifacts_dir, repo_name),
-        user_request="Write the final report now.", output_root=artifacts_dir,
-        max_turns=synthesis_turns, verbose=verbose,
-        use_anthropic_format=use_anthropic_format,
-        max_context_tokens=max_context_tokens, max_source_reads=0,
-        include_write_artifact=True, phase_label="<short-name>/synthesis",
-        allowed_artifact_paths={_REPORT_ARTIFACT},
-    )
+    try:
+        synthesis_result = run_loop(
+            provider=provider, toolkit=synth_toolkit,
+            system_prompt=_build_synthesis_prompt(artifacts_dir, repo_name),
+            user_request="Write the final report now.", output_root=artifacts_dir,
+            max_turns=synthesis_turns, verbose=verbose,
+            use_anthropic_format=use_anthropic_format,
+            max_context_tokens=max_context_tokens, max_source_reads=0,
+            include_write_artifact=True, phase_label="<short-name>/synthesis",
+            allowed_artifact_paths={_REPORT_ARTIFACT},
+        )
+    except Exception:
+        _log.update_workflow_phase("<short-name>/synthesis", status="failed", tool="error")
+        _log.stop_agent_boxes()
+        raise
     events.extend(synthesis_result["events"])
     input_tokens += synthesis_result["input_tokens"]
     output_tokens += synthesis_result["output_tokens"]
@@ -300,8 +326,14 @@ def run_agent(state) -> Any:
     state.input_tokens, state.output_tokens, state.tool_uses = input_tokens, output_tokens, tool_uses
 
     if synthesis_result["status"] == "failed":
+        _log.update_workflow_phase("<short-name>/synthesis", status="failed", tool="error")
+        _log.stop_agent_boxes()
         state.status, state.error = "failed", synthesis_result["error"]
         return state
+
+    _log.update_workflow_phase("<short-name>/synthesis", status="done", tool="report written")
+    _log.print_synthesizer_done(len(synthesis_result["artifacts"]))
+    _log.stop_agent_boxes()
 
     all_artifacts.extend(synthesis_result["artifacts"])
     if not all_artifacts:
@@ -447,9 +479,18 @@ Skip the Stage 3 builder call entirely unless your pipeline needs an MkDocs site
    - Each role writes exactly its assigned artifact; the synthesis step's log shows it
      reading both role artifacts and writing the final report.
    - `pipeline.json` in the run's output dir has `"mode": "<name>"` and `"status": "done"`.
-4. If you touched `pipelines/common.py` (you shouldn't need to), re-verify `lumen run`
-   still works — at minimum re-import `codedoc.pipelines.full`, `codedoc.pipelines.mcp`,
-   `codedoc.pipelines.mcp_http` to confirm no import breakage.
+   - The "researcher done" checkmark lines, the "Tool usage by researcher" table, and the
+     "synthesizer done" line all appear (these come from `print_researcher_done`,
+     `print_tool_usage_table`, `print_synthesizer_done` — if they're missing, you skipped
+     the `codedoc.log` wiring in step 3). In a real terminal (not piped/redirected), you
+     should also see the live colored dashboard boxes update in place during Phase 2/3,
+     matching `lumen run`'s look — `console.is_terminal` is `False` when output is piped,
+     so redirecting to a file/`tail` will only show the plain-line fallbacks, not the boxes.
+4. If you touched `pipelines/common.py` or `codedoc/log.py` (you shouldn't normally need
+   to), re-verify `lumen run` still works — at minimum re-import `codedoc.pipelines.full`,
+   `codedoc.pipelines.mcp`, `codedoc.pipelines.mcp_http`, and confirm
+   `codedoc.log.start_agent_boxes()` (no args) still produces the exact same
+   `analyst/domain|flows|tech` + `synthesis/architect/summary` state as before.
 5. Clean up smoke-test output directories before committing.
 
 ---

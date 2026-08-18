@@ -152,9 +152,10 @@ def run_agent(state) -> Any:
     output_tokens = 0
     tool_uses = 0
 
+    from codedoc import log as _log
+
     def log(msg: str) -> None:
         events.append(msg)
-        from codedoc import log as _log
         _log.print_supervisor_line(msg)
 
     # ------------------------------------------------------------------
@@ -168,8 +169,13 @@ def run_agent(state) -> Any:
     # ------------------------------------------------------------------
     reviewer_turns = max(10, max_turns // 3)
     synthesis_turns = max(6, max_turns // 4)
+    role_names = list(_REVIEWER_PROMPT_FILES)
 
     log("[security-audit] Phase 2 — spawning 2 reviewers in parallel (access · dependencies)")
+    _log.start_agent_boxes(agent_names=role_names, workflow_phases=["security/synthesis"])
+    for name in role_names:
+        _log.update_agent_box(name, status="running", tool="starting")
+
     tasks = {
         name: _make_reviewer_task(
             name,
@@ -184,43 +190,60 @@ def run_agent(state) -> Any:
             use_anthropic_format=use_anthropic_format,
             verbose=verbose,
         )
-        for name in _REVIEWER_PROMPT_FILES
+        for name in role_names
     }
-    results = run_parallel_tasks(tasks)
+    try:
+        results = run_parallel_tasks(tasks)
+    except Exception:
+        _log.stop_agent_boxes()
+        raise
 
     all_artifacts: list[str] = []
+    reviewer_tool_counts: dict[str, dict[str, int]] = {}
     for name, result in results.items():
         events.extend(result["events"])
         input_tokens += result["input_tokens"]
         output_tokens += result["output_tokens"]
         tool_uses += result["tool_uses"]
+        reviewer_tool_counts[name] = result.get("tool_call_counts", {})
+        n_artifacts = len(result["artifacts"])
         if result["status"] == "failed":
+            _log.update_agent_box(name, status="failed", tool="error")
             log(f"[security-audit] WARNING: {name} failed: {result['error']}")
         else:
             all_artifacts.extend(result["artifacts"])
-            log(f"[security-audit] {name} done — {len(result['artifacts'])} artifact(s)")
+            _log.update_agent_box(name, status="done", tool="complete", artifacts=n_artifacts)
+            log(f"[security-audit] {name} done — {n_artifacts} artifact(s)")
+        _log.print_researcher_done(name, n_artifacts)
+    _log.print_tool_usage_table(reviewer_tool_counts)
 
     # ------------------------------------------------------------------
     # Phase 3: fan-in — risk synthesis
     # ------------------------------------------------------------------
     log("[security-audit] Phase 3 — running risk synthesis…")
+    _log.update_workflow_phase("security/synthesis", status="running", tool="risk synthesis")
     synthesis_backend = KuzuBackend(kuzu_path)
     synthesis_toolkit = ReverseEngineerToolkit(synthesis_backend, repo_path=repo_path)
-    synthesis_result = run_loop(
-        provider=provider,
-        toolkit=synthesis_toolkit,
-        system_prompt=_build_synthesis_prompt(artifacts_dir, repo_name),
-        user_request="Write the prioritized audit report now.",
-        output_root=artifacts_dir,
-        max_turns=synthesis_turns,
-        verbose=verbose,
-        use_anthropic_format=use_anthropic_format,
-        max_context_tokens=max_context_tokens,
-        max_source_reads=0,
-        include_write_artifact=True,
-        phase_label="security/synthesis",
-        allowed_artifact_paths={_REPORT_ARTIFACT},
-    )
+    try:
+        synthesis_result = run_loop(
+            provider=provider,
+            toolkit=synthesis_toolkit,
+            system_prompt=_build_synthesis_prompt(artifacts_dir, repo_name),
+            user_request="Write the prioritized audit report now.",
+            output_root=artifacts_dir,
+            max_turns=synthesis_turns,
+            verbose=verbose,
+            use_anthropic_format=use_anthropic_format,
+            max_context_tokens=max_context_tokens,
+            max_source_reads=0,
+            include_write_artifact=True,
+            phase_label="security/synthesis",
+            allowed_artifact_paths={_REPORT_ARTIFACT},
+        )
+    except Exception:
+        _log.update_workflow_phase("security/synthesis", status="failed", tool="error")
+        _log.stop_agent_boxes()
+        raise
     events.extend(synthesis_result["events"])
     input_tokens += synthesis_result["input_tokens"]
     output_tokens += synthesis_result["output_tokens"]
@@ -232,9 +255,15 @@ def run_agent(state) -> Any:
     state.tool_uses = tool_uses
 
     if synthesis_result["status"] == "failed":
+        _log.update_workflow_phase("security/synthesis", status="failed", tool="error")
+        _log.stop_agent_boxes()
         state.status = "failed"
         state.error = synthesis_result["error"]
         return state
+
+    _log.update_workflow_phase("security/synthesis", status="done", tool="report written")
+    _log.print_synthesizer_done(len(synthesis_result["artifacts"]))
+    _log.stop_agent_boxes()
 
     all_artifacts.extend(synthesis_result["artifacts"])
     if not all_artifacts:

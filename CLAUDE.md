@@ -314,10 +314,14 @@ cli.py                          ← @main.command(name="<name>") + @common_pipel
 Reusable building blocks (no changes needed to use them): `KuzuBackend`,
 `ReverseEngineerToolkit` (`kg_tools/`), `create_provider` (`llm.py`), `run_loop` and its
 `allowed_artifact_paths`/`phase_label` params (`stages/agent.py`), `run_parallel_tasks`
-(`stages/parallel.py`), `common_pipeline_options` (`cli.py`), and `pipelines/common.py`'s
-run-dir/state/finalization helpers. A new pipeline defines its own prompt files, its own
-small `allowed_artifact_paths` set per `run_loop` call, and its own `run_agent` — there is
-no shared "ArchetypeDefinition"-style plan the new pipeline must conform to.
+(`stages/parallel.py`), `common_pipeline_options` (`cli.py`), `pipelines/common.py`'s
+run-dir/state/finalization helpers, and `log.py`'s `start_agent_boxes`/`update_agent_box`/
+`update_workflow_phase`/`print_researcher_done`/`print_tool_usage_table`/
+`print_synthesizer_done`/`stop_agent_boxes` (pass your own role/phase names — this is what
+makes a new pipeline's console output look like `lumen run`'s instead of falling back to
+plain dim-text lines). A new pipeline defines its own prompt files, its own small
+`allowed_artifact_paths` set per `run_loop` call, and its own `run_agent` — there is no
+shared "ArchetypeDefinition"-style plan the new pipeline must conform to.
 
 Make/Docker/native parity follows the same copy-the-example pattern as `security-audit`:
 - Native + `lumen-install`: nothing to add — `uv run lumen <name>` and the installed
@@ -478,3 +482,4 @@ Release workflow:
 | `common_pipeline_options` Click decorator shared across pipeline commands | `run` and `security-audit` need the identical repo/model/provider/turns/etc. option set; a decorator avoids re-declaring ~10 `@click.option` lines per new pipeline command. |
 | `security-audit` pipeline has no builder step | Its artifacts (`security/*.md`) are plain markdown, not part of the MkDocs artifact-plan/manifest contract `stages/builder.py` assumes; skipping the builder keeps the example self-contained. |
 | `lumen-security-audit`/`lumen-docker-security-audit` Makefile targets + `scripts/lumen-docker-security-audit.sh` | Gives the new pipeline make/Docker convenience parity with `run`, matching the existing pattern instead of leaving it reachable only via raw `uv run lumen security-audit` / `docker run ... lumen security-audit`. The Docker wrapper script is a deliberate byte-for-byte copy of `lumen-docker-run.sh` with only the subcommand changed — no generic "any pipeline" Make/Docker abstraction, since `ENTRYPOINT ["lumen"]` and the native launcher are already subcommand-agnostic and copying the ~40-line script per pipeline is simpler than parameterizing it. |
+| `log.py`'s live fan-out/fan-in dashboard (`start_agent_boxes`, `_render_agent_columns`, `_render_workflow_panel`, `print_progress_line`) is data-driven, not hardcoded | Originally hardcoded to the docs pipeline's exact 3 analyst names + synthesis/architect/summary phases, so `security-audit`'s 2 reviewers never rendered into the live boxes and fell back to plain dim-text lines — visibly inconsistent with `lumen run`. `start_agent_boxes(agent_names=..., workflow_phases=...)` now takes the role/phase names as parameters (defaulting to the docs pipeline's original 3+3, so `lumen run`'s output is byte-for-byte unchanged), and `print_progress_line` routes per-turn events into whichever boxes were registered by membership check instead of `tag.startswith("analyst/"/"architect"/"summary")`. Every new pipeline must call `start_agent_boxes`/`update_agent_box`/`print_researcher_done`/`print_tool_usage_table`/`update_workflow_phase`/`print_synthesizer_done`/`stop_agent_boxes` with its own names (see `security_audit_agent.py` and `docs/adding-a-pipeline.md`'s `run_agent` skeleton) to get this styling — it is not automatic just from using `run_loop`. |
