@@ -1,6 +1,6 @@
 # Fixture repos for `test-lumen.sh`
 
-Tiny, checked-in synthetic repos used by `../../test-lumen.sh` as the default fast-path
+Tiny, checked-in synthetic repos used by `../test-lumen.sh` as the default fast-path
 target for every discovered `lumen` pipeline command. Kept intentionally small so indexing
 and LLM calls stay fast and cheap — these are for catching pipeline/CLI/Makefile
 regressions, not for exercising indexer/parser correctness at scale.

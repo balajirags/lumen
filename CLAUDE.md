@@ -336,7 +336,7 @@ Make/Docker/native parity follows the same copy-the-example pattern as `security
 - Native bundle build (`build-native.sh`) and the bundle's `lumen` launcher are also
   subcommand-agnostic — no changes needed there for a new pipeline either.
 
-`./test-lumen.sh` (repo root) is the E2E regression safety net: it discovers every native
+`./e2e-test/test-lumen.sh` is the E2E regression safety net: it discovers every native
 `lumen-<name>:` Makefile target (excluding docker/mcp/docs/install/build), runs each one
 against the checked-in fixtures under `e2e-test/fixtures/`, and verifies exit code +
 `pipeline.json` status/mode + artifacts actually written. A new pipeline is picked up

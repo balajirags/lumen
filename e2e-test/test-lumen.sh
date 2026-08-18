@@ -24,7 +24,7 @@
 
 set -uo pipefail  # not -e: we want to run every check and report all failures, not bail early
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 PROVIDER="${PROVIDER:-anthropic}"

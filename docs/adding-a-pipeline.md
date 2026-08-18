@@ -481,7 +481,7 @@ Skip the Stage 3 builder call entirely unless your pipeline needs an MkDocs site
 
 ### 8. Verify
 
-Once step 6 (Makefile target) is done, `./test-lumen.sh` at the repo root discovers your
+Once step 6 (Makefile target) is done, `./e2e-test/test-lumen.sh` discovers your
 new pipeline automatically — it greps the Makefile for `lumen-<name>:` targets and runs
 each one against the checked-in fixture repos under `e2e-test/fixtures/`, verifying exit
 code, `pipeline.json` status/mode, and that artifacts were actually written (see the
