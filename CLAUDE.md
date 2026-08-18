@@ -285,6 +285,13 @@ manifests/artifacts.json          ← machine-generated index of all artifacts w
 
 ### Pluggable agent-stage pipelines
 
+Adding a new pipeline? Use `docs/adding-a-pipeline.md` — it's a self-contained
+reference-and-prompt template (mental model, reusable building blocks, naming conventions,
+copy-paste module skeletons, make/Docker/native checklist, verification steps, and a
+fill-in-the-blank task section at the end) meant to be handed to whoever implements the
+next pipeline so the result is predictable and structurally consistent with
+`security-audit`. The summary below is a condensed pointer, not a replacement for it.
+
 `lumen run` is not the only pipeline — new CLI commands can run an entirely different
 fan-out/fan-in agent stage against the same preflight+indexer flow, without touching
 `stages/agent.py`, the archetype/artifact-plan system, or the docs pipeline in any way.

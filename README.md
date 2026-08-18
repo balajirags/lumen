@@ -161,6 +161,12 @@ reference implementation for adding your own pipeline: a new pipeline module + a
 module reusing the same graph/provider/tool-loop primitives, plus one new CLI command (and,
 for make/Docker parity, one new Makefile target pair + a copied Docker wrapper script).
 
+Want to add your own pipeline? [`docs/adding-a-pipeline.md`](docs/adding-a-pipeline.md) is a
+self-contained reference-and-prompt template — hand it to an engineer or an AI agent along
+with what you want the new pipeline to analyze, and it walks through every file to add
+(prompts, agent stage, pipeline module, CLI command, make/Docker wiring) so the result is
+predictable and consistent with `security-audit`.
+
 ## Getting Started
 
 Set your LLM provider credentials:
