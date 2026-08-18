@@ -336,6 +336,18 @@ Make/Docker/native parity follows the same copy-the-example pattern as `security
 - Native bundle build (`build-native.sh`) and the bundle's `lumen` launcher are also
   subcommand-agnostic — no changes needed there for a new pipeline either.
 
+`./test-lumen.sh` (repo root) is the E2E regression safety net: it discovers every native
+`lumen-<name>:` Makefile target (excluding docker/mcp/docs/install/build), runs each one
+against the checked-in fixtures under `tests/fixtures/`, and verifies exit code +
+`pipeline.json` status/mode + artifacts actually written. A new pipeline is picked up
+automatically the moment its Makefile target exists — nothing to edit in the script. This
+is separate from `pipeline/tests/` (pytest unit tests with every stage mocked) — the E2E
+script exercises the real indexer + real LLM calls end-to-end, which is what caught a real
+bug during its own development: `run_indexer` (shared) always populates
+`state.artifact_plan` for repo classification, but only the docs/`full` pipeline's agent
+stage actually fulfills it — the script's verifier has to know this (`uses_artifact_plan_for`)
+rather than inferring "has a plan" from the field's mere presence.
+
 ---
 
 ## Sub-project: indexer/

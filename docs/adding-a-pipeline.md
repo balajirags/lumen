@@ -481,6 +481,15 @@ Skip the Stage 3 builder call entirely unless your pipeline needs an MkDocs site
 
 ### 8. Verify
 
+Once step 6 (Makefile target) is done, `./test-lumen.sh` at the repo root discovers your
+new pipeline automatically — it greps the Makefile for `lumen-<name>:` targets and runs
+each one against the checked-in fixture repos under `tests/fixtures/`, verifying exit
+code, `pipeline.json` status/mode, and that artifacts were actually written (see the
+script itself for exactly what it checks). Run it after finishing the implementation; it
+covers most of the manual checks below in one command. The manual checks are for when
+`test-lumen.sh` fails and you need to narrow down why, or before the Makefile target
+exists yet.
+
 1. `python3 -c "import ast; ast.parse(open('<file>').read())"` on every new file, or just
    import them directly: `uv run python -c "import codedoc.pipelines.<name_snake>"`.
 2. `uv run lumen --help` shows the new command; `uv run lumen <name> --help` shows the same
