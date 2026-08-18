@@ -338,7 +338,7 @@ Make/Docker/native parity follows the same copy-the-example pattern as `security
 
 `./test-lumen.sh` (repo root) is the E2E regression safety net: it discovers every native
 `lumen-<name>:` Makefile target (excluding docker/mcp/docs/install/build), runs each one
-against the checked-in fixtures under `tests/fixtures/`, and verifies exit code +
+against the checked-in fixtures under `e2e-test/fixtures/`, and verifies exit code +
 `pipeline.json` status/mode + artifacts actually written. A new pipeline is picked up
 automatically the moment its Makefile target exists — nothing to edit in the script. This
 is separate from `pipeline/tests/` (pytest unit tests with every stage mocked) — the E2E

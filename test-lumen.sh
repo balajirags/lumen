@@ -6,7 +6,7 @@
 # Makefile (e.g. `lumen-run`, `lumen-security-audit` — anything matching `lumen-<name>:`
 # except docker/mcp/docs/install/build/help/test targets) and runs each one via
 # `make lumen-<name> REPO=...` against small synthetic fixture repos checked into
-# tests/fixtures/. A new pipeline that follows the Makefile naming convention
+# e2e-test/fixtures/. A new pipeline that follows the Makefile naming convention
 # (see docs/adding-a-pipeline.md) is picked up automatically — no edits needed here.
 #
 # Each run is verified structurally, not just by exit code:
@@ -39,7 +39,7 @@ mkdir -p "$LOG_DIR"
 # Fixture repos (fast path) — tiny, checked-in, free/cheap to index and analyze.
 # ---------------------------------------------------------------------------
 FIXTURES=(
-    "$REPO_ROOT/tests/fixtures/mini-flask-app"
+    "$REPO_ROOT/e2e-test/fixtures/mini-flask-app"
 )
 
 # ---------------------------------------------------------------------------
