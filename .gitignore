@@ -52,6 +52,7 @@ releases/
 
 #test
 token-usage
+manual-test-lumen.sh
 task_logs/
 
 
