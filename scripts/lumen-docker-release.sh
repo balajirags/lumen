@@ -71,8 +71,8 @@ fi
 
 echo "Copying runtime files"
 cp "${ROOT_DIR}/Makefile" "${RUNTIME_DIR}/Makefile"
-cp "${ROOT_DIR}/run-lumen.md" "${RUNTIME_DIR}/run-lumen.md"
-cp "${ROOT_DIR}/docker-source.md" "${RUNTIME_DIR}/docker-source.md"
+cp "${ROOT_DIR}/docs/run-lumen.md" "${RUNTIME_DIR}/run-lumen.md"
+cp "${ROOT_DIR}/docs/docker-source.md" "${RUNTIME_DIR}/docker-source.md"
 cp "${ROOT_DIR}/scripts/lumen-docker-load.sh" "${SCRIPTS_DIR}/lumen-docker-load.sh"
 cp "${ROOT_DIR}/scripts/lumen-docker-run.sh" "${SCRIPTS_DIR}/lumen-docker-run.sh"
 cp "${ROOT_DIR}/scripts/lumen-docker-mcp.sh" "${SCRIPTS_DIR}/lumen-docker-mcp.sh"
