@@ -137,6 +137,20 @@ Follow the existing style (see `security-analyst-access.md` for a role prompt,
 
 ### 3. Write the agent-stage module: `stages/<name_snake>_agent.py`
 
+**Wire in the pretty logging — this is not optional.** `run_loop` alone does not make your
+pipeline's console output look like `lumen run`'s. You must explicitly call the
+`codedoc.log` dashboard functions with your own role/phase names (see the table above and
+the skeleton below): `start_agent_boxes(agent_names=..., workflow_phases=...)` before
+fan-out, `update_agent_box(...)` when each role starts/finishes, `print_researcher_done`
++ `print_tool_usage_table` after fan-out, `update_workflow_phase(...)` +
+`print_synthesizer_done` around the fan-in call, and `stop_agent_boxes()` on every exit
+path (success, failure, and exceptions — use `try`/`except` around the fan-out and fan-in
+calls as shown below so a crash doesn't leave a half-finished live dashboard on screen).
+Skipping this was a real regression once already: a pipeline built without it fell back to
+plain dim-text lines with no live boxes, no "researcher done" checkmarks, and no tool-usage
+table — visibly inconsistent with `lumen run`, and it had to be retrofitted afterward.
+Do it right the first time.
+
 Skeleton (copy `stages/security_audit_agent.py` and rename):
 
 ```python
