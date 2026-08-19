@@ -143,9 +143,9 @@ metadata to read only the exact method body (50–600 tokens), not the whole fil
 
 `lumen run` isn't the only pipeline. Preflight and indexing are shared and unmodified —
 only the agent stage is swapped. `lumen security-audit` is a built-in example: it reuses
-the same indexed graph, then runs 2 reviewers in parallel (access-control exposure,
-dependency/coupling risk) followed by one fan-in synthesis pass that writes a prioritized
-report:
+the same indexed graph, then runs 3 reviewers in parallel (access-control exposure,
+dependency/coupling risk, threat model & trust boundaries) followed by one fan-in synthesis
+pass that writes a prioritized report:
 
 ```bash
 lumen security-audit /path/to/repo --provider anthropic --model claude-sonnet-4-6
@@ -156,7 +156,8 @@ make lumen-docker-security-audit REPO=/path/to/repo ARGS='--provider anthropic -
 ```
 
 Produces `security/access-control-findings.md`, `security/dependency-risk-findings.md`,
-and `security/audit-report.md` under `artifacts/` — no MkDocs build step. It's also the
+`security/threat-model-findings.md`, and `security/audit-report.md` under `artifacts/` — no
+MkDocs build step. It's also the
 reference implementation for adding your own pipeline: a new pipeline module + agent-stage
 module reusing the same graph/provider/tool-loop primitives, plus one new CLI command (and,
 for make/Docker parity, one new Makefile target pair + a copied Docker wrapper script).
