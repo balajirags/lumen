@@ -13,7 +13,7 @@ pipeline, added in this exact way. When in doubt, go read its files instead of g
 - `pipeline/codedoc/pipelines/security_audit.py`
 - `pipeline/codedoc/stages/security_audit_agent.py`
 - `pipeline/codedoc/stages/parallel.py`
-- `pipeline/codedoc/prompts/security-analyst-access.md`, `security-analyst-dependencies.md`, `security-synthesis.md`
+- `pipeline/codedoc/prompts/security-analyst-access.md`, `security-analyst-dependencies.md`, `security-threat-model.md`, `security-synthesis.md`
 - `pipeline/codedoc/cli.py` (the `common_pipeline_options` decorator and the `security_audit` command)
 - `Makefile` (`lumen-security-audit`, `lumen-docker-security-audit` targets)
 - `scripts/lumen-docker-security-audit.sh`

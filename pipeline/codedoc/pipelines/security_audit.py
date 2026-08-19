@@ -2,8 +2,8 @@
 
 Example of a pluggable pipeline: identical preflight/indexer sequencing to
 ``pipelines/full.py``, reusing the exact same shared stages unchanged, but Stage 2 runs
-``stages/security_audit_agent.run_agent`` (fan-out access/dependency reviewers + fan-in
-risk synthesis) instead of the docs pipeline's Analyst+Architect supervisor. There is no
+``stages/security_audit_agent.run_agent`` (fan-out access/dependency/threat-model reviewers
++ fan-in risk synthesis) instead of the docs pipeline's Analyst+Architect supervisor. There is no
 Stage 3 builder step — artifacts are left as plain markdown under ``artifacts/security/``.
 """
 

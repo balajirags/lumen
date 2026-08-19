@@ -204,7 +204,7 @@ Key files:
 - `pipeline/codedoc/preflight/runner.py` — preflight registry/runner; pipeline core depends on this, not on repo-metrics directly
 - `pipeline/codedoc/stages/agent.py` — supervisor + parallel analysts + architect; also exports the reusable `run_loop` tool-loop primitive
 - `pipeline/codedoc/stages/parallel.py` — `run_parallel_tasks`, a generic fan-out/fan-in helper (dict of thunks in, dict of results out) any new agent-stage pipeline can reuse
-- `pipeline/codedoc/stages/security_audit_agent.py` — example alternative agent stage: 2 parallel reviewers (access-control, dependency-risk) fan out via `run_parallel_tasks`, then 1 fan-in risk-synthesis `run_loop` call
+- `pipeline/codedoc/stages/security_audit_agent.py` — example alternative agent stage: 3 parallel reviewers (access-control, dependency-risk, threat-model) fan out via `run_parallel_tasks`, then 1 fan-in risk-synthesis `run_loop` call
 - `pipeline/codedoc/log.py` — structured progress logging, indexer progress panel, repo metrics panel, analyst live boxes
 - `pipeline/codedoc/mcp_server.py` — MCP server backed by `kg_tools`; supports the HTTP MCP flow exposed by `make lumen-mcp` and `make lumen-docker-mcp`
 - `pipeline/codedoc/llm.py` — LLM abstraction: `ClaudeProvider`, `OllamaProvider`, `OpenAIProvider`
@@ -216,7 +216,7 @@ Key files:
 - `pipeline/codedoc/prompts/architect.md` — Solution Architect system prompt (writes target-state artifacts; manifest is machine-generated)
 - `pipeline/codedoc/prompts/archetype-*.md` — archetype overlays for `backend-service`, `frontend-app`, `fullstack-app`, and `library`
 - `pipeline/codedoc/prompts/re-prompt.md` — single-agent fallback prompt (monolithic execution path)
-- `pipeline/codedoc/prompts/security-analyst-access.md`, `security-analyst-dependencies.md`, `security-synthesis.md` — prompts for the example `security-audit` pipeline's 2 reviewers + fan-in synthesis
+- `pipeline/codedoc/prompts/security-analyst-access.md`, `security-analyst-dependencies.md`, `security-threat-model.md`, `security-synthesis.md` — prompts for the example `security-audit` pipeline's 3 reviewers + fan-in synthesis
 - `pipeline/scripts/build-docs-site.sh` — builds MkDocs Material site with Mermaid plus deterministic C4 PlantUML for C1 context views; supports multi-repo accumulation
 - `pipeline/.codedoc.toml` — runtime config (`indexer_bin_dir = ../indexer/bin`, `max_turns = 60`, `repo_size_check = "warn"`)
 - `pipeline/pyproject.toml` — package name: `lumen`, entry point: `lumen = "codedoc.cli:main"`, uses `uv`

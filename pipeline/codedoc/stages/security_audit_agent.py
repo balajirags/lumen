@@ -3,7 +3,7 @@
 Example of a pluggable agent stage: reuses the same low-level primitives as
 ``codedoc.stages.agent`` (KuzuBackend, ReverseEngineerToolkit, create_provider, run_loop)
 against the graph produced by the unchanged preflight/indexer stages, but runs its own
-fan-out/fan-in orchestration — 2 parallel reviewers, then 1 risk-synthesis pass — instead
+fan-out/fan-in orchestration — 3 parallel reviewers, then 1 risk-synthesis pass — instead
 of the docs pipeline's Analyst+Architect pattern.
 
 Usage (as pipeline stage)::
@@ -26,16 +26,24 @@ _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 _ACCESS_ARTIFACT = "security/access-control-findings.md"
 _DEPENDENCY_ARTIFACT = "security/dependency-risk-findings.md"
+_THREAT_MODEL_ARTIFACT = "security/threat-model-findings.md"
 _REPORT_ARTIFACT = "security/audit-report.md"
 
 _REVIEWER_PROMPT_FILES: dict[str, str] = {
     "security/access": "security-analyst-access.md",
     "security/dependencies": "security-analyst-dependencies.md",
+    "security/threat-model": "security-threat-model.md",
 }
 _REVIEWER_ARTIFACTS: dict[str, set[str]] = {
     "security/access": {_ACCESS_ARTIFACT},
     "security/dependencies": {_DEPENDENCY_ARTIFACT},
+    "security/threat-model": {_THREAT_MODEL_ARTIFACT},
 }
+_ALL_REVIEWER_ARTIFACTS: tuple[str, ...] = (
+    _ACCESS_ARTIFACT,
+    _DEPENDENCY_ARTIFACT,
+    _THREAT_MODEL_ARTIFACT,
+)
 
 
 def _load_prompt(filename: str) -> str:
@@ -98,7 +106,7 @@ def _make_reviewer_task(
 def _build_synthesis_prompt(artifacts_dir: str, repo_name: str) -> str:
     prompt = _load_prompt("security-synthesis.md")
     prompt += "\n\n---\n## Findings (written by reviewers)\n\n"
-    for rel_path in (_ACCESS_ARTIFACT, _DEPENDENCY_ARTIFACT):
+    for rel_path in _ALL_REVIEWER_ARTIFACTS:
         full_path = Path(artifacts_dir) / rel_path
         if full_path.exists():
             prompt += f"### {rel_path}\n\n{full_path.read_text(encoding='utf-8')}\n\n"
@@ -165,13 +173,18 @@ def run_agent(state) -> Any:
     orientation_summary = _orientation_summary(kuzu_path, repo_path)
 
     # ------------------------------------------------------------------
-    # Phase 2: fan-out — 2 parallel reviewers
+    # Phase 2: fan-out — 3 parallel reviewers
     # ------------------------------------------------------------------
+    # Per-reviewer turn budget, not divided across reviewers — each reviewer gets its own
+    # full `reviewer_turns`-turn conversation, running concurrently via run_parallel_tasks
+    # (ThreadPoolExecutor sized to len(tasks)). The // 3 divisor is a fixed heuristic
+    # borrowed from the docs pipeline's analyst budget; it does not need to track the
+    # number of reviewers below.
     reviewer_turns = max(10, max_turns // 3)
     synthesis_turns = max(6, max_turns // 4)
     role_names = list(_REVIEWER_PROMPT_FILES)
 
-    log("[security-audit] Phase 2 — spawning 2 reviewers in parallel (access · dependencies)")
+    log(f"[security-audit] Phase 2 — spawning {len(role_names)} reviewers in parallel (access · dependencies · threat-model)")
     _log.start_agent_boxes(agent_names=role_names, workflow_phases=["security/synthesis"])
     for name in role_names:
         _log.update_agent_box(name, status="running", tool="starting")
