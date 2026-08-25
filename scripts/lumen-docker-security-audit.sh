@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+DOCKER_IMAGE="${DOCKER_IMAGE:-lumen}"
+REPO="${REPO:-}"
+ARGS="${ARGS:-}"
+OUTPUT_PATH="${OUTPUT_PATH:-$(pwd)/output}"
+
+if [ -z "${REPO}" ]; then
+  echo "Usage: REPO=/path/to/repo [ARGS='--provider anthropic --model claude-sonnet-4-6'] ./scripts/lumen-docker-security-audit.sh"
+  exit 1
+fi
+
+mkdir -p "${OUTPUT_PATH}"
+
+docker_args=(
+  run --rm
+  --add-host=host.docker.internal:host-gateway
+  -v "${REPO}:/repo"
+  -v "${OUTPUT_PATH}:/workspace/output"
+)
+
+if [ -t 0 ]; then
+  docker_args+=( -i )
+fi
+if [ -t 1 ]; then
+  docker_args+=( -t )
+fi
+
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+  docker_args+=( -e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" )
+fi
+if [ -n "${OPENAI_API_KEY:-}" ]; then
+  docker_args+=( -e "OPENAI_API_KEY=${OPENAI_API_KEY}" )
+fi
+if [ -n "${CMG_JS_HEAP_MB:-}" ]; then
+  docker_args+=( -e "CMG_JS_HEAP_MB=${CMG_JS_HEAP_MB}" )
+fi
+
+cmd=( "${DOCKER_IMAGE}" security-audit /repo --repo-name "$(basename "${REPO}")" --output-dir /workspace/output )
+if [ -n "${ARGS}" ]; then
+  # shellcheck disable=SC2206
+  extra_args=( ${ARGS} )
+  cmd+=( "${extra_args[@]}" )
+fi
+
+docker "${docker_args[@]}" "${cmd[@]}"

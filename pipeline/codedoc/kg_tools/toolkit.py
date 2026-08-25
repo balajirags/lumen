@@ -1602,28 +1602,44 @@ class ReverseEngineerToolkit:
         def get_annotations_usage() -> str:
             """Get a summary of all annotations/decorators used across the codebase."""
             lines = ["=== ANNOTATION USAGE SUMMARY ===\n"]
+            ann_map: dict[str, list[str]] = {}
             try:
                 rows = backend.execute(
                     "MATCH (target)-[:HAS_ANNOTATION]->(a:AnnotationType) "
                     "RETURN a.name AS annotation, label(target) AS target_type, "
                     "count(*) AS usage_count ORDER BY usage_count DESC"
                 )
-                if rows:
-                    ann_map: dict[str, list[str]] = {}
-                    for r in rows:
-                        ann = r.get("annotation", "")
-                        ann_map.setdefault(ann, []).append(
-                            f"{r.get('target_type', '')}: {r.get('usage_count', 0)}"
-                        )
-                    for ann, usages in sorted(ann_map.items(), key=lambda x: -sum(int(u.split(": ")[1]) for u in x[1])):
-                        total = sum(int(u.split(": ")[1]) for u in usages)
-                        lines.append(f"  @{ann}  (total: {total})")
-                        for u in usages:
-                            lines.append(f"    {u}")
-                else:
-                    lines.append("  No annotations found.")
-            except Exception as e:
-                lines.append(f"  (error: {e})")
+                for r in rows or []:
+                    ann = r.get("annotation", "")
+                    ann_map.setdefault(ann, []).append(
+                        f"{r.get('target_type', '')}: {r.get('usage_count', 0)}"
+                    )
+            except Exception:
+                pass
+            try:
+                # Python decorators are stored as Decorator/DECORATES, not
+                # HAS_ANNOTATION/AnnotationType — merge them in so Python auth
+                # decorators (@login_required, @require_login, etc.) are visible here.
+                rows = backend.execute(
+                    "MATCH (d:Decorator)-[:DECORATES]->(target) "
+                    "RETURN d.name AS annotation, label(target) AS target_type, "
+                    "count(*) AS usage_count ORDER BY usage_count DESC"
+                )
+                for r in rows or []:
+                    ann = r.get("annotation", "")
+                    ann_map.setdefault(ann, []).append(
+                        f"{r.get('target_type', '')}: {r.get('usage_count', 0)}"
+                    )
+            except Exception:
+                pass
+            if ann_map:
+                for ann, usages in sorted(ann_map.items(), key=lambda x: -sum(int(u.split(": ")[1]) for u in x[1])):
+                    total = sum(int(u.split(": ")[1]) for u in usages)
+                    lines.append(f"  @{ann}  (total: {total})")
+                    for u in usages:
+                        lines.append(f"    {u}")
+            else:
+                lines.append("  No annotations found.")
             return "\n".join(lines)
 
         # ------------------------------------------------------------------ #

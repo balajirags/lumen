@@ -11,6 +11,7 @@ pipeline/output/
 pipeline/output_old/
 pipeline/.pytest_cache/
 pipeline/.tmp/
+.ruff_cache/
 
 # Gradle / Java (indexer/)
 indexer/.gradle/
@@ -40,8 +41,10 @@ output/
 #output folder
 output/
 output_old/
+/kuzu_db/
 
 demo.txt
+.learnings/demo.txt
 help.txt
 *.tar
 
@@ -52,7 +55,8 @@ releases/
 
 #test
 token-usage
-test-lumen.sh
+.learnings/token-usage
+e2e-test/manual-test-lumen.sh
 task_logs/
 
 

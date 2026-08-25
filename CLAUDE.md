@@ -10,8 +10,13 @@ large repos, and to reduce follow-up analysis cost when the same indexed repo is
 ```
 Source repo → [preflight + indexer] → KuzuDB graph
                                       ├─ [full pipeline] -> [agent] -> Markdown artifacts -> [builder] -> MkDocs Material site
+                                      ├─ [security-audit pipeline] -> [security-audit agent] -> Markdown artifacts
                                       └─ [mcp pipeline] -> HTTP MCP server
 ```
+
+Preflight and the indexer are shared, unmodified, by every pipeline. Only the agent stage
+(stage 2) is pluggable — new pipelines add a new CLI command + pipeline module + agent-stage
+module and reuse preflight/indexer as-is. See "Pluggable agent-stage pipelines" below.
 
 This is a monorepo containing two sub-projects:
 
@@ -40,6 +45,10 @@ make lumen-docker-run REPO=/path/to/repo \
 
 make lumen-docker-mcp DB=/path/to/output/<run>/index.kuzu/<repo>-db
 make lumen-docker-docs  # serve generated doc-site → http://localhost:8081
+
+# security-audit pipeline (fan-out reviewers + risk synthesis, same indexed graph)
+make lumen-docker-security-audit REPO=/path/to/repo \
+  ARGS="--provider anthropic --model claude-sonnet-4-6"
 ```
 
 For `xlarge` repos, `lumen-docker-run` intentionally stops after preflight and recommends
@@ -67,6 +76,10 @@ make lumen-run REPO=/path/to/repo ARGS='--provider ollama --model qwen2.5:32b --
 
 # Or invoke lumen directly
 cd pipeline && uv run lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
+
+# security-audit pipeline
+make lumen-security-audit REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
+cd pipeline && uv run lumen security-audit /path/to/repo --provider anthropic --model claude-sonnet-4-6
 ```
 
 ### Native bundle (no Docker, no dev tools)
@@ -95,6 +108,7 @@ available; it emits a warning and skips PHP if neither is found.
 After install:
 ```bash
 lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
+lumen security-audit /path/to/repo --provider anthropic --model claude-sonnet-4-6
 lumen mcp /path/to/repo    # HTTP MCP server
 
 # PHP repos: also install php on the target
@@ -137,7 +151,7 @@ If `timeout` or `max_turns` is explicitly set in `.codedoc.toml` or via CLI, tha
 | File | Purpose |
 |---|---|
 | `Dockerfile` | Multi-stage pipeline image: jlink JRE + pip-installed lumen runtime + Node JS parser |
-| `scripts/lumen-docker-*.sh` | Script-backed Docker entrypoints for pipeline, MCP, docs, image load, and release bundling |
+| `scripts/lumen-docker-*.sh` | Script-backed Docker entrypoints for pipeline, security-audit, MCP, docs, image load, and release bundling |
 
 ### Dockerfile (pipeline) — 5 stages
 
@@ -158,11 +172,15 @@ on aarch64 where `python:3.11-slim` requires GLIBC_2.38 but `node:20-slim` only 
 | Profile | Command | URL |
 |---|---|---|
 | `run` | `make lumen-docker-run REPO=... ARGS='...'` | — (writes to `./output/`) |
+| `security-audit` | `make lumen-docker-security-audit REPO=... ARGS='...'` | — (writes to `./output/`) |
 | `mcp` | `make lumen-docker-mcp DB=...` | http://localhost:8765/mcp |
 | `docs` | `make lumen-docker-docs` | http://localhost:8081 |
 
-`run`, `mcp`, and `docs` are script-backed `docker run` entrypoints invoked from the Makefile.
-They all use the same `DOCKER_IMAGE` runtime.
+`run`, `security-audit`, `mcp`, and `docs` are script-backed `docker run` entrypoints invoked
+from the Makefile. They all use the same `DOCKER_IMAGE` runtime.
+`scripts/lumen-docker-security-audit.sh` is a byte-for-byte mirror of `lumen-docker-run.sh`
+with only the invoked subcommand changed (`security-audit` instead of `run`) — this is the
+pattern any new pluggable pipeline's Docker wrapper should follow.
 The scripts add `host.docker.internal:host-gateway` so Ollama-on-host works on Linux; on Mac/Windows Docker Desktop, `host.docker.internal` is available automatically.
 `lumen-docker-mcp` prefers serving an existing DB via `DB`, and falls back to repo indexing when `REPO` is provided.
 `lumen-docker-docs` serves `output/doc-site` from the same `lumen` image instead of a separate generic Python image.
@@ -175,15 +193,18 @@ Normal MCP commands already print config snippets before serving; `--print-confi
 Python package named `codedoc` (internal). CLI entry point: `lumen` (via `pyproject.toml`).
 
 Key files:
-- `pipeline/codedoc/cli.py` — Click CLI behind the repo-local `make lumen-run` and `make lumen-mcp` commands
+- `pipeline/codedoc/cli.py` — Click CLI behind the repo-local `make lumen-run` and `make lumen-mcp` commands; `common_pipeline_options` decorator shares the repo/model/provider/etc. option set across `run` and other agent-stage pipeline commands (e.g. `security-audit`)
 - `pipeline/codedoc/config.py` — config loader; defaults use `Path(__file__)` relative paths
 - `pipeline/codedoc/pipelines/full.py` — full docs pipeline: preflight → indexer → agent → builder
 - `pipeline/codedoc/pipelines/mcp.py` — MCP pipeline: preflight → indexer → MCP serve metadata
-- `pipeline/codedoc/pipelines/common.py` — shared run-dir, state-init, and finalization helpers
+- `pipeline/codedoc/pipelines/security_audit.py` — example pluggable pipeline: preflight → indexer (both unchanged) → security-audit agent stage; no builder step
+- `pipeline/codedoc/pipelines/common.py` — shared run-dir, state-init, finalization, and xlarge/runtime-defaults helpers, mode-agnostic (any pipeline module opts in via explicit params, not a hardcoded mode string)
 - `pipeline/codedoc/pipeline.py` — compatibility shim exporting the pipeline entrypoints
 - `pipeline/codedoc/preflight/repo_metrics.py` — native pluggable repo metrics guardrail (LOC, file count, language mix)
 - `pipeline/codedoc/preflight/runner.py` — preflight registry/runner; pipeline core depends on this, not on repo-metrics directly
-- `pipeline/codedoc/stages/agent.py` — supervisor + parallel analysts + architect
+- `pipeline/codedoc/stages/agent.py` — supervisor + parallel analysts + architect; also exports the reusable `run_loop` tool-loop primitive
+- `pipeline/codedoc/stages/parallel.py` — `run_parallel_tasks`, a generic fan-out/fan-in helper (dict of thunks in, dict of results out) any new agent-stage pipeline can reuse
+- `pipeline/codedoc/stages/security_audit_agent.py` — example alternative agent stage: 3 parallel reviewers (access-control, dependency-risk, threat-model) fan out via `run_parallel_tasks`, then 1 fan-in risk-synthesis `run_loop` call
 - `pipeline/codedoc/log.py` — structured progress logging, indexer progress panel, repo metrics panel, analyst live boxes
 - `pipeline/codedoc/mcp_server.py` — MCP server backed by `kg_tools`; supports the HTTP MCP flow exposed by `make lumen-mcp` and `make lumen-docker-mcp`
 - `pipeline/codedoc/llm.py` — LLM abstraction: `ClaudeProvider`, `OllamaProvider`, `OpenAIProvider`
@@ -195,6 +216,7 @@ Key files:
 - `pipeline/codedoc/prompts/architect.md` — Solution Architect system prompt (writes target-state artifacts; manifest is machine-generated)
 - `pipeline/codedoc/prompts/archetype-*.md` — archetype overlays for `backend-service`, `frontend-app`, `fullstack-app`, and `library`
 - `pipeline/codedoc/prompts/re-prompt.md` — single-agent fallback prompt (monolithic execution path)
+- `pipeline/codedoc/prompts/security-analyst-access.md`, `security-analyst-dependencies.md`, `security-threat-model.md`, `security-synthesis.md` — prompts for the example `security-audit` pipeline's 3 reviewers + fan-in synthesis
 - `pipeline/scripts/build-docs-site.sh` — builds MkDocs Material site with Mermaid plus deterministic C4 PlantUML for C1 context views; supports multi-repo accumulation
 - `pipeline/.codedoc.toml` — runtime config (`indexer_bin_dir = ../indexer/bin`, `max_turns = 60`, `repo_size_check = "warn"`)
 - `pipeline/pyproject.toml` — package name: `lumen`, entry point: `lumen = "codedoc.cli:main"`, uses `uv`
@@ -260,6 +282,71 @@ target-state/fullstack-boundaries.md ← frontend/backend seam plan (fullstack-a
 target-state/migration-plan.md    ← migration plan (frontend/fullstack/library)
 manifests/artifacts.json          ← machine-generated index of all artifacts written
 ```
+
+### Pluggable agent-stage pipelines
+
+Adding a new pipeline? Use `docs/adding-a-pipeline.md` — it's a self-contained
+reference-and-prompt template (mental model, reusable building blocks, naming conventions,
+copy-paste module skeletons, make/Docker/native checklist, verification steps, and a
+fill-in-the-blank task section at the end) meant to be handed to whoever implements the
+next pipeline so the result is predictable and structurally consistent with
+`security-audit`. The summary below is a condensed pointer, not a replacement for it.
+
+`lumen run` is not the only pipeline — new CLI commands can run an entirely different
+fan-out/fan-in agent stage against the same preflight+indexer flow, without touching
+`stages/agent.py`, the archetype/artifact-plan system, or the docs pipeline in any way.
+`lumen security-audit` (`pipelines/security_audit.py` + `stages/security_audit_agent.py`)
+is a worked example — copy its shape for a new pipeline:
+
+```
+pipelines/<name>.py            ← create_run_dir → init_state(mode="<name>") → run_preflights
+                                  → apply_repo_size_runtime_defaults(state, bump_max_turns=...)
+                                  → run_indexer (unchanged) → stages/<name>_agent.run_agent
+                                  → finalize_state
+stages/<name>_agent.py         ← run_agent(state) -> state; builds its own KuzuBackend +
+                                  ReverseEngineerToolkit + create_provider(...) per task, fans
+                                  out via stages/parallel.run_parallel_tasks, fans in via one
+                                  more stages/agent.run_loop call
+cli.py                          ← @main.command(name="<name>") + @common_pipeline_options
+                                  + a call into pipelines/<name>.run_pipeline
+```
+
+Reusable building blocks (no changes needed to use them): `KuzuBackend`,
+`ReverseEngineerToolkit` (`kg_tools/`), `create_provider` (`llm.py`), `run_loop` and its
+`allowed_artifact_paths`/`phase_label` params (`stages/agent.py`), `run_parallel_tasks`
+(`stages/parallel.py`), `common_pipeline_options` (`cli.py`), `pipelines/common.py`'s
+run-dir/state/finalization helpers, and `log.py`'s `start_agent_boxes`/`update_agent_box`/
+`update_workflow_phase`/`print_researcher_done`/`print_tool_usage_table`/
+`print_synthesizer_done`/`stop_agent_boxes` (pass your own role/phase names — this is what
+makes a new pipeline's console output look like `lumen run`'s instead of falling back to
+plain dim-text lines). A new pipeline defines its own prompt files, its own small
+`allowed_artifact_paths` set per `run_loop` call, and its own `run_agent` — there is no
+shared "ArchetypeDefinition"-style plan the new pipeline must conform to.
+
+Make/Docker/native parity follows the same copy-the-example pattern as `security-audit`:
+- Native + `lumen-install`: nothing to add — `uv run lumen <name>` and the installed
+  `lumen <name>` binary work automatically once the CLI command exists (Click resolves any
+  registered subcommand; `make lumen-<name> REPO=... ARGS='...'` is just a convenience
+  wrapper mirroring `lumen-run`/`lumen-security-audit` in the Makefile).
+- Docker: add `scripts/lumen-docker-<name>.sh` as a byte-for-byte copy of
+  `lumen-docker-run.sh`/`lumen-docker-security-audit.sh` with the subcommand swapped, plus a
+  `lumen-docker-<name>` Makefile target that shells out to it. The Docker image itself needs
+  no changes — `ENTRYPOINT ["lumen"]` already resolves any subcommand; the wrapper script only
+  exists for the `REPO=`/`ARGS=`/volume-mount convenience the Makefile provides.
+- Native bundle build (`build-native.sh`) and the bundle's `lumen` launcher are also
+  subcommand-agnostic — no changes needed there for a new pipeline either.
+
+`./e2e-test/test-lumen.sh` is the E2E regression safety net: it discovers every native
+`lumen-<name>:` Makefile target (excluding docker/mcp/docs/install/build), runs each one
+against the checked-in fixtures under `e2e-test/fixtures/`, and verifies exit code +
+`pipeline.json` status/mode + artifacts actually written. A new pipeline is picked up
+automatically the moment its Makefile target exists — nothing to edit in the script. This
+is separate from `pipeline/tests/` (pytest unit tests with every stage mocked) — the E2E
+script exercises the real indexer + real LLM calls end-to-end, which is what caught a real
+bug during its own development: `run_indexer` (shared) always populates
+`state.artifact_plan` for repo classification, but only the docs/`full` pipeline's agent
+stage actually fulfills it — the script's verifier has to know this (`uses_artifact_plan_for`)
+rather than inferring "has a plan" from the field's mere presence.
 
 ---
 
@@ -396,8 +483,18 @@ Release workflow:
 | PHP traits emitted as CLASS with `phpKind: "trait"` | Avoids adding a new KuzuDB table; DomainDetector clusters traits via existing CLASS branch; `phpKind` property preserves the distinction for consumers that need it |
 | PHP store uses a Python bridge (`store.php` → `kuzu_writer.py`) | PHP has no native KuzuDB SDK. Rather than routing through Java, `store.php` shells out to `kuzu_writer.py`, a thin Python script that reuses `KuzuStore` from the Python parser. This keeps `cmg-php` self-contained (same pattern as `cmg-python` / `cmg-js`) and avoids a Java dependency for PHP indexing. Python is always available since it is the pipeline runtime. |
 | PHP route annotations emitted as `ANNOTATION_TYPE` (not `DECORATOR`) | `HAS_ANNOTATION` schema requires `Method → AnnotationType` as the target. Emitting `DECORATOR` type nodes would violate the schema and cause KuzuDB insert failures. Using `ANNOTATION_TYPE` also lets `WorkflowBuilder`'s annotation index work identically to the JVM path. |
+| `HAS_ANNOTATION` REL TABLE declares a `value STRING` property (`indexer/parsers/python/store.py`) | Found via `security-audit` language-coverage testing: `parse.php`'s `RouteExtractor` attaches `{value: route_path}` to every `HAS_ANNOTATION` edge it emits, but the shared REL TABLE schema (used by the PHP→KuzuDB bridge) never declared that property — every PHP route/annotation edge failed a KuzuDB binder check and was silently dropped by `KuzuStore._query()`'s blanket `except Exception: pass`, making `get_entry_points`/`get_api_endpoints`/`get_annotations_usage` return empty for 100% of PHP repos despite the parser correctly extracting routes. Java and Python never hit this because Java writes via its own JVM-side store (not this bridge) and Python never emits `HAS_ANNOTATION` at all (see next row). |
+| `get_annotations_usage()` also queries `DECORATES`/`Decorator` (`pipeline/codedoc/kg_tools/toolkit.py`) | Found via the same investigation: Python decorators (`@login_required`, `@require_login`, etc.) are stored as `Decorator`/`DECORATES` nodes/edges (`indexer/parsers/python/parse.py`), never as `HAS_ANNOTATION`/`AnnotationType` — so `get_annotations_usage()` querying only `HAS_ANNOTATION` reported "no annotations found" for Python codebases even when a real auth decorator was present and correctly indexed. The tool now unions both queries so Java annotations and Python decorators both surface. Confirmed both fixes end-to-end: a Laravel fixture with `Route::middleware('auth')`-wrapped routes now shows the routes with correct HTTP verbs (previously zero), and a Flask fixture with `@require_login` now shows that decorator in the annotation summary (previously "No annotations found"). A third, harder gap — JS/TS has no backend entry-point or middleware-chain detection at all, and Laravel's `Route::middleware(...)->group()` wrapping specifically is still unparsed — is tracked in `backlog/js-backend-entrypoint-detection.md` and `backlog/php-laravel-middleware-detection.md` since both need new parser logic, not a schema/query fix. |
 | `nikic/php-parser` via Composer | Industry-standard PHP AST library (20M+ monthly downloads); same approach as Babel for JS — external library, no built-in PHP tokenizer limitations; `composer.lock` committed for reproducibility |
 | PHP `vendor/` directory in `ALWAYS_IGNORED` | Prevents indexing of Composer dependencies (same rationale as `node_modules` for JS) |
 | install.sh skips Composer if `vendor/` already present | Allows offline use and avoids requiring Composer on machines where the vendor directory was pre-installed (e.g., from a git-committed vendor or Docker layer) |
 | `cmg-php` in native bundle calls system PHP (not bundled) | The PHP interpreter is a compiled binary that varies by OS/arch; jlink solves this for Java, Node ships a single static binary, and Python uses a venv — there is no equivalent portable packaging for PHP. The target machine must have `php` installed for PHP repos. |
 | `cmg-php` prepends `venv/bin` to `PATH` | `store.php::findPython()` probes for `python3` / `python` by name. Prepending the bundled venv's `bin/` to `PATH` ensures it finds the bundled Python (which has `kuzu` installed) rather than any system Python that lacks `kuzu`. No changes to `store.php` needed. |
+| `pipelines/common.py` xlarge/runtime-default helpers are mode-agnostic | `should_stop_for_xlarge_repo` and `apply_repo_size_runtime_defaults(state, bump_max_turns=...)` no longer branch on `state.mode == "full"`. New pipelines opt in explicitly via the `bump_max_turns` param instead of requiring an edit to shared code every time a pipeline is added. |
+| `run_parallel_tasks` extracted as a standalone fan-out/fan-in helper | Generalizes the `ThreadPoolExecutor` pattern already used by the docs pipeline's Phase 2 into a ~10-line, domain-agnostic dict-of-thunks-in/dict-of-results-out function (`stages/parallel.py`), reusable by any new agent-stage pipeline without introducing an "analyst"/"archetype" abstraction. |
+| New agent-stage pipelines get their own `run_agent`, not a generalized `run_supervisor_agent` | `run_supervisor_agent`'s `ArchetypeDefinition`/artifact-plan machinery is deeply coupled to the docs pipeline's exact 3-analyst-+-architect contract. Rather than generalizing that (high risk, large surface area), new pipelines write their own small `run_agent(state) -> state` stage module built directly on `KuzuBackend`/`ReverseEngineerToolkit`/`create_provider`/`run_loop`/`run_parallel_tasks` — the docs pipeline stays completely untouched. |
+| `common_pipeline_options` Click decorator shared across pipeline commands | `run` and `security-audit` need the identical repo/model/provider/turns/etc. option set; a decorator avoids re-declaring ~10 `@click.option` lines per new pipeline command. |
+| `security-audit` pipeline has no builder step | Its artifacts (`security/*.md`) are plain markdown, not part of the MkDocs artifact-plan/manifest contract `stages/builder.py` assumes; skipping the builder keeps the example self-contained. |
+| `lumen-security-audit`/`lumen-docker-security-audit` Makefile targets + `scripts/lumen-docker-security-audit.sh` | Gives the new pipeline make/Docker convenience parity with `run`, matching the existing pattern instead of leaving it reachable only via raw `uv run lumen security-audit` / `docker run ... lumen security-audit`. The Docker wrapper script is a deliberate byte-for-byte copy of `lumen-docker-run.sh` with only the subcommand changed — no generic "any pipeline" Make/Docker abstraction, since `ENTRYPOINT ["lumen"]` and the native launcher are already subcommand-agnostic and copying the ~40-line script per pipeline is simpler than parameterizing it. |
+| `log.py`'s live fan-out/fan-in dashboard (`start_agent_boxes`, `_render_agent_columns`, `_render_workflow_panel`, `print_progress_line`) is data-driven, not hardcoded | Originally hardcoded to the docs pipeline's exact 3 analyst names + synthesis/architect/summary phases, so `security-audit`'s 2 reviewers never rendered into the live boxes and fell back to plain dim-text lines — visibly inconsistent with `lumen run`. `start_agent_boxes(agent_names=..., workflow_phases=...)` now takes the role/phase names as parameters (defaulting to the docs pipeline's original 3+3, so `lumen run`'s output is byte-for-byte unchanged), and `print_progress_line` routes per-turn events into whichever boxes were registered by membership check instead of `tag.startswith("analyst/"/"architect"/"summary")`. Every new pipeline must call `start_agent_boxes`/`update_agent_box`/`print_researcher_done`/`print_tool_usage_table`/`update_workflow_phase`/`print_synthesizer_done`/`stop_agent_boxes` with its own names (see `security_audit_agent.py` and `docs/adding-a-pipeline.md`'s `run_agent` skeleton) to get this styling — it is not automatic just from using `run_loop`. |
+| `security-audit` reviewer prompts require an explicit TURN N tool-call sequence + an explicit forbidden-tool list | The original `security-analyst-access.md`/`security-analyst-dependencies.md` gave an open-ended tool list with no turn discipline; this was invisible on the tiny e2e fixture but on a real Spring Boot repo (`inventory-service`) the access reviewer spiraled into 20 turns of ad-hoc `query()` Cypher calls chasing auth-annotation names and per-class lookups, hit KuzuDB binder exceptions on nonexistent properties, and never called `write_artifact` (0 artifacts produced); the dependency reviewer narrowly avoided the same fate. All three reviewer prompts (`security-analyst-access.md`, `security-analyst-dependencies.md`, `security-threat-model.md`) now prescribe an exact TURN 1/2/3 tool sequence, explicitly forbid `get_class_details`/`get_method_signature`/`get_callees`/`get_callers`/`get_control_flow`/`get_data_flow`/raw `query` (source-level tools that invite chasing individual names), and instruct the model to write immediately once past the halfway point of its turn budget rather than keep exploring. |
