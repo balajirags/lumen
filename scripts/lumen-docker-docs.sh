@@ -16,6 +16,7 @@ docker_args=(
   -e SITE_DIR=/workspace/output/doc-site
   -e SITE_TITLE="lumen Docs"
   -e DOCS_PORT=8080
+  -e HOST_PORT="${PORT}"
   --entrypoint /opt/lumen/scripts/run-docs-server.sh
 )
 
