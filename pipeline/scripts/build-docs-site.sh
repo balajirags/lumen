@@ -52,19 +52,48 @@ trap 'rm -rf "$STAGING"' EXIT
 DOCS_DIR="$STAGING/docs"
 mkdir -p "$DOCS_DIR"
 
-# ── Step 1: Copy artifacts ───────────────────────────────────────────
-echo "Step 1/3: Copying forward-engineering artifacts"
-
+# ── Step 1: Resolve the latest run that produced each (repo, section) ──
+# <name>-YYYYMMDD-HHMMSS run dirs share a base name once the timestamp is
+# stripped. Deduping is done per (repo, section) rather than picking one
+# whole "latest" run directory per repo, because different pipelines
+# (e.g. `lumen run` vs `lumen security-audit`) write disjoint section sets
+# under the same repo base name — `security-audit` only ever writes a
+# `security/` section. Picking a single latest *directory* per repo would
+# make a later security-audit run wholesale replace an earlier docs run's
+# domain/architecture/tech/etc. sections instead of adding to them.
+# $OUTPUT_DIR/*/ globs in lexicographic order, which matches chronological
+# order for this naming scheme, so the last dir seen per (repo, section) is
+# the latest — this also fixes stale files lingering from older reruns of
+# the same repo+section (e.g. a since-dropped conditional artifact).
+LATEST_DIR="$STAGING/.latest-section"
+mkdir -p "$LATEST_DIR"
 for repo_dir in "$OUTPUT_DIR"/*/; do
   [[ -d "$repo_dir" ]] || continue
+  [[ -d "${repo_dir}artifacts" ]] || continue
   repo_name="$(basename "$repo_dir")"
-  # Strip timestamp suffix (<name>-YYYYMMDD-HHMMSS → <name>)
   repo_base="$(echo "$repo_name" | sed 's/-[0-9]\{8\}-[0-9]\{6\}$//')"
 
-  for section_dir in "$repo_dir"artifacts/*/; do
+  for section_dir in "${repo_dir}artifacts"/*/; do
     [[ -d "$section_dir" ]] || continue
     section_name="$(basename "$section_dir")"
     [[ "$section_name" == "manifests" ]] && continue
+
+    mkdir -p "$LATEST_DIR/$repo_base"
+    echo "$section_dir" > "$LATEST_DIR/$repo_base/$section_name"
+  done
+done
+
+# ── Step 2: Copy artifacts (latest run per repo+section) ────────────────
+echo "Step 1/3: Copying forward-engineering artifacts"
+
+for repo_marker_dir in "$LATEST_DIR"/*/; do
+  [[ -d "$repo_marker_dir" ]] || continue
+  repo_base="$(basename "$repo_marker_dir")"
+
+  for section_marker in "$repo_marker_dir"*; do
+    [[ -f "$section_marker" ]] || continue
+    section_name="$(basename "$section_marker")"
+    section_dir="$(cat "$section_marker")"
 
     mkdir -p "$DOCS_DIR/$repo_base/$section_name"
     cp -rp "$section_dir/." "$DOCS_DIR/$repo_base/$section_name/"
