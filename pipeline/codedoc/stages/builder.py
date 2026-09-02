@@ -136,8 +136,13 @@ def _generate_fallback_html(artifacts_dir: Path, site_dir: Path, state: Pipeline
     index_path = site_dir / "index.html"
     index_path.write_text(html)
 
-    # Symlink artifacts so relative links work
+    # Symlink artifacts so relative links work. Path.exists() follows symlinks
+    # and reports False for a dangling one, so check is_symlink() too — otherwise
+    # a stale link from a prior run's (now-deleted) artifacts dir makes
+    # symlink_to() raise FileExistsError on the link path itself.
     artifacts_link = site_dir / "artifacts"
+    if artifacts_link.is_symlink():
+        artifacts_link.unlink()
     if not artifacts_link.exists():
         artifacts_link.symlink_to(artifacts_dir.resolve())
 
