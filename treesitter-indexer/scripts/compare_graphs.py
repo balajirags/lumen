@@ -8,7 +8,7 @@ their output.
 Usage:
     python3 compare_graphs.py <fixture-repo-path> [--old-bin PATH] [--new-bin PATH]
 
-Requires `kuzu` installed in addition to `ladybug` (see requirements-dev.txt)
+Requires `kuzu` installed in addition to `ladybug` (run `uv sync --extra dev`)
 -- both are needed because each engine's graph is read via `_dump_graph.py`,
 run as its own subprocess (kuzu's and ladybug's native extensions can't be
 imported in the same process -- see that file's docstring).

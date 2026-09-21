@@ -16,15 +16,13 @@ echo ""
 
 mkdir -p "$BIN_DIR"
 
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "  ✗ python3 not found -- skipping treesitter-indexer build"
+if ! command -v uv >/dev/null 2>&1; then
+    echo "  ✗ uv not found -- see https://docs.astral.sh/uv/ -- skipping treesitter-indexer build"
     exit 1
 fi
 
-echo "--- Creating venv + installing dependencies ---"
-python3 -m venv "$VENV_DIR"
-"$VENV_DIR/bin/pip" install -q --upgrade pip
-"$VENV_DIR/bin/pip" install -q -r "$SCRIPT_DIR/requirements.txt"
+echo "--- Syncing dependencies via uv (pyproject.toml / uv.lock) ---"
+(cd "$SCRIPT_DIR" && uv sync)
 
 cat > "$BIN_DIR/cmg-java-ts" <<EOF
 #!/usr/bin/env bash

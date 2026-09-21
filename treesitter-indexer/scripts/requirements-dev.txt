@@ -1,4 +1,0 @@
-# Only needed by compare_graphs.py, to read the OLD cmg-java engine's KuzuDB
-# output for validation. The engine itself (graph_store.py) never depends on
-# this -- see requirements.txt and the plan's LadybugDB rationale.
-kuzu==0.11.3

@@ -1,0 +1,18 @@
+[project]
+name = "treesitter-indexer"
+version = "0.1.0"
+description = "Prototype tree-sitter-based Java indexer (increment 1 of the indexer replatform)"
+requires-python = ">=3.11"
+dependencies = [
+    "tree-sitter>=0.25,<0.27",
+    "tree-sitter-java>=0.23,<0.24",
+    "ladybug>=0.20,<0.21",
+]
+
+[project.optional-dependencies]
+# Only needed by scripts/compare_graphs.py, to read the OLD cmg-java engine's
+# KuzuDB output for validation -- the engine itself never depends on this.
+dev = ["kuzu==0.11.3"]
+
+[tool.uv]
+package = false
