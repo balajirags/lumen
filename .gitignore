@@ -29,6 +29,12 @@ indexer/parsers/javascript/node_modules/
 # PHP (indexer/parsers/php/)
 indexer/parsers/php/vendor/
 
+# Python (treesitter-indexer/) -- standalone prototype, not part of indexer/
+treesitter-indexer/__pycache__/
+treesitter-indexer/**/__pycache__/
+treesitter-indexer/.venv/
+treesitter-indexer/bin/cmg-*
+
 # Common
 .DS_Store
 .env

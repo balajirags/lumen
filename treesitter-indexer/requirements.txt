@@ -1,0 +1,3 @@
+tree-sitter>=0.25,<0.27
+tree-sitter-java>=0.23,<0.24
+ladybug>=0.20,<0.21
