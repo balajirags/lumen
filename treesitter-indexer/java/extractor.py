@@ -32,6 +32,7 @@ import tree_sitter_java as tsjava
 from graph_model import Graph
 from repo_layout import detect_modules, detect_source_root
 from java.calls import MethodCallContext, RepoIndex, resolve_call_target
+from java.http_dependencies import looks_like_url
 
 JAVA_LANGUAGE = Language(tsjava.language())
 
@@ -112,6 +113,29 @@ def _annotation_name_and_value(ann_node: Node, src: bytes) -> tuple[str, str | N
     if value_pair is not None:
         return name, _strip_quotes(_text(src, value_pair.child_by_field_name("value")))
     return name, None
+
+
+def _annotation_all_attributes(ann_node: Node, src: bytes) -> dict[str, str]:
+    """Unlike _annotation_name_and_value (which collapses to one fallback-
+    first value for the generic HAS_ANNOTATION capture), returns every
+    key=value attribute -- used by _emit_annotations to check each attribute
+    independently for a URL-shaped value, regardless of which key it's under
+    or which annotation it belongs to (see http_dependencies.py)."""
+    if ann_node.type == "marker_annotation":
+        return {}
+    args = ann_node.child_by_field_name("arguments")
+    if args is None:
+        return {}
+    named = args.named_children
+    if len(named) == 1 and named[0].type != "element_value_pair":
+        return {"value": _strip_quotes(_text(src, named[0]))}
+    attrs: dict[str, str] = {}
+    for pair in named:
+        if pair.type != "element_value_pair":
+            continue
+        key = _text(src, pair.child_by_field_name("key"))
+        attrs[key] = _strip_quotes(_text(src, pair.child_by_field_name("value")))
+    return attrs
 
 
 def _find_type_declarations(node: Node, out: list[Node]) -> None:
@@ -306,8 +330,38 @@ def _count_args(call_node: Node) -> int:
     return len([c for c in args.named_children])
 
 
+def _url_literal_args(call_node: Node, src: bytes) -> list[str]:
+    """Returns the stripped text of every URL-shaped string-literal argument
+    of a call, regardless of which method is being called -- deliberately not
+    gated by method name (see java/http_dependencies.py's docstring)."""
+    args = call_node.child_by_field_name("arguments")
+    if args is None:
+        return []
+    return [
+        _strip_quotes(_text(src, arg))
+        for arg in args.named_children
+        if arg.type == "string_literal" and looks_like_url(_strip_quotes(_text(src, arg)))
+    ]
+
+
+_HTTP_DEP_COUNTER = {"n": 0}
+
+
+def _emit_http_dependency(graph: Graph, owner_id: str, key: str, value: str) -> None:
+    """Emits a ConfigProperty representing an HTTP dependency detected directly
+    in Java source (see java/http_dependencies.py), linked via the same
+    REFERENCES_CONFIG edge used for @Value-driven config usage -- reused
+    deliberately so get_external_dependencies() needs no changes to surface
+    these alongside config-derived infrastructure dependencies."""
+    _HTTP_DEP_COUNTER["n"] += 1
+    qualified_name = f"code:{owner_id}#{key}#{_HTTP_DEP_COUNTER['n']}"
+    prop_id = f"configprop:{qualified_name}"
+    graph.add_node(prop_id, "CONFIG_PROPERTY", key, qualified_name, code=value, external=False)
+    graph.add_rel(owner_id, prop_id, "REFERENCES_CONFIG")
+
+
 def _emit_calls_in_body(graph: Graph, body_node: Node | None, src: bytes, caller_id: str,
-                         ctx: MethodCallContext, index: RepoIndex) -> None:
+                         ctx: MethodCallContext, index: RepoIndex, caller_label: str = "") -> None:
     if body_node is None:
         return
 
@@ -318,6 +372,9 @@ def _emit_calls_in_body(graph: Graph, body_node: Node | None, src: bytes, caller
             receiver = _receiver_text(n, src)
             arg_count = _count_args(n)
             line = n.start_point[0] + 1
+
+            for url in _url_literal_args(n, src):
+                _emit_http_dependency(graph, caller_id, f"http-call:{caller_label}.{method_name}", url)
             result = resolve_call_target(receiver, method_name, arg_count, ctx, index)
             if result is not None:
                 target_type_fqn, confidence, reason = result
@@ -422,6 +479,15 @@ def _emit_annotations(graph: Graph, decl_or_member_node: Node, src: bytes, owner
         if not graph.has_node(ann_id):
             graph.add_node(ann_id, "ANNOTATION_TYPE", name, name, external=True)
         graph.add_rel(owner_id, ann_id, "HAS_ANNOTATION", value=value or "")
+
+        # Any annotation attribute shaped like a URL is a dependency signal,
+        # regardless of which annotation it is (e.g. a Feign client's `url`,
+        # a Swagger @Server's `url`, or any other framework's convention) --
+        # deliberately not gated to a specific known annotation name; see
+        # java/http_dependencies.py's docstring for why.
+        for attr_key, attr_value in _annotation_all_attributes(ann, src).items():
+            if looks_like_url(attr_value):
+                _emit_http_dependency(graph, owner_id, f"annotation:{name}.{attr_key}", attr_value)
 
 
 def _emit_members(graph: Graph, decl: TypeDeclInfo, finfo: FileInfo, index: RepoIndex,
@@ -550,7 +616,8 @@ def _emit_calls_and_overrides(graph: Graph, decl: TypeDeclInfo, finfo: FileInfo,
             )
             for pname, ptype in params:
                 ctx.local_types.setdefault(pname, ptype)
-            _emit_calls_in_body(graph, member.child_by_field_name("body"), src, ctor_id, ctx, index)
+            _emit_calls_in_body(graph, member.child_by_field_name("body"), src, ctor_id, ctx, index,
+                                 caller_label=decl.simple_name)
 
         elif member.type == "method_declaration":
             name_node = member.child_by_field_name("name")
@@ -565,7 +632,8 @@ def _emit_calls_and_overrides(graph: Graph, decl: TypeDeclInfo, finfo: FileInfo,
             )
             for pname, ptype in params:
                 ctx.local_types.setdefault(pname, ptype)
-            _emit_calls_in_body(graph, member.child_by_field_name("body"), src, method_id, ctx, index)
+            _emit_calls_in_body(graph, member.child_by_field_name("body"), src, method_id, ctx, index,
+                                 caller_label=f"{decl.simple_name}.{mname}")
 
             has_override = any(
                 _annotation_name_and_value(ann, src)[0] == "Override"

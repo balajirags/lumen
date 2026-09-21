@@ -128,6 +128,57 @@ public class Callee {
         self.assertEqual(same_type["reason"], "same-file")
         self.assertAlmostEqual(same_type["confidence"], 0.95)
 
+    def test_http_dependency_detected_from_any_method_call_with_literal_url(self):
+        """No method-name allowlist: an arbitrary custom method with a literal
+        URL argument is captured the same way RestTemplate/WebClient would be."""
+        _write(self.repo, "src/com/example/PaymentService.java", """
+package com.example;
+public class PaymentService {
+    public String charge(String amount) {
+        return myCustomHttpHelper("https://api.stripe.com/v1/charges", amount);
+    }
+    private String myCustomHttpHelper(String url, String body) { return null; }
+}
+""")
+        graph = extract_repo(self.repo).to_json()
+        props = [n for n in graph["nodes"] if n["type"] == "CONFIG_PROPERTY"]
+        self.assertEqual(len(props), 1)
+        self.assertEqual(props[0]["properties"]["code"], "https://api.stripe.com/v1/charges")
+
+        refs = [r for r in graph["relationships"] if r["type"] == "REFERENCES_CONFIG"]
+        self.assertEqual(len(refs), 1)
+        by_qn = self._nodes_by_qn(graph)
+        self.assertEqual(refs[0]["sourceId"], by_qn["com.example.PaymentService.charge"]["id"])
+
+    def test_http_dependency_detected_from_any_annotation_with_url_attribute(self):
+        """No annotation-name allowlist: a custom, non-Feign annotation with a
+        literal URL attribute is captured the same way @FeignClient would be."""
+        _write(self.repo, "src/com/example/LegacyClient.java", """
+package com.example;
+@RemoteService(endpoint = "http://legacy-service:8080")
+public interface LegacyClient {
+    String ping();
+}
+""")
+        graph = extract_repo(self.repo).to_json()
+        props = [n for n in graph["nodes"] if n["type"] == "CONFIG_PROPERTY"]
+        self.assertEqual(len(props), 1)
+        self.assertEqual(props[0]["properties"]["code"], "http://legacy-service:8080")
+
+    def test_placeholder_only_annotation_attribute_not_captured_as_http_dependency(self):
+        """A non-literal placeholder (${...}) isn't a URL literal -- accepted
+        trade-off, not a bug (see http_dependencies.py's docstring)."""
+        _write(self.repo, "src/com/example/PlaceholderClient.java", """
+package com.example;
+@RemoteService(name = "inventory-service", endpoint = "${inventory.service.url}")
+public interface PlaceholderClient {
+    String ping();
+}
+""")
+        graph = extract_repo(self.repo).to_json()
+        props = [n for n in graph["nodes"] if n["type"] == "CONFIG_PROPERTY"]
+        self.assertEqual(props, [])
+
 
 if __name__ == "__main__":
     unittest.main()

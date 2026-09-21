@@ -88,8 +88,12 @@ REL_DEFINITIONS = [
     "CREATE REL TABLE IF NOT EXISTS COMPANION_OF (FROM CompanionObject TO Class, FROM CompanionObject TO DataClass, FROM CompanionObject TO SealedClass)",
     "CREATE REL TABLE IF NOT EXISTS SUSPENDS (FROM SuspendFunction TO SuspendFunction, FROM SuspendFunction TO Method)",
     # Links a @Value("${...}")-annotated Java field/parameter/method to the
-    # ConfigProperty it reads -- see config/extractor.py's link_config_usages().
-    "CREATE REL TABLE IF NOT EXISTS REFERENCES_CONFIG (FROM Field TO ConfigProperty, FROM Parameter TO ConfigProperty, FROM Method TO ConfigProperty)",
+    # ConfigProperty it reads (config/extractor.py's link_config_usages()), and
+    # also links code-detected HTTP dependencies -- a @FeignClient-annotated
+    # interface/class, or a Method/Constructor calling RestTemplate/WebClient/
+    # HttpClient with a literal URL argument -- to a synthesized ConfigProperty
+    # representing that dependency (java/extractor.py's http_dependencies.py).
+    "CREATE REL TABLE IF NOT EXISTS REFERENCES_CONFIG (FROM Field TO ConfigProperty, FROM Parameter TO ConfigProperty, FROM Method TO ConfigProperty, FROM Constructor TO ConfigProperty, FROM Interface TO ConfigProperty, FROM Class TO ConfigProperty)",
 ]
 
 # Ported from KuzuGraphStore.java -- created after the base node tables (Workflow/
