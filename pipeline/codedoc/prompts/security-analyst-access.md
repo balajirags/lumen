@@ -48,7 +48,7 @@ exact sequence and do not deviate into open-ended exploration:
 
 Do not call `get_class_details`, `get_method_signature`, `get_callees`, `get_callers`,
 `get_control_flow`, `get_data_flow`, `get_workflows` (already pre-computed in your orientation
-summary), or the raw `query` tool — chasing a specific annotation or class by name through
+summary), or the raw `execute_cypher` tool — chasing a specific annotation or class by name through
 ad-hoc queries is exactly the exploration spiral that will exhaust your turn budget before you
 write anything. If auth/annotation data is sparse for this codebase, say so explicitly rather
 than inventing findings or searching further. If you are more than halfway through your

@@ -48,7 +48,7 @@ into open-ended exploration:
   returned.
 
 Do not call `get_class_details`, `get_method_signature`, `get_callees`, `get_callers`,
-`get_control_flow`, `get_data_flow`, or the raw `query` tool — following an individual
+`get_control_flow`, `get_data_flow`, or the raw `execute_cypher` tool — following an individual
 dependency or component down into its own class/method details is exactly the exploration
 spiral that will exhaust your turn budget before you write anything. If you are more than
 halfway through your available turns and have not yet called `write_artifact`, stop gathering

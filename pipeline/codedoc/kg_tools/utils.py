@@ -1,7 +1,6 @@
-"""Shared constants, regex patterns, and utility functions for kg_tools."""
+"""Shared constants and utility functions for kg_tools."""
 
 import json
-import re
 
 # ── Constants ───────────────────────────────────────────────────────────────
 
@@ -43,20 +42,6 @@ REL_TYPES = [
 #
 # HAS_ANNOTATION edge properties:
 #   value STRING — the primary annotation attribute (e.g. "/api/v1/inventory" for @RequestMapping)
-
-_READ_ONLY_PATTERN = re.compile(
-    r"^\s*(MATCH|RETURN|WITH|WHERE|ORDER|SKIP|LIMIT|UNWIND|OPTIONAL|CALL|UNION)\b",
-    re.IGNORECASE,
-)
-_WRITE_PATTERN = re.compile(
-    r"\b(CREATE|MERGE|DELETE|DETACH|SET|REMOVE|DROP|ALTER)\b",
-    re.IGNORECASE,
-)
-
-
-def _is_read_only(cypher: str) -> bool:
-    return bool(_READ_ONLY_PATTERN.match(cypher)) and not bool(_WRITE_PATTERN.search(cypher))
-
 
 def _cypher_escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace("'", "\\'")

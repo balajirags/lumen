@@ -65,7 +65,7 @@ deviate into open-ended exploration:
   using only what the tool calls above returned.
 
 Do not call `get_method_signature`, `get_class_details`, `get_control_flow`, `get_callees`,
-`get_data_flow`, `get_module_dependency_map`, or the raw `query` tool — those are for
+`get_data_flow`, `get_module_dependency_map`, or the raw `execute_cypher` tool — those are for
 source-level review, not attack-surface/trust-boundary mapping, and following every function
 name you encounter into its own signature/class lookup is exactly the exploration spiral that
 will exhaust your turn budget before you write anything. The Domains and Workflows sections

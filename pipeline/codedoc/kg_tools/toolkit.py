@@ -11,7 +11,6 @@ from codedoc.kg_tools.utils import (
     REL_TYPES,
     _cypher_escape,
     _format_rows,
-    _is_read_only,
 )
 from codedoc.kg_tools.registry import ToolRegistry
 
@@ -93,25 +92,6 @@ class ReverseEngineerToolkit:
         reg = self.registry
         backend = self.backend
         repo_path = self.repo_path
-
-        # ------------------------------------------------------------------ #
-        # query
-        # ------------------------------------------------------------------ #
-        @reg.tool()
-        def query(cypher: str) -> str:
-            """Run a read-only Cypher query against the code graph and return results.
-
-            Examples:
-              MATCH (c:Class) RETURN c.name, c.qualifiedName LIMIT 10
-              MATCH (a)-[r:CALLS]->(b) RETURN a.qualifiedName, b.qualifiedName LIMIT 20
-            """
-            if not _is_read_only(cypher):
-                return "Error: only read-only queries (MATCH/RETURN) are allowed."
-            try:
-                rows = backend.execute(cypher)
-                return _format_rows(rows)
-            except Exception as e:
-                return f"Query error: {e}"
 
         # ------------------------------------------------------------------ #
         # get_schema
