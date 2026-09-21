@@ -144,8 +144,12 @@ def check_workflows_and_domains(old: dict, new: dict, failures: list[str]) -> No
     old_wf, new_wf = old["workflows"], new["workflows"]
     print(f"  old: {old_wf}")
     print(f"  new: {new_wf}")
-    if not old_wf or not new_wf:
-        failures.append("expected at least one Workflow in both graphs")
+    if not old_wf and not new_wf:
+        # Both agree there are no HTTP-annotated entry points in this repo --
+        # that's agreement, not a divergence (e.g. a non-Spring-MVC repo).
+        pass
+    elif not old_wf or not new_wf:
+        failures.append("one graph has Workflows and the other has none")
     else:
         matched = any(o["method"] == n["method"] and o["path"] == n["path"] for o in old_wf for n in new_wf)
         if not matched:
@@ -155,8 +159,10 @@ def check_workflows_and_domains(old: dict, new: dict, failures: list[str]) -> No
     old_dom, new_dom = old["domains"], new["domains"]
     print(f"  old: {len(old_dom)} multi-member domains")
     print(f"  new: {len(new_dom)} multi-member domains")
-    if not old_dom or not new_dom:
-        failures.append("expected at least one multi-member Domain in both graphs")
+    if not old_dom and not new_dom:
+        pass
+    elif not old_dom or not new_dom:
+        failures.append("one graph has multi-member Domains and the other has none")
 
 
 def main() -> int:
