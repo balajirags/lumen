@@ -172,19 +172,28 @@ def main() -> int:
     new_bin = Path(args.new_bin)
 
     with tempfile.TemporaryDirectory(prefix="compare-graphs-") as tmp:
+        repo_name = fixture_path.name
         old_db_dir = Path(tmp) / "old"
         new_db_dir = Path(tmp) / "new"
-        run_indexer(old_bin, fixture_path, old_db_dir, "mini-spring", ["--language", "jvm"])
-        run_indexer(new_bin, fixture_path, new_db_dir, "mini-spring", ["--clear"])
+        run_indexer(old_bin, fixture_path, old_db_dir, repo_name, ["--language", "jvm"])
+        run_indexer(new_bin, fixture_path, new_db_dir, repo_name, ["--clear"])
 
         queries = build_queries()
-        old = dump_graph("kuzu", old_db_dir / "mini-spring-db", queries)
-        new = dump_graph("ladybug", new_db_dir / "mini-spring-db", queries)
+        old = dump_graph("kuzu", old_db_dir / f"{repo_name}-db", queries)
+        new = dump_graph("ladybug", new_db_dir / f"{repo_name}-db", queries)
 
         failures: list[str] = []
         check_counts(old, new, failures)
-        check_identity_spot_checks(old, new, failures)
-        check_calls(old, new, failures)
+        # The identity/CALLS spot-checks below are hardcoded to
+        # mini-spring-app's specific class names -- only meaningful when
+        # that's the fixture being run. Against an arbitrary real repo they'd
+        # just report noise, so skip them and rely on the counts/workflow/
+        # domain checks (which are repo-agnostic) instead.
+        if repo_name == "mini-spring-app":
+            check_identity_spot_checks(old, new, failures)
+            check_calls(old, new, failures)
+        else:
+            print(f"\n(skipping mini-spring-app-specific identity/CALLS spot-checks -- fixture is '{repo_name}')")
         check_workflows_and_domains(old, new, failures)
 
         print("\n=== Result ===")

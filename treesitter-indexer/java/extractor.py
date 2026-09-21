@@ -204,10 +204,36 @@ def _ensure_type_node(graph, name_text: str, index: RepoIndex, from_file: str, f
     if resolved:
         return f"type:{resolved}", resolved, True
     simple = name_text.split("<", 1)[0].rstrip("[]").strip()
-    ext_id = f"type:external:{simple}"
+    qualified_external = index.qualify_external(simple, from_file)
+    ext_id = f"type:external:{qualified_external}"
     if not graph.has_node(ext_id):
-        graph.add_node(ext_id, default_kind, simple, simple, external=True)
+        graph.add_node(ext_id, default_kind, simple, qualified_external, external=True)
     return ext_id, None, False
+
+
+def _collect_supertypes(decl: "TypeDeclInfo", finfo: "FileInfo", index: RepoIndex) -> list[tuple[str, str | None, bool]]:
+    """Returns [(rawSupertypeText, resolvedInternalFqnOrNone, isSuperclassClause), ...]
+    for a type's superclass/super_interfaces/extends_interfaces clauses --
+    shared by _emit_supertypes and _emit_calls_and_overrides so both see the
+    same list, including entries that resolve to nothing internal (needed so
+    OVERRIDES can still target an external/framework method -- see
+    _emit_calls_and_overrides)."""
+    src = finfo.src
+    items: list[tuple[str, str | None, bool]] = []
+    for child in decl.node.children:
+        if child.type == "superclass":
+            type_ref = next((c for c in child.named_children), None)
+            if type_ref is not None:
+                raw = _text(src, type_ref)
+                items.append((raw, index.resolve_type_name(raw, finfo.file_path, finfo.package), True))
+        elif child.type in ("super_interfaces", "extends_interfaces"):
+            type_list = next((c for c in child.children if c.type == "type_list"), None)
+            if type_list is None:
+                continue
+            for type_ref in type_list.named_children:
+                raw = _text(src, type_ref)
+                items.append((raw, index.resolve_type_name(raw, finfo.file_path, finfo.package), False))
+    return items
 
 
 def _method_id(type_fqn: str, method_name: str, arity: int) -> str:
@@ -334,16 +360,58 @@ def _emit_calls_in_body(graph: Graph, body_node: Node | None, src: bytes, caller
     walk(body_node)
 
 
+def _detect_source_root(project_root: str) -> str:
+    """Ported from App.java's detectSourceRoot (Java-only case): standard Maven
+    /Gradle layout puts sources under src/main/java, TEST sources under
+    src/test/java -- the latter is deliberately never scanned. Falls back to
+    src/main or src for non-standard layouts, then the project root itself."""
+    for candidate in ("src/main/java", "src/main", "src"):
+        path = os.path.join(project_root, candidate)
+        if os.path.isdir(path):
+            return path
+    return project_root
+
+
+def _detect_modules(project_root: str) -> list[str]:
+    """Ported from App.java's detectModules: a subdirectory counts as its own
+    module if it has both a build file and a src layout of its own."""
+    modules: list[str] = []
+    try:
+        for name in sorted(os.listdir(project_root)):
+            child = os.path.join(project_root, name)
+            if not os.path.isdir(child):
+                continue
+            has_own_build = any(
+                os.path.exists(os.path.join(child, f)) for f in ("build.gradle", "build.gradle.kts", "pom.xml")
+            )
+            has_src = any(
+                os.path.isdir(os.path.join(child, d)) for d in ("src/main/java", "src/main", "src")
+            )
+            if has_own_build and has_src:
+                modules.append(child)
+    except OSError:
+        pass
+
+    if not modules:
+        return [project_root]
+
+    if any(os.path.isdir(os.path.join(project_root, d)) for d in ("src/main/java", "src/main")):
+        modules.insert(0, project_root)
+    return modules
+
+
 def extract_repo(repo_path: str) -> Graph:
     parser = Parser(JAVA_LANGUAGE)
     graph = Graph()
 
     java_files = []
-    for root, dirs, files in os.walk(repo_path):
-        dirs[:] = [d for d in dirs if d not in (".git", "target", "build", "node_modules", ".venv")]
-        for fname in files:
-            if fname.endswith(".java"):
-                java_files.append(os.path.join(root, fname))
+    for module_root in _detect_modules(repo_path):
+        source_root = _detect_source_root(module_root)
+        for root, dirs, files in os.walk(source_root):
+            dirs[:] = [d for d in dirs if d not in (".git", "target", "build", "node_modules", ".venv")]
+            for fname in files:
+                if fname.endswith(".java"):
+                    java_files.append(os.path.join(root, fname))
 
     file_infos: list[FileInfo] = []
     for fpath in java_files:
@@ -397,21 +465,14 @@ def extract_repo(repo_path: str) -> Graph:
 
 
 def _emit_supertypes(graph: Graph, decl: TypeDeclInfo, finfo: FileInfo, index: RepoIndex, type_id: str) -> None:
-    src = finfo.src
-    for child in decl.node.children:
-        if child.type == "superclass":
-            type_ref = next((c for c in child.named_children), None)
-            if type_ref is not None:
-                target_id, _, _ = _ensure_type_node(graph, _text(src, type_ref), index, finfo.file_path, finfo.package, "CLASS")
-                graph.add_rel(type_id, target_id, "EXTENDS")
-        elif child.type in ("super_interfaces", "extends_interfaces"):
-            type_list = next((c for c in child.children if c.type == "type_list"), None)
-            if type_list is None:
-                continue
-            for type_ref in type_list.named_children:
-                target_id, _, _ = _ensure_type_node(graph, _text(src, type_ref), index, finfo.file_path, finfo.package, "INTERFACE")
-                rel = "EXTENDS" if decl.kind == "Interface" else "IMPLEMENTS"
-                graph.add_rel(type_id, target_id, rel)
+    for raw, _resolved, is_superclass in _collect_supertypes(decl, finfo, index):
+        if is_superclass:
+            target_id, _, _ = _ensure_type_node(graph, raw, index, finfo.file_path, finfo.package, "CLASS")
+            graph.add_rel(type_id, target_id, "EXTENDS")
+        else:
+            target_id, _, _ = _ensure_type_node(graph, raw, index, finfo.file_path, finfo.package, "INTERFACE")
+            rel = "EXTENDS" if decl.kind == "Interface" else "IMPLEMENTS"
+            graph.add_rel(type_id, target_id, rel)
 
 
 def _emit_annotations(graph: Graph, decl_or_member_node: Node, src: bytes, owner_id: str) -> None:
@@ -528,22 +589,15 @@ def _emit_calls_and_overrides(graph: Graph, decl: TypeDeclInfo, finfo: FileInfo,
     if body is None:
         return
 
-    supertype_fqns: list[str] = []
-    for child in decl.node.children:
-        if child.type == "superclass":
-            type_ref = next((c for c in child.named_children), None)
-            if type_ref is not None:
-                resolved = index.resolve_type_name(_text(src, type_ref), finfo.file_path, finfo.package)
-                if resolved:
-                    supertype_fqns.append(resolved)
-        elif child.type in ("super_interfaces", "extends_interfaces"):
-            type_list = next((c for c in child.children if c.type == "type_list"), None)
-            if type_list is None:
-                continue
-            for type_ref in type_list.named_children:
-                resolved = index.resolve_type_name(_text(src, type_ref), finfo.file_path, finfo.package)
-                if resolved:
-                    supertype_fqns.append(resolved)
+    supertypes = _collect_supertypes(decl, finfo, index)
+    supertype_fqns = [fqn for _raw, fqn, _is_superclass in supertypes if fqn]
+    # Raw supertype references that did NOT resolve to an internal type --
+    # real-world @Override overwhelmingly targets framework/JDK interfaces
+    # (Filter, MessageListener, CommandLineRunner, Object, ...), not other
+    # classes in the same repo, so OVERRIDES needs an external fallback to be
+    # useful at all (confirmed empirically: on a real Spring service, 5/5 of
+    # the existing cmg-java engine's OVERRIDES edges target external methods).
+    external_supertype_raws = [raw for raw, fqn, _is_superclass in supertypes if not fqn]
 
     for member in body.named_children:
         if member.type == "constructor_declaration":
@@ -578,11 +632,28 @@ def _emit_calls_and_overrides(graph: Graph, decl: TypeDeclInfo, finfo: FileInfo,
                 for ann in _annotation_nodes(member)
             )
             if has_override:
+                matched = False
                 for super_fqn in supertype_fqns:
                     for (sup_name, sup_arity, sup_id) in type_methods.get(super_fqn, []):
                         if sup_name == mname and sup_arity == arity:
                             graph.add_rel(method_id, sup_id, "OVERRIDES")
+                            matched = True
                             break
+                    if matched:
+                        break
+                if not matched and external_supertype_raws:
+                    # No internal ancestor declares this method (or the only
+                    # ancestor is external) -- target an external placeholder
+                    # method under the first external supertype, mirroring
+                    # what real symbol resolution actually produces.
+                    raw = external_supertype_raws[0]
+                    target_type_id, _, _ = _ensure_type_node(graph, raw, index, finfo.file_path, finfo.package, "CLASS")
+                    target_type_name = graph.nodes[target_type_id]["qualifiedName"]
+                    ext_method_id = f"method:external:{target_type_name}.{mname}/{arity}"
+                    if not graph.has_node(ext_method_id):
+                        graph.add_node(ext_method_id, "METHOD", mname, f"{target_type_name}.{mname}", external=True)
+                        graph.add_rel(target_type_id, ext_method_id, "CONTAINS")
+                    graph.add_rel(method_id, ext_method_id, "OVERRIDES")
 
 
 def _field_type_map(decl: TypeDeclInfo, finfo: FileInfo, src: bytes) -> dict[str, str]:

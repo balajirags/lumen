@@ -73,6 +73,21 @@ class RepoIndex:
             return matches[0]
         return None
 
+    def qualify_external(self, simple_or_qualified: str, from_file: str) -> str:
+        """Best-effort qualified name for a type NOT in this repo (framework/JDK
+        classes), used so external placeholder nodes look like real qualified
+        names (e.g. `org.springframework...MessageListener`) rather than a bare
+        simple name -- mirrors what real symbol resolution would produce, using
+        only this file's own import statements (no classpath JARs available)."""
+        name = simple_or_qualified.strip()
+        if "<" in name:
+            name = name[: name.index("<")]
+        name = name.rstrip("[]").strip()
+        if "." in name:
+            return name
+        imports = self.file_imports.get(from_file, {})
+        return imports.get(name, name)
+
 
 @dataclass
 class MethodCallContext:
