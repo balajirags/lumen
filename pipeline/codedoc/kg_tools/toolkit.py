@@ -16,6 +16,41 @@ from codedoc.kg_tools.utils import (
 from codedoc.kg_tools.registry import ToolRegistry
 
 
+# (category, key substrings, value substrings) checked against lowercased
+# ConfigProperty key/value -- first match wins. Used by get_external_dependencies()
+# to classify config-derived infrastructure dependencies (only populated by the
+# experimental treesitter-indexer's config/extractor.py -- see ConfigProperty).
+_INFRA_DEPENDENCY_PATTERNS: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = [
+    ("Database", ("datasource", "jdbc", "jpa", "hibernate", "mongodb", "mongo.", "database"),
+     ("jdbc:", "mongodb:", "mongodb+srv:", "postgresql://", "mysql://")),
+    ("Message Broker", ("kafka", "rabbitmq", "amqp", "activemq", "sqs", "pubsub"), ("amqp://",)),
+    ("Cache", ("redis", "memcached", "ehcache", "hazelcast"), ("redis://",)),
+    ("Search", ("elasticsearch", "solr", "opensearch"), ()),
+    ("Cloud / Storage", ("s3.", "azure.", "gcs.", "blob.", "bucket"), ("s3://", "blob.core.windows.net")),
+    ("External Service / API", (), ("http://", "https://")),
+]
+
+# Key substrings that mark a config value as sensitive -- its value is
+# redacted in get_external_dependencies() output regardless of category.
+_SECRET_KEY_SUBSTRINGS = (
+    "password", "secret", "token", "apikey", "api-key", "api_key", "credential", "private-key", "privatekey",
+)
+
+
+def _classify_config_dependency(key: str, value: str) -> str | None:
+    key_l = (key or "").lower()
+    value_l = (value or "").lower()
+    for category, key_subs, value_subs in _INFRA_DEPENDENCY_PATTERNS:
+        if any(s in key_l for s in key_subs) or any(s in value_l for s in value_subs):
+            return category
+    return None
+
+
+def _is_secret_like_key(key: str) -> bool:
+    key_l = (key or "").lower()
+    return any(s in key_l for s in _SECRET_KEY_SUBSTRINGS)
+
+
 _NAME_TOKEN_BLACKLIST = {
     "api", "app", "client", "component", "context", "controller", "data", "default",
     "fetch", "function", "get", "handler", "hook", "http", "index", "layout", "module",
@@ -2027,8 +2062,8 @@ class ReverseEngineerToolkit:
         # ------------------------------------------------------------------ #
         @reg.tool()
         def get_external_dependencies() -> str:
-            """Find references to external types from outside the analyzed codebase."""
-            lines = ["=== EXTERNAL DEPENDENCIES ===\n"]
+            """Find external code dependencies (library/framework types) and infrastructure dependencies inferred from config (databases, message brokers, caches, external services)."""
+            lines = ["=== EXTERNAL DEPENDENCIES (CODE) ===\n"]
             try:
                 rows = backend.execute(
                     "MATCH (n) WHERE n.external = true "
@@ -2052,6 +2087,48 @@ class ReverseEngineerToolkit:
                     lines.append("  No external dependencies marked in the graph.")
             except Exception as e:
                 lines.append(f"  (error: {e})")
+
+            lines.append("\n=== INFRASTRUCTURE DEPENDENCIES (FROM CONFIG) ===\n")
+            try:
+                prop_rows = backend.execute(
+                    "MATCH (p:ConfigProperty) RETURN p.qualifiedName AS qn, p.name AS key, p.code AS value"
+                )
+            except Exception:
+                prop_rows = None
+            if not prop_rows:
+                lines.append("  No config indexed (requires the experimental treesitter-indexer).")
+                return "\n".join(lines)
+
+            consumers_by_prop: dict[str, list[str]] = {}
+            try:
+                consumer_rows = backend.execute(
+                    "MATCH (consumer)-[:REFERENCES_CONFIG]->(p:ConfigProperty) "
+                    "RETURN p.qualifiedName AS qn, consumer.qualifiedName AS consumer, label(consumer) AS consumer_type"
+                )
+                for r in consumer_rows or []:
+                    consumers_by_prop.setdefault(r.get("qn", ""), []).append(
+                        f"{r.get('consumer_type', '')}: {r.get('consumer', '')}"
+                    )
+            except Exception:
+                pass
+
+            by_category: dict[str, list[dict]] = {}
+            for r in prop_rows:
+                category = _classify_config_dependency(r.get("key", ""), r.get("value", ""))
+                if category:
+                    by_category.setdefault(category, []).append(r)
+
+            if not by_category:
+                lines.append("  No recognizable infrastructure dependencies found in indexed config.")
+            else:
+                for category, items in sorted(by_category.items()):
+                    lines.append(f"  {category}  ({len(items)} propert{'y' if len(items) == 1 else 'ies'})")
+                    for item in sorted(items, key=lambda x: x.get("key", "")):
+                        key = item.get("key", "")
+                        value = "<redacted>" if _is_secret_like_key(key) else item.get("value", "")
+                        lines.append(f"    {key} = {value}")
+                        for consumer in consumers_by_prop.get(item.get("qn", ""), []):
+                            lines.append(f"      consumed by: {consumer}")
             return "\n".join(lines)
 
         # ------------------------------------------------------------------ #

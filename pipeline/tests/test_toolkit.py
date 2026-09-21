@@ -136,3 +136,66 @@ def test_get_ui_to_api_call_map_falls_back_to_ui_module_imports():
     assert "UI Module Imports To API Modules (Fallback)" in result
     assert "admin-frontend.src.App" in result
     assert "admin-frontend.src.api" in result
+
+
+class ConfigDependencyBackend:
+    def execute(self, query: str):
+        if "MATCH (n) WHERE n.external = true" in query:
+            return []
+        if "MATCH (p:ConfigProperty) RETURN p.qualifiedName" in query:
+            return [
+                {"qn": "application.yml#spring.datasource.url", "key": "spring.datasource.url",
+                 "value": "jdbc:postgresql://localhost/inventory"},
+                {"qn": "application.yml#spring.datasource.password", "key": "spring.datasource.password",
+                 "value": "hunter2"},
+                {"qn": "application.yml#spring.kafka.bootstrap-servers", "key": "spring.kafka.bootstrap-servers",
+                 "value": "localhost:9092"},
+                {"qn": "application.yml#server.port", "key": "server.port", "value": "8080"},
+            ]
+        if "MATCH (consumer)-[:REFERENCES_CONFIG]->(p:ConfigProperty)" in query:
+            return [
+                {"qn": "application.yml#spring.datasource.url",
+                 "consumer": "com.example.Repo.dataSource", "consumer_type": "Field"},
+            ]
+        return []
+
+
+class NoConfigBackend:
+    def execute(self, query: str):
+        if "MATCH (n) WHERE n.external = true" in query:
+            return []
+        if "MATCH (p:ConfigProperty) RETURN p.qualifiedName" in query:
+            raise RuntimeError("Table ConfigProperty does not exist")
+        return []
+
+
+def test_get_external_dependencies_classifies_config_infrastructure():
+    toolkit = ReverseEngineerToolkit(ConfigDependencyBackend(), repo_path=".")
+
+    result = toolkit.call("get_external_dependencies")
+
+    assert "INFRASTRUCTURE DEPENDENCIES" in result
+    assert "Database" in result
+    assert "spring.datasource.url = jdbc:postgresql://localhost/inventory" in result
+    assert "consumed by: Field: com.example.Repo.dataSource" in result
+    assert "Message Broker" in result
+    assert "spring.kafka.bootstrap-servers = localhost:9092" in result
+    # server.port doesn't match any infra category -- shouldn't appear
+    assert "server.port" not in result
+
+
+def test_get_external_dependencies_redacts_secret_like_values():
+    toolkit = ReverseEngineerToolkit(ConfigDependencyBackend(), repo_path=".")
+
+    result = toolkit.call("get_external_dependencies")
+
+    assert "spring.datasource.password = <redacted>" in result
+    assert "hunter2" not in result
+
+
+def test_get_external_dependencies_handles_no_config_indexed():
+    toolkit = ReverseEngineerToolkit(NoConfigBackend(), repo_path=".")
+
+    result = toolkit.call("get_external_dependencies")
+
+    assert "No config indexed" in result

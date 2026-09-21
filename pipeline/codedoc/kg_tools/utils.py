@@ -16,6 +16,9 @@ NODE_TYPES = [
     # Post-processing abstractions
     "Workflow",   # end-to-end execution trace (HTTP entry → repository/event terminal)
     "Domain",     # functional cluster of cohesive classes/modules
+    # Config (experimental treesitter-indexer only -- see treesitter-indexer/config/)
+    "ConfigFile",      # a YAML/JSON/.properties file under src/main/resources
+    "ConfigProperty",  # a flattened dotted-key config entry (e.g. spring.datasource.url)
 ]
 
 REL_TYPES = [
@@ -28,6 +31,8 @@ REL_TYPES = [
     # Post-processing abstractions
     "WORKFLOW_STEP",  # (Method|Component|Function)-[:WORKFLOW_STEP {step}]->(Workflow)
     "IN_DOMAIN",      # (Class|Interface|Component|Module|...)-[:IN_DOMAIN]->(Domain)
+    # Config (experimental treesitter-indexer only)
+    "REFERENCES_CONFIG",  # (Field|Parameter|Method)-[:REFERENCES_CONFIG]->(ConfigProperty)
 ]
 
 # CALLS edge properties:
