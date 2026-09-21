@@ -35,6 +35,36 @@ CONFIG_EXTENSIONS = (".yml", ".yaml", ".json", ".properties")
 # Matches ${some.key} or ${some.key:defaultValue} -- Spring placeholder syntax.
 _PLACEHOLDER_RE = re.compile(r"\$\{([^}:]+)(?::[^}]*)?\}")
 
+# Matches Java ResourceBundle locale suffixes, e.g. messages_es.properties,
+# messages_in_ID.properties, ValidationMessages_fr_CA.properties -- a locale
+# code is always exactly 2 lowercase letters, optionally + 2-letter region,
+# optionally + a variant, which is distinct enough from Spring profile
+# suffixes (application-dev.properties uses a hyphen and a descriptive word,
+# never this shape) to be a safe heuristic.
+_LOCALE_SUFFIX_RE = re.compile(r"^(.+)_[a-z]{2}(_[A-Za-z]{2})?(_\w+)?\.properties$")
+
+
+def _i18n_bundle_basenames(filenames: list[str]) -> set[str]:
+    """Base names (without extension) that have at least one locale-suffixed
+    sibling in the same directory -- e.g. seeing messages_es.properties marks
+    "messages" as an i18n bundle, so messages.properties and every other
+    messages_XX.properties sibling are all skipped as translation noise, not
+    real deployment config."""
+    bases: set[str] = set()
+    for fname in filenames:
+        match = _LOCALE_SUFFIX_RE.match(fname)
+        if match:
+            bases.add(match.group(1))
+    return bases
+
+
+def _is_i18n_bundle_file(fname: str, bundle_basenames: set[str]) -> bool:
+    if not fname.endswith(".properties"):
+        return False
+    match = _LOCALE_SUFFIX_RE.match(fname)
+    base = match.group(1) if match else fname[: -len(".properties")]
+    return base in bundle_basenames
+
 
 def _text(src: bytes, node: Node | None) -> str:
     if node is None:
@@ -198,8 +228,13 @@ def extract_config(repo_path: str, graph: Graph) -> None:
             # which case a sibling src/test/resources would otherwise still
             # get walked into.
             dirs[:] = [d for d in dirs if d not in (".git", "target", "build", "node_modules", ".venv", "test", "tests")]
+            bundle_basenames = _i18n_bundle_basenames(files)
+            skipped_bundle_files = 0
             for fname in files:
                 if not fname.endswith(CONFIG_EXTENSIONS):
+                    continue
+                if _is_i18n_bundle_file(fname, bundle_basenames):
+                    skipped_bundle_files += 1
                     continue
                 full_path = os.path.join(root, fname)
                 rel_path = os.path.relpath(full_path, repo_path)
@@ -212,6 +247,10 @@ def extract_config(repo_path: str, graph: Graph) -> None:
                         _extract_properties_file(full_path, rel_path, graph)
                 except Exception as exc:
                     print(f"config extractor: failed to parse {rel_path}: {exc}", file=sys.stderr)
+            if skipped_bundle_files:
+                print(f"config extractor: skipped {skipped_bundle_files} i18n resource-bundle "
+                      f"file(s) in {os.path.relpath(root, repo_path)} (translations, not config)",
+                      file=sys.stderr)
 
     link_config_usages(graph)
 

@@ -93,6 +93,26 @@ spring.datasource.url=jdbc:postgresql://x/db
         extract_config(self.repo, graph)
         self.assertEqual(len([n for n in graph.nodes.values() if n["type"] == "CONFIG_PROPERTY"]), 0)
 
+    def test_i18n_message_bundles_excluded(self):
+        _write(self.repo, "src/main/resources/messages.properties", "greeting=Hello\n")
+        _write(self.repo, "src/main/resources/messages_es.properties", "greeting=Hola\n")
+        _write(self.repo, "src/main/resources/messages_in_ID.properties", "greeting=Halo\n")
+        _write(self.repo, "src/main/resources/application.properties", "server.port=8080\n")
+        graph = Graph()
+        extract_config(self.repo, graph)
+        props = self._props_by_key(graph)
+        self.assertNotIn("greeting", props)
+        self.assertEqual(len([n for n in graph.nodes.values() if n["type"] == "CONFIG_FILE"]), 1)
+        self.assertEqual(props["server.port"]["properties"]["code"], "8080")
+
+    def test_profile_suffixed_config_not_treated_as_i18n(self):
+        _write(self.repo, "src/main/resources/application.properties", "server.port=8080\n")
+        _write(self.repo, "src/main/resources/application-dev.properties", "server.port=9090\n")
+        graph = Graph()
+        extract_config(self.repo, graph)
+        file_names = {n["name"] for n in graph.nodes.values() if n["type"] == "CONFIG_FILE"}
+        self.assertEqual(file_names, {"application.properties", "application-dev.properties"})
+
     def test_link_config_usages_matches_value_annotation(self):
         _write(self.repo, "src/main/resources/application.yml", "inventory:\n  page-size: 20\n")
         graph = Graph()
