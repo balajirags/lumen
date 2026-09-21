@@ -29,6 +29,8 @@ from dataclasses import dataclass, field as dc_field
 from tree_sitter import Language, Node, Parser
 import tree_sitter_java as tsjava
 
+from graph_model import Graph
+from repo_layout import detect_modules, detect_source_root
 from java.calls import MethodCallContext, RepoIndex, resolve_call_target
 
 JAVA_LANGUAGE = Language(tsjava.language())
@@ -244,31 +246,6 @@ def _ctor_id(type_fqn: str, arity: int) -> str:
     return f"ctor:{type_fqn}#/{arity}"
 
 
-class Graph:
-    def __init__(self):
-        self.nodes: dict[str, dict] = {}
-        self.relationships: list[dict] = []
-
-    def add_node(self, node_id, node_type, name, qualified_name, **props):
-        if node_id in self.nodes:
-            return
-        self.nodes[node_id] = {
-            "id": node_id, "type": node_type, "name": name,
-            "qualifiedName": qualified_name, "properties": props,
-        }
-
-    def has_node(self, node_id) -> bool:
-        return node_id in self.nodes
-
-    def add_rel(self, source_id, target_id, rel_type, **props):
-        self.relationships.append({
-            "sourceId": source_id, "targetId": target_id, "type": rel_type, "properties": props,
-        })
-
-    def to_json(self) -> dict:
-        return {"nodes": list(self.nodes.values()), "relationships": self.relationships}
-
-
 def _throws_types(method_node: Node, src: bytes) -> list[str]:
     result = []
     for child in method_node.children:
@@ -360,55 +337,18 @@ def _emit_calls_in_body(graph: Graph, body_node: Node | None, src: bytes, caller
     walk(body_node)
 
 
-def _detect_source_root(project_root: str) -> str:
-    """Ported from App.java's detectSourceRoot (Java-only case): standard Maven
-    /Gradle layout puts sources under src/main/java, TEST sources under
-    src/test/java -- the latter is deliberately never scanned. Falls back to
-    src/main or src for non-standard layouts, then the project root itself."""
-    for candidate in ("src/main/java", "src/main", "src"):
-        path = os.path.join(project_root, candidate)
-        if os.path.isdir(path):
-            return path
-    return project_root
-
-
-def _detect_modules(project_root: str) -> list[str]:
-    """Ported from App.java's detectModules: a subdirectory counts as its own
-    module if it has both a build file and a src layout of its own."""
-    modules: list[str] = []
-    try:
-        for name in sorted(os.listdir(project_root)):
-            child = os.path.join(project_root, name)
-            if not os.path.isdir(child):
-                continue
-            has_own_build = any(
-                os.path.exists(os.path.join(child, f)) for f in ("build.gradle", "build.gradle.kts", "pom.xml")
-            )
-            has_src = any(
-                os.path.isdir(os.path.join(child, d)) for d in ("src/main/java", "src/main", "src")
-            )
-            if has_own_build and has_src:
-                modules.append(child)
-    except OSError:
-        pass
-
-    if not modules:
-        return [project_root]
-
-    if any(os.path.isdir(os.path.join(project_root, d)) for d in ("src/main/java", "src/main")):
-        modules.insert(0, project_root)
-    return modules
-
-
 def extract_repo(repo_path: str) -> Graph:
     parser = Parser(JAVA_LANGUAGE)
     graph = Graph()
 
     java_files = []
-    for module_root in _detect_modules(repo_path):
-        source_root = _detect_source_root(module_root)
+    for module_root in detect_modules(repo_path):
+        source_root = detect_source_root(module_root)
         for root, dirs, files in os.walk(source_root):
-            dirs[:] = [d for d in dirs if d not in (".git", "target", "build", "node_modules", ".venv")]
+            # "test"/"tests" belt-and-suspenders: detect_source_root can fall
+            # back to a bare src/ when a repo has no src/main/java at all, in
+            # which case a sibling src/test/java would otherwise still get walked.
+            dirs[:] = [d for d in dirs if d not in (".git", "target", "build", "node_modules", ".venv", "test", "tests")]
             for fname in files:
                 if fname.endswith(".java"):
                     java_files.append(os.path.join(root, fname))

@@ -37,7 +37,8 @@ def main() -> int:
 
     print("-- Node counts --")
     for table in ["Package", "Class", "Interface", "Enum", "Record", "Method",
-                  "Constructor", "Field", "Parameter", "AnnotationType", "Workflow", "Domain"]:
+                  "Constructor", "Field", "Parameter", "AnnotationType", "Workflow", "Domain",
+                  "ConfigFile", "ConfigProperty"]:
         try:
             c = q(conn, f"MATCH (n:{table}) RETURN count(n) AS c")[0]["c"]
             if c:
@@ -68,6 +69,16 @@ def main() -> int:
     for row in q(conn, "MATCH (a)-[c:CALLS]->(b) RETURN a.qualifiedName AS src, "
                        "b.qualifiedName AS tgt, c.confidence AS conf, c.reason AS reason LIMIT 20"):
         print(f"  {row['src']} -> {row['tgt']}  (conf={row['conf']}, {row['reason']})")
+
+    print("\n-- Config properties (up to 30) --")
+    for row in q(conn, "MATCH (f:ConfigFile)-[:CONTAINS]->(p:ConfigProperty) "
+                       "RETURN f.path AS file, p.name AS key, p.code AS value LIMIT 30"):
+        print(f"  [{row['file']}] {row['key']} = {row['value']}")
+
+    print("\n-- Java code reading config (@Value) --")
+    for row in q(conn, "MATCH (a)-[:REFERENCES_CONFIG]->(p:ConfigProperty) "
+                       "RETURN a.qualifiedName AS src, p.name AS key, p.code AS value"):
+        print(f"  {row['src']} reads {row['key']} = {row['value']}")
 
     return 0
 

@@ -2,6 +2,7 @@ package com.example.inventory.service;
 
 import com.example.inventory.notify.Notifier;
 import com.example.inventory.repository.ItemRepository;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.util.List;
 
@@ -10,6 +11,9 @@ public class InventoryService {
 
     private final ItemRepository itemRepository;
     private final Notifier notifier;
+
+    @Value("${inventory.default-page-size:10}")
+    private int defaultPageSize;
 
     public InventoryService(ItemRepository itemRepository, Notifier notifier) {
         this.itemRepository = itemRepository;

@@ -55,12 +55,13 @@ NODE_TYPES = [
     "DataClass", "SealedClass", "SealedInterface", "ObjectDecl",
     "CompanionObject", "ExtensionFunction", "SuspendFunction",
     "Property", "Lambda", "InitBlock", "TypeAlias",
+    "ConfigFile", "ConfigProperty",
 ]
 
 # Same shape as store.py's REL_DEFINITIONS, except CALLS carries
 # confidence/reason (Java's shape) instead of resolved BOOLEAN.
 REL_DEFINITIONS = [
-    "CREATE REL TABLE IF NOT EXISTS CONTAINS (FROM Package TO Class, FROM Package TO Interface, FROM Package TO Enum, FROM Package TO Record, FROM Class TO Method, FROM Class TO Constructor, FROM Class TO Field, FROM Interface TO Method, FROM Interface TO Field, FROM Module TO Function, FROM Module TO ArrowFunction, FROM Module TO Component, FROM Module TO Hook, FROM Module TO Class, FROM Class TO Function, FROM Class TO ArrowFunction, FROM DataClass TO Method, FROM DataClass TO Property, FROM SealedClass TO Method, FROM SealedClass TO Property, FROM ObjectDecl TO Method, FROM ObjectDecl TO Property, FROM CompanionObject TO Method, FROM CompanionObject TO Property, FROM Class TO Property, FROM Class TO InitBlock, FROM Package TO TypeAlias, FROM Package TO ObjectDecl)",
+    "CREATE REL TABLE IF NOT EXISTS CONTAINS (FROM Package TO Class, FROM Package TO Interface, FROM Package TO Enum, FROM Package TO Record, FROM Class TO Method, FROM Class TO Constructor, FROM Class TO Field, FROM Interface TO Method, FROM Interface TO Field, FROM Module TO Function, FROM Module TO ArrowFunction, FROM Module TO Component, FROM Module TO Hook, FROM Module TO Class, FROM Class TO Function, FROM Class TO ArrowFunction, FROM DataClass TO Method, FROM DataClass TO Property, FROM SealedClass TO Method, FROM SealedClass TO Property, FROM ObjectDecl TO Method, FROM ObjectDecl TO Property, FROM CompanionObject TO Method, FROM CompanionObject TO Property, FROM Class TO Property, FROM Class TO InitBlock, FROM Package TO TypeAlias, FROM Package TO ObjectDecl, FROM ConfigFile TO ConfigProperty)",
     "CREATE REL TABLE IF NOT EXISTS EXTENDS (FROM Class TO Class, FROM Interface TO Interface, FROM Component TO Class, FROM DataClass TO Class, FROM SealedClass TO Class)",
     "CREATE REL TABLE IF NOT EXISTS IMPLEMENTS (FROM Class TO Interface, FROM DataClass TO Interface, FROM SealedClass TO Interface, FROM ObjectDecl TO Interface)",
     "CREATE REL TABLE IF NOT EXISTS CALLS (FROM Method TO Method, FROM Constructor TO Method, FROM Function TO Function, FROM Function TO Method, FROM ArrowFunction TO Function, FROM ArrowFunction TO Method, FROM Component TO Function, FROM Hook TO Function, FROM AsyncFunction TO Function, FROM ExtensionFunction TO Method, FROM ExtensionFunction TO Function, FROM SuspendFunction TO Method, FROM SuspendFunction TO Function, FROM Lambda TO Method, FROM Lambda TO Function, FROM InitBlock TO Method, lineNumber INT64, confidence DOUBLE, reason STRING)",
@@ -86,6 +87,9 @@ REL_DEFINITIONS = [
     "CREATE REL TABLE IF NOT EXISTS SEALED_SUBTYPE (FROM SealedClass TO Class, FROM SealedClass TO DataClass, FROM SealedClass TO ObjectDecl, FROM SealedInterface TO Class, FROM SealedInterface TO Interface)",
     "CREATE REL TABLE IF NOT EXISTS COMPANION_OF (FROM CompanionObject TO Class, FROM CompanionObject TO DataClass, FROM CompanionObject TO SealedClass)",
     "CREATE REL TABLE IF NOT EXISTS SUSPENDS (FROM SuspendFunction TO SuspendFunction, FROM SuspendFunction TO Method)",
+    # Links a @Value("${...}")-annotated Java field/parameter/method to the
+    # ConfigProperty it reads -- see config/extractor.py's link_config_usages().
+    "CREATE REL TABLE IF NOT EXISTS REFERENCES_CONFIG (FROM Field TO ConfigProperty, FROM Parameter TO ConfigProperty, FROM Method TO ConfigProperty)",
 ]
 
 # Ported from KuzuGraphStore.java -- created after the base node tables (Workflow/
@@ -105,6 +109,7 @@ NODE_TYPE_MAP = {
     "ENUM": "Enum", "RECORD": "Record", "ANNOTATION_TYPE": "AnnotationType",
     "METHOD": "Method", "CONSTRUCTOR": "Constructor", "FIELD": "Field",
     "PARAMETER": "Parameter", "FILE": "File", "STATEMENT": "Statement",
+    "CONFIG_FILE": "ConfigFile", "CONFIG_PROPERTY": "ConfigProperty",
 }
 
 
@@ -142,6 +147,8 @@ def infer_norm_kind(node_type: str | None) -> str:
         return "AnnotationLike"
     if normalized == "STATEMENT":
         return "Statement"
+    if normalized in {"CONFIG_FILE", "CONFIG_PROPERTY"}:
+        return "ConfigLike"
     return "CodeElement"
 
 
@@ -161,6 +168,8 @@ def infer_rel_norm_kind(rel_type: str | None) -> str:
         return "SemanticRelation"
     if normalized in {"AST_CHILD", "CFG_NEXT", "DATA_FLOW"}:
         return "FlowRelation"
+    if normalized == "REFERENCES_CONFIG":
+        return "DependsOn"
     return "CodeRelation"
 
 
@@ -171,7 +180,7 @@ _ALL_REL_TYPES = [
     "IMPORTS", "EXPORTS", "RENDERS", "USES_HOOK", "PROP_DEPENDENCY",
     "DECORATES", "YIELDS",
     "EXTENSION_OF", "DELEGATES_TO", "SEALED_SUBTYPE", "COMPANION_OF", "SUSPENDS",
-    "WORKFLOW_STEP", "IN_DOMAIN",
+    "WORKFLOW_STEP", "IN_DOMAIN", "REFERENCES_CONFIG",
 ]
 
 

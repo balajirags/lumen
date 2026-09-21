@@ -23,6 +23,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from java.extractor import extract_repo  # noqa: E402
+from config.extractor import extract_config  # noqa: E402
 import graph_store  # noqa: E402
 from postprocess import workflow_builder, domain_detector  # noqa: E402
 
@@ -34,11 +35,15 @@ def main() -> int:
     ap.add_argument("--repo-name", required=True)
     ap.add_argument("--backend", choices=["json", "kuzu"], default="kuzu")
     ap.add_argument("--clear", action="store_true", default=False)
+    ap.add_argument("--no-config", action="store_true", default=False,
+                     help="skip YAML/JSON/.properties config extraction")
     ap.add_argument("--json-out", default=None, help="only used with --backend json")
     args = ap.parse_args()
 
     print(f"tree-sitter Java indexer: scanning {args.repo_path}", file=sys.stderr)
     graph = extract_repo(args.repo_path)
+    if not args.no_config:
+        extract_config(args.repo_path, graph)
     graph_json = graph.to_json()
     print(
         f"tree-sitter Java indexer: {len(graph_json['nodes'])} nodes, "
