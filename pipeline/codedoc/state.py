@@ -72,6 +72,14 @@ class PipelineState:
     build_script: str = ""
     site_dir: str = ""  # override for doc-site location
 
+    # --- Experimental tree-sitter Java indexer (see treesitter-indexer/) ---
+    experimental_treesitter_java: bool = False
+    treesitter_indexer_bin_dir: str = ""
+    # Set by run_indexer to the actual on-disk format written ("kuzu" |
+    # "ladybug") -- kg_tools.create_graph_backend() reads this so every
+    # analyst/MCP call opens kuzu_path with the correct backend.
+    graph_backend: str = "kuzu"
+
     def log(self, stage: str, message: str) -> None:
         ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
         line = f"[{ts}] [{stage}] {message}"
@@ -89,6 +97,7 @@ class PipelineState:
             "status": self.status,
             "error": self.error,
             "kuzu_path": self.kuzu_path,
+            "graph_backend": self.graph_backend,
             "indexed_languages": self.indexed_languages,
             "language_categories": self.language_categories,
             "language_flavors": self.language_flavors,

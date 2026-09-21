@@ -40,7 +40,7 @@ from codedoc.artifact_planner import (
     planned_artifacts_by_class,
 )
 from codedoc.diagrams import WRITE_C4_ARTIFACT_ANTHROPIC, WRITE_C4_ARTIFACT_OPENAI, write_c4_artifact
-from codedoc.kg_tools import KuzuBackend, ReverseEngineerToolkit
+from codedoc.kg_tools import ReverseEngineerToolkit, create_graph_backend, sniff_backend_kind
 from codedoc.llm import LLMProvider, ToolCall, ToolDefinition, ToolParam, chat_with_retry, create_provider
 from codedoc.prompts import GRAPH_CONVENTIONS_BASE
 
@@ -621,6 +621,7 @@ def _write_machine_manifest(
     repo_metrics: dict[str, Any] | None = None,
     input_tokens: int = 0,
     output_tokens: int = 0,
+    indexer_backend: str = "kuzu",
 ) -> str:
     root = Path(artifacts_dir)
     manifest_path = root / "manifests" / "artifacts.json"
@@ -642,6 +643,9 @@ def _write_machine_manifest(
         "primary_repo_type": plan.get("primary_repo_type", archetype),
         "capabilities": plan.get("capabilities", []),
         "size_profile": plan.get("size_profile", "small"),
+        # "kuzu" | "ladybug" -- which graph DB engine produced kuzu_path,
+        # e.g. "ladybug" if --experimental-treesitter-java was used.
+        "indexer_backend": indexer_backend,
         "repo_metrics": {
             "loc": int((repo_metrics or {}).get("total_loc", 0) or 0),
             "source_files": int((repo_metrics or {}).get("total_source_files", 0) or 0),
@@ -1045,7 +1049,7 @@ def _recover_missing_current_state_artifacts(
 ) -> dict[str, Any]:
     if not missing_paths:
         return {"status": "done", "artifacts": [], "events": [], "tool_uses": 0, "tool_call_counts": {}, "input_tokens": 0, "output_tokens": 0}
-    backend = KuzuBackend(kuzu_path)
+    backend = create_graph_backend(kuzu_path)
     toolkit = ReverseEngineerToolkit(backend, repo_path=repo_path)
     system_prompt = _build_analyst_system_prompt(
         analyst_name, kuzu_path, repo_name, orientation_summary, primary_repo_type, repo_metrics=repo_metrics
@@ -1131,7 +1135,7 @@ def _controlled_frontend_source_confirmation(
 def _backfill_required_artifacts(kuzu_path: str, repo_path: str, artifacts_dir: str, archetype: str) -> list[str]:
     generated: list[str] = []
     root = Path(artifacts_dir)
-    backend = KuzuBackend(kuzu_path)
+    backend = create_graph_backend(kuzu_path)
     toolkit = ReverseEngineerToolkit(backend, repo_path=repo_path)
 
     state_target = root / "current-state" / "state-management.md"
@@ -1501,7 +1505,7 @@ def run_supervisor_agent(
     # ------------------------------------------------------------------
     log("[supervisor] Phase 1 — orientation (direct toolkit query)")
     try:
-        p1_backend = KuzuBackend(kuzu_path)
+        p1_backend = create_graph_backend(kuzu_path)
         p1_toolkit = ReverseEngineerToolkit(p1_backend, repo_path=repo_path)
 
         # Soft fallback: if the architecture summary fails, continue with a stub
@@ -1601,7 +1605,7 @@ def run_supervisor_agent(
     analyst_requests = _build_analyst_requests(selected_repo_archetype)
 
     def _run_analyst(name: str, user_request: str) -> tuple[str, dict]:
-        backend = KuzuBackend(kuzu_path)
+        backend = create_graph_backend(kuzu_path)
         toolkit = ReverseEngineerToolkit(backend, repo_path=repo_path)
         analyst_system = _build_analyst_system_prompt(
             name, kuzu_path, repo_name, orientation_summary, selected_repo_archetype, repo_metrics=repo_metrics
@@ -1752,7 +1756,7 @@ def run_supervisor_agent(
     arch_system = _build_architect_prompt(
         orientation_summary, artifacts_dir, repo_name, selected_repo_archetype, repo_metrics=repo_metrics
     )
-    arch_backend = KuzuBackend(kuzu_path)
+    arch_backend = create_graph_backend(kuzu_path)
     arch_toolkit = ReverseEngineerToolkit(arch_backend, repo_path=repo_path)
     arch_result = run_loop(
         provider=provider,
@@ -1873,6 +1877,7 @@ def run_supervisor_agent(
         repo_metrics=repo_metrics,
         input_tokens=total_input_tokens,
         output_tokens=total_output_tokens,
+        indexer_backend=sniff_backend_kind(kuzu_path),
     )
     all_artifacts.append(manifest_path)
     all_events.append(f"[supervisor] manifest generated — {manifest_path}")
@@ -1947,7 +1952,7 @@ def run_agent(state) -> Any:
 
     # Quick connectivity check before spinning up the supervisor
     try:
-        KuzuBackend(kuzu_path)
+        create_graph_backend(kuzu_path)
     except FileNotFoundError as e:
         if not is_dict:
             ps.status = "failed"
@@ -2098,7 +2103,7 @@ def main() -> None:
     repo_name = args.repo_name or Path(args.db_path).parent.name
 
     try:
-        KuzuBackend(args.db_path)  # connectivity check
+        create_graph_backend(args.db_path)  # connectivity check
     except FileNotFoundError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)

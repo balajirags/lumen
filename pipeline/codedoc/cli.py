@@ -58,6 +58,10 @@ def common_pipeline_options(f):
 @main.command()
 @click.argument("repo_path", type=click.Path(exists=True, file_okay=False))
 @common_pipeline_options
+@click.option("--experimental-treesitter-java", is_flag=True, default=False,
+              help="Use the experimental tree-sitter Java indexer prototype (treesitter-indexer/) "
+                   "instead of cmg-java. Only applies to Java/Kotlin-only repos with no Kotlin "
+                   "files (falls back to cmg-java otherwise); off by default.")
 def run(
     repo_path: str,
     output_dir: str | None,
@@ -71,6 +75,7 @@ def run(
     allow_xlarge: bool,
     ollama_num_ctx: int | None,
     verbose: bool,
+    experimental_treesitter_java: bool,
 ) -> None:
     """Run the full pipeline: index → agent → build.
 
@@ -87,6 +92,7 @@ def run(
         "allow_xlarge": allow_xlarge or None,
         "ollama_num_ctx": ollama_num_ctx,
         "verbose": verbose or None,
+        "experimental_treesitter_java": experimental_treesitter_java or None,
     })
 
     state = run_pipeline(
@@ -106,6 +112,8 @@ def run(
         max_turns_explicit=cfg.max_turns_explicit,
         verbose=cfg.verbose,
         indexer_bin_dir=cfg.indexer_bin_dir,
+        experimental_treesitter_java=cfg.experimental_treesitter_java,
+        treesitter_indexer_bin_dir=cfg.treesitter_indexer_bin_dir,
         agent_prompt=cfg.agent_prompt,
         build_script=cfg.build_script,
     )

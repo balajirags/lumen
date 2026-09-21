@@ -1,23 +1,29 @@
 """Knowledge-graph query toolkit for code reverse-engineering.
 
-Provides ``KuzuBackend``, ``ToolRegistry``, and ``ReverseEngineerToolkit``
-with 30+ tools for querying code property graphs stored in KuzuDB.
+Provides ``create_graph_backend``, ``ToolRegistry``, and
+``ReverseEngineerToolkit`` with 30+ tools for querying code property graphs.
 
 Language-agnostic: works with Java, Kotlin, JavaScript/TypeScript, and
-Python code graphs produced by any cmg-* indexer.
+Python code graphs produced by any cmg-* indexer, and with graphs produced
+by the experimental treesitter-indexer prototype (LadybugDB-backed).
 
 Usage::
 
-    from codedoc.kg_tools import KuzuBackend, ReverseEngineerToolkit
+    from codedoc.kg_tools import create_graph_backend, ReverseEngineerToolkit
 
-    backend = KuzuBackend("./kuzu_db/my-project-db")
+    backend = create_graph_backend("./kuzu_db/my-project-db")
     toolkit = ReverseEngineerToolkit(backend)
     tools   = toolkit.openai_tool_definitions()
     result  = toolkit.call("summary")
 """
 
-from codedoc.kg_tools.backends import KuzuBackend, Neo4jBackend
+from codedoc.kg_tools.backends import (
+    KuzuBackend, LadybugBackend, Neo4jBackend, create_graph_backend, sniff_backend_kind,
+)
 from codedoc.kg_tools.registry import ToolDef, ToolRegistry
 from codedoc.kg_tools.toolkit import ReverseEngineerToolkit
 
-__all__ = ["KuzuBackend", "Neo4jBackend", "ToolDef", "ToolRegistry", "ReverseEngineerToolkit"]
+__all__ = [
+    "KuzuBackend", "LadybugBackend", "Neo4jBackend", "create_graph_backend", "sniff_backend_kind",
+    "ToolDef", "ToolRegistry", "ReverseEngineerToolkit",
+]

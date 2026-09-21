@@ -17,6 +17,23 @@ from codedoc.repo_classification import classify_repo
 from codedoc.state import PipelineState
 
 
+def should_use_treesitter_java(state: PipelineState, ordered_languages: list[str]) -> bool:
+    """Whether to dispatch to the experimental cmg-java-ts instead of cmg-java.
+
+    Only used for single-language, Kotlin-free JVM repos -- it doesn't
+    understand Kotlin syntax, and using it alongside another language's
+    cmg-* writer in the same DB would hit an unresolved CALLS-schema
+    conflict (kuzu's `resolved BOOLEAN` vs this engine's
+    `confidence DOUBLE, reason STRING`). Callers fall back to cmg-java
+    (silently, with a log line) when this returns False.
+    """
+    return (
+        state.experimental_treesitter_java
+        and ordered_languages == ["jvm"]
+        and "kotlin" not in (state.language_flavors or [])
+    )
+
+
 def detect_languages(repo_path: str) -> dict[str, int]:
     """Return all supported language categories found in the repo with their file counts."""
     metrics = classify_repo(repo_path)
@@ -90,24 +107,44 @@ def run_indexer(state: PipelineState) -> PipelineState:
     effective_repo_name = state.repo_name or repo.name
     kuzu_dir = Path(state.output_dir).resolve() / "index.kuzu"
     kuzu_dir.mkdir(parents=True, exist_ok=True)
+
+    use_treesitter_java = should_use_treesitter_java(state, ordered_languages)
+    if state.experimental_treesitter_java and not use_treesitter_java:
+        state.log(
+            stage,
+            "--experimental-treesitter-java requested but this repo is polyglot or has Kotlin "
+            "files; falling back to cmg-java for compatibility.",
+        )
+    if use_treesitter_java:
+        state.graph_backend = "ladybug"
+        state.log(stage, "Using experimental tree-sitter Java indexer (cmg-java-ts)")
+
     _log.start_indexer_progress([LANGUAGE_CATEGORY_BY_KEY[lang].display_name for lang in ordered_languages])
     try:
         for language in ordered_languages:
             definition = LANGUAGE_CATEGORY_BY_KEY[language]
-            binary_name = definition.binary_name
-            binary = Path(state.indexer_bin_dir) / binary_name
+            if use_treesitter_java and language == "jvm":
+                binary_name = "cmg-java-ts"
+                binary = Path(state.treesitter_indexer_bin_dir) / binary_name
+                cli_language = None
+            else:
+                binary_name = definition.binary_name
+                binary = Path(state.indexer_bin_dir) / binary_name
+                cli_language = definition.cli_language
             if not binary.exists():
-                raise FileNotFoundError(
-                    f"Indexer binary not found: {binary}\n"
-                    f"Run the install script or check your indexer_bin_dir setting."
+                hint = (
+                    "Run treesitter-indexer/install.sh or check your treesitter_indexer_bin_dir setting."
+                    if use_treesitter_java and language == "jvm"
+                    else "Run the install script or check your indexer_bin_dir setting."
                 )
+                raise FileNotFoundError(f"Indexer binary not found: {binary}\n{hint}")
 
             display = definition.display_name
             _log.update_indexer_progress(display, "running")
             state.log(stage, f"Running {binary_name} for {display} → {kuzu_dir}/{effective_repo_name}-db")
             cmd = [str(binary), str(repo), _DB_FLAG, str(kuzu_dir), "--repo-name", effective_repo_name]
-            if definition.cli_language:
-                cmd.extend(["--language", definition.cli_language])
+            if cli_language:
+                cmd.extend(["--language", cli_language])
             try:
                 proc = subprocess.run(
                     cmd,

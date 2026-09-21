@@ -17,7 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from codedoc.kg_tools import KuzuBackend, ReverseEngineerToolkit
+from codedoc.kg_tools import ReverseEngineerToolkit, create_graph_backend
 from codedoc.llm import create_provider
 from codedoc.stages.agent import run_loop
 from codedoc.stages.parallel import run_parallel_tasks
@@ -51,7 +51,7 @@ def _load_prompt(filename: str) -> str:
 
 
 def _orientation_summary(kuzu_path: str, repo_path: str) -> str:
-    backend = KuzuBackend(kuzu_path)
+    backend = create_graph_backend(kuzu_path)
     toolkit = ReverseEngineerToolkit(backend, repo_path=repo_path)
     try:
         return toolkit.call("get_architecture_summary")
@@ -77,7 +77,7 @@ def _make_reviewer_task(
     verbose: bool,
 ):
     def _task() -> dict:
-        backend = KuzuBackend(kuzu_path)
+        backend = create_graph_backend(kuzu_path)
         toolkit = ReverseEngineerToolkit(backend, repo_path=repo_path)
         system_prompt = (
             _load_prompt(_REVIEWER_PROMPT_FILES[name])
@@ -141,7 +141,7 @@ def run_agent(state) -> Any:
     repo_name = state.repo_name or (Path(repo_path).name if repo_path else "unknown")
 
     try:
-        KuzuBackend(kuzu_path)
+        create_graph_backend(kuzu_path)
     except FileNotFoundError as e:
         state.status = "failed"
         state.error = str(e)
@@ -235,7 +235,7 @@ def run_agent(state) -> Any:
     # ------------------------------------------------------------------
     log("[security-audit] Phase 3 — running risk synthesis…")
     _log.update_workflow_phase("security/synthesis", status="running", tool="risk synthesis")
-    synthesis_backend = KuzuBackend(kuzu_path)
+    synthesis_backend = create_graph_backend(kuzu_path)
     synthesis_toolkit = ReverseEngineerToolkit(synthesis_backend, repo_path=repo_path)
     try:
         synthesis_result = run_loop(

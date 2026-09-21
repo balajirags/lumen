@@ -8,7 +8,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from codedoc.kg_tools import KuzuBackend, ReverseEngineerToolkit
+from codedoc.kg_tools import ReverseEngineerToolkit, create_graph_backend
 
 
 def _pipeline_dir() -> Path:
@@ -53,7 +53,7 @@ def build_mcp_server(
     path: str = "/mcp",
 ) -> FastMCP:
     identity = format_server_identity(db_path, repo_path)
-    backend = KuzuBackend(db_path)
+    backend = create_graph_backend(db_path)
     toolkit = ReverseEngineerToolkit(backend, repo_path=repo_path)
     server = FastMCP(
         identity["server_name"],

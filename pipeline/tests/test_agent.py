@@ -163,6 +163,21 @@ def test_write_machine_manifest_uses_runtime_repo_name(tmp_path):
     assert manifest["repo_metrics"]["loc"] == 12_345
     assert manifest["tokens"] == {"input": 111, "output": 222, "total": 333}
     assert manifest["artifacts"][-1]["file"] == "target-state/migration-plan.md"
+    assert manifest["indexer_backend"] == "kuzu"
+
+
+def test_write_machine_manifest_records_treesitter_indexer_backend(tmp_path):
+    artifacts_dir = tmp_path / "artifacts"
+
+    manifest_path = _write_machine_manifest(
+        str(artifacts_dir),
+        "inventory-service",
+        "backend-service",
+        indexer_backend="ladybug",
+    )
+    manifest = json.loads(Path(manifest_path).read_text())
+
+    assert manifest["indexer_backend"] == "ladybug"
 
 
 def test_write_machine_manifest_deduplicates_omissions(tmp_path):
@@ -218,7 +233,7 @@ def test_backfill_required_artifacts_frontend_module_dependency_map(tmp_path, mo
                 return "=== UI TO API CALL MAP ==="
             raise AssertionError(name)
 
-    monkeypatch.setattr("codedoc.stages.agent.KuzuBackend", lambda path: object())
+    monkeypatch.setattr("codedoc.stages.agent.create_graph_backend", lambda path: object())
     monkeypatch.setattr("codedoc.stages.agent.ReverseEngineerToolkit", FakeToolkit)
 
     generated = _backfill_required_artifacts("fake-db", "fake-repo", str(artifacts_dir), "frontend-app")
@@ -267,7 +282,7 @@ def test_backfill_required_artifacts_fullstack_generates_frontend_interaction_vi
                 return f"// {kwargs['method_name']}\n  27  inventoryClient.getItems()\n"
             raise AssertionError(name)
 
-    monkeypatch.setattr("codedoc.stages.agent.KuzuBackend", lambda path: object())
+    monkeypatch.setattr("codedoc.stages.agent.create_graph_backend", lambda path: object())
     monkeypatch.setattr("codedoc.stages.agent.ReverseEngineerToolkit", FakeToolkit)
 
     generated = _backfill_required_artifacts("fake-db", "fake-repo", str(artifacts_dir), "fullstack-app")
@@ -360,7 +375,7 @@ def test_recovery_prompt_gives_api_spec_more_budget(tmp_path, monkeypatch):
         calls["user_request"] = kwargs["user_request"]
         return {"status": "done", "artifacts": [], "events": [], "tool_uses": 0, "input_tokens": 0, "output_tokens": 0}
 
-    monkeypatch.setattr("codedoc.stages.agent.KuzuBackend", lambda path: object())
+    monkeypatch.setattr("codedoc.stages.agent.create_graph_backend", lambda path: object())
     monkeypatch.setattr("codedoc.stages.agent.ReverseEngineerToolkit", FakeToolkit)
     monkeypatch.setattr("codedoc.stages.agent.run_loop", fake_run_loop)
 

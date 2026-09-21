@@ -10,6 +10,10 @@ requires-python = ">=3.11"
 dependencies = [
     "click>=8.1,<9",
     "kuzu>=0.7,<1",
+    # Reads graphs written by the experimental treesitter-indexer prototype
+    # (treesitter-indexer/graph_store.py), which targets LadybugDB rather
+    # than the archived kuzu package -- see kg_tools/backends.py.
+    "ladybug>=0.20,<0.21",
     "mcp>=1.0.0,<2",
     "anthropic>=0.39,<1",
     "openai>=1.0,<3",
