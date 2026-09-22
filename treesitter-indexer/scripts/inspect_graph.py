@@ -10,9 +10,13 @@ Usage: python3 inspect_graph.py <db-path>
 
 from __future__ import annotations
 
+import os
 import sys
 
 import ladybug as lb
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from postprocess.http_routes import resolve_route  # noqa: E402
 
 
 def q(conn, cypher: str) -> list[dict]:
@@ -46,12 +50,16 @@ def main() -> int:
         except Exception:
             pass
 
-    print("\n-- Entry points (HTTP-annotated methods) --")
-    for row in q(conn,
-                 "MATCH (m:Method)-[r:HAS_ANNOTATION]->(a:AnnotationType) "
-                 "WHERE a.name IN ['GetMapping','PostMapping','PutMapping','DeleteMapping','PatchMapping','RequestMapping'] "
-                 "RETURN m.qualifiedName AS method, a.name AS annotation, r.value AS path"):
-        print(f"  {row['annotation']:15s} {row['path'] or '':20s} {row['method']}")
+    print("\n-- Entry points (HTTP-annotated methods, any framework) --")
+    ann_by_method: dict[str, dict[str, str]] = {}
+    for row in q(conn, "MATCH (m:Method)-[r:HAS_ANNOTATION]->(a:AnnotationType) "
+                       "RETURN m.qualifiedName AS method, a.name AS annotation, r.value AS value"):
+        ann_by_method.setdefault(row["method"], {})[row["annotation"]] = row["value"]
+    for method, anns in sorted(ann_by_method.items()):
+        route = resolve_route(anns)
+        if route is not None:
+            http_method, http_path = route
+            print(f"  {http_method:8s} {http_path or '':20s} {method}")
 
     print("\n-- Workflows (entry point -> terminal traces) --")
     for row in q(conn, "MATCH (w:Workflow) RETURN w.name AS name, w.httpMethod AS method, "

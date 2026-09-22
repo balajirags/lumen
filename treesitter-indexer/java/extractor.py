@@ -47,8 +47,6 @@ PRIMITIVE_TYPES = {
     "void", "int", "long", "short", "byte", "char", "boolean", "float", "double",
 }
 
-HTTP_ANNOTATIONS = {"GetMapping", "PostMapping", "PutMapping", "DeleteMapping", "PatchMapping", "RequestMapping"}
-
 
 def _text(src: bytes, node: Node | None) -> str:
     if node is None:

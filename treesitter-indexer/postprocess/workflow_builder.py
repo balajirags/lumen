@@ -16,10 +16,7 @@ import sys
 from collections import deque
 
 import graph_store
-
-HTTP_ANNOTATIONS = {
-    "GetMapping", "PostMapping", "PutMapping", "DeleteMapping", "PatchMapping", "RequestMapping",
-}
+from postprocess.http_routes import resolve_route
 
 
 def _rows(store, cypher: str) -> list[dict]:
@@ -29,22 +26,6 @@ def _rows(store, cypher: str) -> list[dict]:
     while result.has_next():
         out.append(dict(zip(cols, result.get_next())))
     return out
-
-
-def _resolve_http_method(anns: dict[str, str]) -> str:
-    for ann, http in (("GetMapping", "GET"), ("PostMapping", "POST"), ("PutMapping", "PUT"),
-                       ("DeleteMapping", "DELETE"), ("PatchMapping", "PATCH")):
-        if ann in anns:
-            return http
-    return "HTTP"
-
-
-def _resolve_http_path(anns: dict[str, str]) -> str | None:
-    for ann in HTTP_ANNOTATIONS:
-        val = anns.get(ann)
-        if val:
-            return val
-    return None
 
 
 def _is_jvm_terminal(info: dict) -> bool:
@@ -142,7 +123,13 @@ def build_jvm_workflows(store) -> int:
     for row in ann_rows:
         ann_index.setdefault(row["nodeId"], {})[row["annName"]] = row["value"]
 
-    entry_points = [nid for nid, anns in ann_index.items() if any(a in HTTP_ANNOTATIONS for a in anns)]
+    # resolve_route() is framework-agnostic (see http_routes.py): it doesn't
+    # know "Spring" or "JAX-RS", only that an annotation name looks verb-like
+    # and/or some annotation's value looks like a path. This is what lets
+    # Micronaut's @Get, JAX-RS's @GET + @Path, and Spring's @GetMapping all
+    # resolve as entry points without any of those names being hardcoded.
+    routes = {nid: resolve_route(anns) for nid, anns in ann_index.items()}
+    entry_points = {nid: route for nid, route in routes.items() if route is not None}
     if not entry_points:
         return 0
 
@@ -159,10 +146,7 @@ def build_jvm_workflows(store) -> int:
         calls_by_source.setdefault(row["src"], []).append(row["tgt"])
 
     emitted_workflow_ids: set[str] = set()
-    for entry_id in entry_points:
-        anns = ann_index.get(entry_id, {})
-        http_method = _resolve_http_method(anns)
-        http_path = _resolve_http_path(anns)
+    for entry_id, (http_method, http_path) in entry_points.items():
         _bfs_and_emit(node_info, calls_by_source, entry_id, http_method, http_path, "java",
                       emitted_workflow_ids, store)
 
