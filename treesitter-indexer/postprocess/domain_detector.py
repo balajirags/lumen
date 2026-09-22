@@ -10,14 +10,9 @@ from __future__ import annotations
 import sys
 
 import graph_store
+from postprocess.layer_classification import layer_from_annotation, layer_from_qualified_name
 
 LABEL_PROP_ITERATIONS = 10
-
-SPRING_LAYER = {
-    "RestController": "Controller", "Controller": "Controller",
-    "Service": "Service", "Repository": "Repository",
-    "Component": "Component", "Configuration": "Configuration",
-}
 
 # Clusterable types for the JVM strategy -- deliberately excludes Constructor,
 # Field, and Record (matches DomainDetector.java's isClusterableType switch,
@@ -135,18 +130,23 @@ def _derive_heuristic_label(store, production_nodes: dict[str, dict], members: l
     for row in ann_rows + class_ann_rows:
         if row["nodeId"] not in member_set:
             continue
-        layer = SPRING_LAYER.get(row["annName"])
+        layer = layer_from_annotation(row["annName"])
         if layer:
             ann_freq[layer] = ann_freq.get(layer, 0) + 1
     if ann_freq:
         return max(ann_freq.items(), key=lambda kv: kv[1])[0]
 
-    has_model = any(
-        (".model." in production_nodes[m]["qualifiedName"] or ".entity." in production_nodes[m]["qualifiedName"]
-         or ".dto." in production_nodes[m]["qualifiedName"])
-        for m in members
-    )
-    return "Model" if has_model else "Mixed"
+    # Fallback for codebases with no stereotype annotations at all (JAX-RS,
+    # plain package-by-layer Java): the same role-word check applied to
+    # package/qualifiedName instead of annotation names.
+    pkg_freq: dict[str, int] = {}
+    for m in members:
+        layer = layer_from_qualified_name(production_nodes[m]["qualifiedName"])
+        if layer:
+            pkg_freq[layer] = pkg_freq.get(layer, 0) + 1
+    if pkg_freq:
+        return max(pkg_freq.items(), key=lambda kv: kv[1])[0]
+    return "Mixed"
 
 
 def _compute_cohesion(store, member_set: set[str]) -> float:
