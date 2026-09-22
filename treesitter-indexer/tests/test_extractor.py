@@ -167,7 +167,7 @@ public interface LegacyClient {
 
     def test_placeholder_only_annotation_attribute_not_captured_as_http_dependency(self):
         """A non-literal placeholder (${...}) isn't a URL literal -- accepted
-        trade-off, not a bug (see http_dependencies.py's docstring)."""
+        trade-off, not a bug (see http_url_detection.py's docstring)."""
         _write(self.repo, "src/com/example/PlaceholderClient.java", """
 package com.example;
 @RemoteService(name = "inventory-service", endpoint = "${inventory.service.url}")

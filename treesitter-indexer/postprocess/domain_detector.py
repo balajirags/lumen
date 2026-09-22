@@ -3,6 +3,14 @@ Ported from indexer/app/.../DomainDetector.java (verified by direct read).
 JVM strategy only -- PHP/React strategies are out of scope for this Java-first
 increment. Reads/writes the persisted graph via Cypher, same rationale as
 workflow_builder.py.
+
+The Python increment (see the plan) extends this file's heuristic-label
+lookup and its language tagging to be multi-language-aware, but deliberately
+does NOT extend CLUSTERABLE_TABLES/_build_adjacency to cluster Python's
+top-level Function nodes -- only Class/Method members (e.g. a Python
+repository class) are clustered today. A Flask/FastAPI app that's mostly
+free functions will therefore get sparser Domain coverage than a JVM app;
+flagged as a known follow-up, not attempted in this increment.
 """
 
 from __future__ import annotations
@@ -16,7 +24,9 @@ LABEL_PROP_ITERATIONS = 10
 
 # Clusterable types for the JVM strategy -- deliberately excludes Constructor,
 # Field, and Record (matches DomainDetector.java's isClusterableType switch,
-# which only lists CLASS, INTERFACE, ENUM, METHOD for the JVM case).
+# which only lists CLASS, INTERFACE, ENUM, METHOD for the JVM case). Also
+# covers Python's Class/Method nodes for free (same table names), but not
+# Python's Function table -- see module docstring.
 CLUSTERABLE_TABLES = ["Class", "Interface", "Enum", "Method"]
 
 
@@ -46,13 +56,16 @@ def _get_production_nodes(store) -> dict[str, dict]:
         rows = _rows(
             store,
             f"MATCH (n:{table}) WHERE n.external = false OR n.external IS NULL "
-            f"RETURN n.id AS id, n.name AS name, n.qualifiedName AS qualifiedName",
+            f"RETURN n.id AS id, n.name AS name, n.qualifiedName AS qualifiedName, n.language AS language",
         )
         for row in rows:
             qn = row.get("qualifiedName") or ""
             if _is_test_node(qn):
                 continue
-            nodes[row["id"]] = {"name": row.get("name"), "qualifiedName": qn, "table": table}
+            nodes[row["id"]] = {
+                "name": row.get("name"), "qualifiedName": qn, "table": table,
+                "language": row.get("language") or "java",
+            }
     return nodes
 
 
@@ -116,6 +129,19 @@ def _derive_domain_name(production_nodes: dict[str, dict], members: list[str]) -
     return best[:1].upper() + best[1:] if best else "Unknown"
 
 
+def _derive_domain_language(production_nodes: dict[str, dict], members: list[str]) -> str:
+    """Was hardcoded to "java" before this graph could ever contain more than
+    one language's nodes -- now derives it from the members' own `language`
+    property (majority vote) so a Python-only Domain isn't mislabeled."""
+    freq: dict[str, int] = {}
+    for member_id in members:
+        lang = production_nodes[member_id].get("language") or "java"
+        freq[lang] = freq.get(lang, 0) + 1
+    if not freq:
+        return "java"
+    return max(freq.items(), key=lambda kv: kv[1])[0]
+
+
 def _derive_heuristic_label(store, production_nodes: dict[str, dict], members: list[str]) -> str:
     member_set = set(members)
     ann_freq: dict[str, int] = {}
@@ -127,7 +153,16 @@ def _derive_heuristic_label(store, production_nodes: dict[str, dict], members: l
         store,
         "MATCH (n:Class)-[r:HAS_ANNOTATION]->(a:AnnotationType) RETURN n.id AS nodeId, a.name AS annName",
     )
-    for row in ann_rows + class_ann_rows:
+    # Python has no HAS_ANNOTATION-based stereotype convention of its own --
+    # decorators land in Decorator/DECORATES instead (see
+    # python/decorators.py). Unioned in additively: layer_from_annotation
+    # itself needs no changes, since a decorator name (e.g. "app.route",
+    # "dataclass") tokenizes the same way an annotation name does.
+    decorator_rows = _rows(
+        store,
+        "MATCH (d:Decorator)-[:DECORATES]->(n) RETURN n.id AS nodeId, d.name AS annName",
+    )
+    for row in ann_rows + class_ann_rows + decorator_rows:
         if row["nodeId"] not in member_set:
             continue
         layer = layer_from_annotation(row["annName"])
@@ -195,7 +230,7 @@ def detect_domains(store) -> int:
         domain_name = _derive_domain_name(production_nodes, members)
         heuristic_label = _derive_heuristic_label(store, production_nodes, members)
         cohesion = _compute_cohesion(store, set(members))
-        language = "java"
+        language = _derive_domain_language(production_nodes, members)
 
         base_id = f"domain:{language}:{domain_name.lower().replace(' ', '-')}"
         domain_id = base_id

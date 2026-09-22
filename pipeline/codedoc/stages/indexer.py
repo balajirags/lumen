@@ -34,6 +34,16 @@ def should_use_treesitter_java(state: PipelineState, ordered_languages: list[str
     )
 
 
+def should_use_treesitter_python(state: PipelineState, ordered_languages: list[str]) -> bool:
+    """Whether to dispatch to the experimental cmg-python-ts instead of
+    cmg-python. Only used for single-language Python repos -- polyglot repos
+    still use cmg-python, same rationale as should_use_treesitter_java (no
+    sibling-flavor conflict to guard against here, since Python has no
+    Kotlin-equivalent second flavor sharing its language category).
+    """
+    return state.experimental_treesitter_python and ordered_languages == ["python"]
+
+
 def detect_languages(repo_path: str) -> dict[str, int]:
     """Return all supported language categories found in the repo with their file counts."""
     metrics = classify_repo(repo_path)
@@ -119,12 +129,27 @@ def run_indexer(state: PipelineState) -> PipelineState:
         state.graph_backend = "ladybug"
         state.log(stage, "Using experimental tree-sitter Java indexer (cmg-java-ts)")
 
+    use_treesitter_python = should_use_treesitter_python(state, ordered_languages)
+    if state.experimental_treesitter_python and not use_treesitter_python:
+        state.log(
+            stage,
+            "--experimental-treesitter-python requested but this repo is polyglot; "
+            "falling back to cmg-python for compatibility.",
+        )
+    if use_treesitter_python:
+        state.graph_backend = "ladybug"
+        state.log(stage, "Using experimental tree-sitter Python indexer (cmg-python-ts)")
+
     _log.start_indexer_progress([LANGUAGE_CATEGORY_BY_KEY[lang].display_name for lang in ordered_languages])
     try:
         for language in ordered_languages:
             definition = LANGUAGE_CATEGORY_BY_KEY[language]
-            if use_treesitter_java and language == "jvm":
-                binary_name = "cmg-java-ts"
+            use_treesitter_for_language = (
+                (use_treesitter_java and language == "jvm")
+                or (use_treesitter_python and language == "python")
+            )
+            if use_treesitter_for_language:
+                binary_name = "cmg-java-ts" if language == "jvm" else "cmg-python-ts"
                 binary = Path(state.treesitter_indexer_bin_dir) / binary_name
                 cli_language = None
             else:
@@ -134,7 +159,7 @@ def run_indexer(state: PipelineState) -> PipelineState:
             if not binary.exists():
                 hint = (
                     "Run treesitter-indexer/install.sh or check your treesitter_indexer_bin_dir setting."
-                    if use_treesitter_java and language == "jvm"
+                    if use_treesitter_for_language
                     else "Run the install script or check your indexer_bin_dir setting."
                 )
                 raise FileNotFoundError(f"Indexer binary not found: {binary}\n{hint}")

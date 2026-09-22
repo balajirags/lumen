@@ -40,8 +40,9 @@ def main() -> int:
     print(f"=== Graph summary: {db_path} ===\n")
 
     print("-- Node counts --")
-    for table in ["Package", "Class", "Interface", "Enum", "Record", "Method",
-                  "Constructor", "Field", "Parameter", "AnnotationType", "Workflow", "Domain",
+    for table in ["Package", "Module", "Class", "Interface", "Enum", "Record", "Method",
+                  "Constructor", "Function", "AsyncFunction", "Generator", "Decorator",
+                  "Field", "Parameter", "AnnotationType", "Workflow", "Domain",
                   "ConfigFile", "ConfigProperty"]:
         try:
             c = q(conn, f"MATCH (n:{table}) RETURN count(n) AS c")[0]["c"]
@@ -50,10 +51,15 @@ def main() -> int:
         except Exception:
             pass
 
-    print("\n-- Entry points (HTTP-annotated methods, any framework) --")
+    print("\n-- Entry points (HTTP-annotated/decorated methods+functions, any framework) --")
     ann_by_method: dict[str, dict[str, str]] = {}
     for row in q(conn, "MATCH (m:Method)-[r:HAS_ANNOTATION]->(a:AnnotationType) "
                        "RETURN m.qualifiedName AS method, a.name AS annotation, r.value AS value"):
+        ann_by_method.setdefault(row["method"], {})[row["annotation"]] = row["value"]
+    # Python has no HAS_ANNOTATION convention -- decorators land in
+    # Decorator/DECORATES instead (see python/decorators.py).
+    for row in q(conn, "MATCH (d:Decorator)-[r:DECORATES]->(n) "
+                       "RETURN n.qualifiedName AS method, d.name AS annotation, r.value AS value"):
         ann_by_method.setdefault(row["method"], {})[row["annotation"]] = row["value"]
     for method, anns in sorted(ann_by_method.items()):
         route = resolve_route(anns)

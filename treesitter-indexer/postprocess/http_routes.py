@@ -2,7 +2,7 @@
 Generic, framework-agnostic HTTP route/entry-point detection for
 WorkflowBuilder, replacing a hardcoded Spring-only annotation list.
 
-Same philosophy as java/http_dependencies.py: recognize routes by
+Same philosophy as http_url_detection.py: recognize routes by
 STRUCTURAL SHAPE (an annotation name that normalizes to an HTTP verb, plus a
 path-shaped attribute value) rather than a fixed per-framework name list.
 Spring's GetMapping/PostMapping/RequestMapping, Micronaut's Get/Post, and
@@ -35,14 +35,19 @@ _ROUTE_HINT_WORDS = {"mapping", "route", "routing", "endpoint", "path", "http"}
 
 
 def _tokenize(name: str) -> list[str]:
-    """Splits a PascalCase/camelCase/underscore/hyphen name into lowercase
-    word tokens, e.g. "PostMapping" -> ["post","mapping"], "HttpDelete" ->
-    ["http","delete"], "GET" -> ["get"]. Lets annotation_http_verb recognize
-    a verb wherever it appears in the name (prefix, suffix, whole name)
-    instead of only exact matches or fixed suffixes."""
+    """Splits a PascalCase/camelCase/underscore/hyphen/dotted name into
+    lowercase word tokens, e.g. "PostMapping" -> ["post","mapping"],
+    "HttpDelete" -> ["http","delete"], "GET" -> ["get"], and -- since a
+    decorator's own dotted-attribute name is a route signal too, not just an
+    annotation's simple name (see python/decorators.py) -- "app.get" ->
+    ["app","get"], "router.get" -> ["router","get"]. Lets annotation_http_verb
+    recognize a verb wherever it appears in the name (prefix, suffix, whole
+    name, or a dotted segment) instead of only exact matches or fixed
+    suffixes. Splitting on "." is safe for Java annotation names, which never
+    contain a literal dot (always a simple class name)."""
     spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
     spaced = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", spaced)
-    return [p.lower() for p in re.split(r"[\s_-]+", spaced) if p]
+    return [p.lower() for p in re.split(r"[\s_.\-]+", spaced) if p]
 
 
 def annotation_http_verb(annotation_name: str) -> str | None:

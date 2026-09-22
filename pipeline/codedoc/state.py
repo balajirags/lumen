@@ -72,8 +72,9 @@ class PipelineState:
     build_script: str = ""
     site_dir: str = ""  # override for doc-site location
 
-    # --- Experimental tree-sitter Java indexer (see treesitter-indexer/) ---
+    # --- Experimental tree-sitter Java/Python indexer (see treesitter-indexer/) ---
     experimental_treesitter_java: bool = False
+    experimental_treesitter_python: bool = False
     treesitter_indexer_bin_dir: str = ""
     # Set by run_indexer to the actual on-disk format written ("kuzu" |
     # "ladybug") -- kg_tools.create_graph_backend() reads this so every

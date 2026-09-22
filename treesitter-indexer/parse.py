@@ -3,9 +3,10 @@
 CLI entrypoint for the tree-sitter Java indexer prototype (`cmg-java-ts`).
 
 Deliberately mirrors the calling convention of the existing cmg-* wrappers
-(`<repo-path> --db-path <dir> --repo-name <name> [--clear]`) but is NOT wired
-into pipeline/codedoc/stages/indexer.py -- see the plan's "Dispatch" section.
-This binary is never invoked by the real pipeline.
+(`<repo-path> --db-path <dir> --repo-name <name> [--clear]`). Dispatched to
+from pipeline/codedoc/stages/indexer.py when --experimental-treesitter-java
+is set (single-language, Kotlin-free JVM repos only -- see
+should_use_treesitter_java); falls back to cmg-java otherwise.
 
 Unlike App.java (which clears the whole DB by default unless --incremental is
 passed), this tool's destructive-clear default is the SAFE one: --clear is

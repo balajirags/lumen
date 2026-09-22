@@ -30,6 +30,14 @@ class HttpRoutesTests(unittest.TestCase):
         self.assertEqual(annotation_http_verb("GET"), "get")
         self.assertEqual(annotation_http_verb("POST"), "post")
 
+    def test_annotation_http_verb_dotted_decorator_style(self):
+        # A decorator's own dotted-attribute name is a route signal too, not
+        # just an annotation's simple name (see python/decorators.py) --
+        # "app.get"/"router.get" must split on "." the same way PascalCase
+        # names split on case boundaries.
+        self.assertEqual(annotation_http_verb("app.get"), "get")
+        self.assertEqual(annotation_http_verb("router.post"), "post")
+
     def test_annotation_http_verb_rejects_unrelated_names(self):
         # Lombok's @Getter starts with "get" but isn't a route annotation --
         # must not false-positive just because of a prefix match.
@@ -50,6 +58,9 @@ class HttpRoutesTests(unittest.TestCase):
         # the same method -- proves signals combine across annotations, not
         # just within one, without any JAX-RS-specific code.
         self.assertEqual(resolve_route({"GET": None, "Path": "/items"}), ("GET", "/items"))
+
+    def test_resolve_route_fastapi_dotted_decorator_style(self):
+        self.assertEqual(resolve_route({"router.get": "/orders/{id}"}), ("GET", "/orders/{id}"))
 
     def test_resolve_route_micronaut_style(self):
         self.assertEqual(resolve_route({"Get": "/items"}), ("GET", "/items"))

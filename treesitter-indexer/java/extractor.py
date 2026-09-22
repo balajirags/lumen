@@ -32,7 +32,7 @@ import tree_sitter_java as tsjava
 from graph_model import Graph
 from repo_layout import detect_modules, detect_source_root
 from java.calls import MethodCallContext, RepoIndex, resolve_call_target
-from java.http_dependencies import looks_like_url
+from http_url_detection import looks_like_url
 
 JAVA_LANGUAGE = Language(tsjava.language())
 
@@ -118,7 +118,7 @@ def _annotation_all_attributes(ann_node: Node, src: bytes) -> dict[str, str]:
     first value for the generic HAS_ANNOTATION capture), returns every
     key=value attribute -- used by _emit_annotations to check each attribute
     independently for a URL-shaped value, regardless of which key it's under
-    or which annotation it belongs to (see http_dependencies.py)."""
+    or which annotation it belongs to (see http_url_detection.py)."""
     if ann_node.type == "marker_annotation":
         return {}
     args = ann_node.child_by_field_name("arguments")
@@ -331,7 +331,7 @@ def _count_args(call_node: Node) -> int:
 def _url_literal_args(call_node: Node, src: bytes) -> list[str]:
     """Returns the stripped text of every URL-shaped string-literal argument
     of a call, regardless of which method is being called -- deliberately not
-    gated by method name (see java/http_dependencies.py's docstring)."""
+    gated by method name (see http_url_detection.py's docstring)."""
     args = call_node.child_by_field_name("arguments")
     if args is None:
         return []
@@ -347,7 +347,7 @@ _HTTP_DEP_COUNTER = {"n": 0}
 
 def _emit_http_dependency(graph: Graph, owner_id: str, key: str, value: str) -> None:
     """Emits a ConfigProperty representing an HTTP dependency detected directly
-    in Java source (see java/http_dependencies.py), linked via the same
+    in Java source (see http_url_detection.py), linked via the same
     REFERENCES_CONFIG edge used for @Value-driven config usage -- reused
     deliberately so get_external_dependencies() needs no changes to surface
     these alongside config-derived infrastructure dependencies."""
@@ -482,7 +482,7 @@ def _emit_annotations(graph: Graph, decl_or_member_node: Node, src: bytes, owner
         # regardless of which annotation it is (e.g. a Feign client's `url`,
         # a Swagger @Server's `url`, or any other framework's convention) --
         # deliberately not gated to a specific known annotation name; see
-        # java/http_dependencies.py's docstring for why.
+        # http_url_detection.py's docstring for why.
         for attr_key, attr_value in _annotation_all_attributes(ann, src).items():
             if looks_like_url(attr_value):
                 _emit_http_dependency(graph, owner_id, f"annotation:{name}.{attr_key}", attr_value)

@@ -65,7 +65,11 @@ REL_DEFINITIONS = [
     "CREATE REL TABLE IF NOT EXISTS EXTENDS (FROM Class TO Class, FROM Interface TO Interface, FROM Component TO Class, FROM DataClass TO Class, FROM SealedClass TO Class)",
     "CREATE REL TABLE IF NOT EXISTS IMPLEMENTS (FROM Class TO Interface, FROM DataClass TO Interface, FROM SealedClass TO Interface, FROM ObjectDecl TO Interface)",
     "CREATE REL TABLE IF NOT EXISTS CALLS (FROM Method TO Method, FROM Constructor TO Method, FROM Function TO Function, FROM Function TO Method, FROM ArrowFunction TO Function, FROM ArrowFunction TO Method, FROM Component TO Function, FROM Hook TO Function, FROM AsyncFunction TO Function, FROM ExtensionFunction TO Method, FROM ExtensionFunction TO Function, FROM SuspendFunction TO Method, FROM SuspendFunction TO Function, FROM Lambda TO Method, FROM Lambda TO Function, FROM InitBlock TO Method, lineNumber INT64, confidence DOUBLE, reason STRING)",
-    "CREATE REL TABLE IF NOT EXISTS RETURNS (FROM Method TO Class, FROM Method TO Interface, FROM Method TO Enum, FROM Method TO Record, FROM ExtensionFunction TO Class, FROM SuspendFunction TO Class)",
+    # Function->Class/Interface/Enum/Record added for Python's top-level
+    # functions (e.g. a Flask/FastAPI route handler's own return-type hint) --
+    # the original set only covered Method, since the Java-only increment
+    # never emits a top-level, non-method Function node.
+    "CREATE REL TABLE IF NOT EXISTS RETURNS (FROM Method TO Class, FROM Method TO Interface, FROM Method TO Enum, FROM Method TO Record, FROM Function TO Class, FROM Function TO Interface, FROM Function TO Enum, FROM Function TO Record, FROM ExtensionFunction TO Class, FROM SuspendFunction TO Class)",
     "CREATE REL TABLE IF NOT EXISTS HAS_PARAMETER (FROM Method TO Parameter, FROM Constructor TO Parameter, FROM Function TO Parameter, FROM ArrowFunction TO Parameter, FROM ExtensionFunction TO Parameter, FROM SuspendFunction TO Parameter, FROM Lambda TO Parameter)",
     "CREATE REL TABLE IF NOT EXISTS OF_TYPE (FROM Field TO Class, FROM Field TO Interface, FROM Field TO Enum, FROM Field TO Record, FROM Parameter TO Class, FROM Parameter TO Interface, FROM Parameter TO Enum, FROM Parameter TO Record, FROM Property TO Class, FROM Property TO Interface)",
     "CREATE REL TABLE IF NOT EXISTS HAS_ANNOTATION (FROM Class TO AnnotationType, FROM Interface TO AnnotationType, FROM Method TO AnnotationType, FROM Constructor TO AnnotationType, FROM Field TO AnnotationType, FROM Property TO AnnotationType, FROM ExtensionFunction TO AnnotationType, value STRING)",
@@ -80,7 +84,11 @@ REL_DEFINITIONS = [
     "CREATE REL TABLE IF NOT EXISTS RENDERS (FROM Component TO Component, FROM Function TO Component, FROM ArrowFunction TO Component, lineNumber INT64)",
     "CREATE REL TABLE IF NOT EXISTS USES_HOOK (FROM Component TO Hook, FROM Function TO Hook, FROM ArrowFunction TO Hook, lineNumber INT64)",
     "CREATE REL TABLE IF NOT EXISTS PROP_DEPENDENCY (FROM Component TO Component)",
-    "CREATE REL TABLE IF NOT EXISTS DECORATES (FROM Decorator TO Function, FROM Decorator TO Method, FROM Decorator TO Class, FROM Decorator TO AsyncFunction)",
+    # value STRING mirrors HAS_ANNOTATION.value -- lets Python's decorator
+    # mechanism (@app.route("/x")) capture the same kind of single-attribute
+    # payload Java's HAS_ANNOTATION already does, so postprocess/ can treat
+    # both as one shape (see workflow_builder.py/domain_detector.py).
+    "CREATE REL TABLE IF NOT EXISTS DECORATES (FROM Decorator TO Function, FROM Decorator TO Method, FROM Decorator TO Class, FROM Decorator TO AsyncFunction, value STRING)",
     "CREATE REL TABLE IF NOT EXISTS YIELDS (FROM Generator TO Class)",
     "CREATE REL TABLE IF NOT EXISTS EXTENSION_OF (FROM ExtensionFunction TO Class, FROM ExtensionFunction TO Interface, FROM ExtensionFunction TO DataClass)",
     "CREATE REL TABLE IF NOT EXISTS DELEGATES_TO (FROM Property TO Class, FROM Property TO Interface)",
@@ -92,7 +100,7 @@ REL_DEFINITIONS = [
     # also links code-detected HTTP dependencies -- a @FeignClient-annotated
     # interface/class, or a Method/Constructor calling RestTemplate/WebClient/
     # HttpClient with a literal URL argument -- to a synthesized ConfigProperty
-    # representing that dependency (java/extractor.py's http_dependencies.py).
+    # representing that dependency (see http_url_detection.py).
     "CREATE REL TABLE IF NOT EXISTS REFERENCES_CONFIG (FROM Field TO ConfigProperty, FROM Parameter TO ConfigProperty, FROM Method TO ConfigProperty, FROM Constructor TO ConfigProperty, FROM Interface TO ConfigProperty, FROM Class TO ConfigProperty)",
 ]
 
@@ -129,8 +137,11 @@ def _escape(s) -> str:
     return str(s).replace("\\", "\\\\").replace("'", "\\'")
 
 
-def infer_language(_node_type: str | None) -> str:
-    return "java"
+def infer_language(_node_type: str | None, default: str = "java") -> str:
+    """Historical default is "java" since this was originally a Java-only
+    engine -- `default` lets a per-run caller (e.g. parse_python.py) override
+    it for an entire save() call instead of hardcoding a second language."""
+    return default
 
 
 def infer_norm_kind(node_type: str | None) -> str:
@@ -236,7 +247,11 @@ class LadybugGraphStore:
         self._query("DROP TABLE Domain", quiet=True)
         self.init_schema()
 
-    def save(self, graph_json: dict) -> None:
+    def save(self, graph_json: dict, language: str = "java") -> None:
+        """`language` is the default for every node/rel in this graph_json
+        that doesn't already carry an explicit `language` property -- lets a
+        per-language entrypoint (parse.py vs parse_python.py) pass its own
+        language once instead of every extractor stamping it on every node."""
         node_table_map: dict[str, str] = {}
 
         for node in graph_json["nodes"]:
@@ -251,7 +266,7 @@ class LadybugGraphStore:
 
             props = {
                 **node.get("properties", {}),
-                "language": node.get("properties", {}).get("language", infer_language(node["type"])),
+                "language": node.get("properties", {}).get("language", infer_language(node["type"], language)),
                 "kind": table,
                 "normKind": node.get("properties", {}).get("normKind", infer_norm_kind(node["type"])),
             }
@@ -282,7 +297,7 @@ class LadybugGraphStore:
 
             props = {
                 **rel.get("properties", {}),
-                "language": infer_language(rel.get("type")),
+                "language": rel.get("properties", {}).get("language", infer_language(rel.get("type"), language)),
                 "kind": rel.get("type"),
                 "normKind": infer_rel_norm_kind(rel.get("type")),
             }

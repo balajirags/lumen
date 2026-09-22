@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from codedoc.state import PipelineState
-from codedoc.stages.indexer import detect_languages, should_use_treesitter_java
+from codedoc.stages.indexer import detect_languages, should_use_treesitter_java, should_use_treesitter_python
 
 
 def _state(**overrides) -> PipelineState:
@@ -28,6 +28,21 @@ def test_should_use_treesitter_java_false_for_polyglot_repo():
 def test_should_use_treesitter_java_false_when_kotlin_present():
     state = _state(experimental_treesitter_java=True, language_flavors=["java", "kotlin"])
     assert should_use_treesitter_java(state, ["jvm"]) is False
+
+
+def test_should_use_treesitter_python_when_flag_set_and_python_only():
+    state = _state(experimental_treesitter_python=True)
+    assert should_use_treesitter_python(state, ["python"]) is True
+
+
+def test_should_use_treesitter_python_false_when_flag_unset():
+    state = _state(experimental_treesitter_python=False)
+    assert should_use_treesitter_python(state, ["python"]) is False
+
+
+def test_should_use_treesitter_python_false_for_polyglot_repo():
+    state = _state(experimental_treesitter_python=True)
+    assert should_use_treesitter_python(state, ["python", "jvm"]) is False
 
 
 def test_detect_languages_mixed_repo(tmp_path):

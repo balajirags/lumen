@@ -28,6 +28,7 @@ _DEFAULTS = {
     "allow_xlarge": False,
     "indexer_bin_dir": str(Path(__file__).resolve().parent.parent.parent / "indexer" / "bin"),
     "experimental_treesitter_java": False,
+    "experimental_treesitter_python": False,
     "treesitter_indexer_bin_dir": str(
         Path(__file__).resolve().parent.parent.parent / "treesitter-indexer" / "bin"
     ),
@@ -54,6 +55,7 @@ class Config:
     allow_xlarge: bool = _DEFAULTS["allow_xlarge"]
     indexer_bin_dir: str = _DEFAULTS["indexer_bin_dir"]
     experimental_treesitter_java: bool = _DEFAULTS["experimental_treesitter_java"]
+    experimental_treesitter_python: bool = _DEFAULTS["experimental_treesitter_python"]
     treesitter_indexer_bin_dir: str = _DEFAULTS["treesitter_indexer_bin_dir"]
     agent_prompt: str = _DEFAULTS["agent_prompt"]
     build_script: str = _DEFAULTS["build_script"]

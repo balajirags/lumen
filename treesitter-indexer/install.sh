@@ -2,16 +2,16 @@
 set -euo pipefail
 
 # Wholly independent install script -- mirrors the shape of
-# indexer/install.sh's cmg-java stanza but is self-contained and never touches
-# anything under indexer/. Produces bin/cmg-java-ts, a wrapper this repo's
-# real pipeline (pipeline/codedoc/stages/indexer.py) never invokes -- see the
-# plan's "Dispatch" section.
+# indexer/install.sh's cmg-* stanzas but is self-contained and never touches
+# anything under indexer/. Produces bin/cmg-java-ts and bin/cmg-python-ts,
+# dispatched to from pipeline/codedoc/stages/indexer.py when
+# --experimental-treesitter-java/--experimental-treesitter-python is set.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BIN_DIR="$SCRIPT_DIR/bin"
 VENV_DIR="$SCRIPT_DIR/.venv"
 
-echo "==> Installing treesitter-indexer (Java prototype)..."
+echo "==> Installing treesitter-indexer..."
 echo ""
 
 mkdir -p "$BIN_DIR"
@@ -30,3 +30,10 @@ exec "$VENV_DIR/bin/python3" "$SCRIPT_DIR/parse.py" "\$@"
 EOF
 chmod +x "$BIN_DIR/cmg-java-ts"
 echo "  ✓ bin/cmg-java-ts"
+
+cat > "$BIN_DIR/cmg-python-ts" <<EOF
+#!/usr/bin/env bash
+exec "$VENV_DIR/bin/python3" "$SCRIPT_DIR/parse_python.py" "\$@"
+EOF
+chmod +x "$BIN_DIR/cmg-python-ts"
+echo "  ✓ bin/cmg-python-ts"
