@@ -230,3 +230,78 @@ def build_python_workflows(store) -> int:
     print(f"WorkflowBuilder (Python): emitted {len(emitted_workflow_ids)} workflows from "
           f"{len(entry_points)} entry points", file=sys.stderr)
     return len(emitted_workflow_ids)
+
+
+def _is_php_terminal(info: dict) -> bool:
+    """"reposit" (not "repository") deliberately catches both "Repository"
+    and the equally-common plural "Repositories" PHP/Laravel convention
+    uses -- "Repositories".lower() does NOT contain the exact substring
+    "repository" (differs at one character), so a straight copy of
+    _is_python_terminal's check would silently miss every plural-named
+    repository class, which is the MORE common Laravel naming convention."""
+    qn = (info.get("qualifiedName") or "").lower()
+    name = (info.get("name") or "").lower()
+    return "reposit" in qn or "dao" in qn or "producer" in name or "publisher" in name
+
+
+# Function is included alongside Method (unlike build_jvm_workflows, which is
+# Method-only) because PHP methods commonly call free/global helper
+# functions directly (Laravel's redirect()/response()/view(), or any other
+# free function) -- exactly the case Task 2's Method->Function/
+# Constructor->Function schema additions exist for. Without this, those
+# edges would be schema-supported but never actually traversed by the BFS,
+# silently missing real workflow steps that route through a helper function.
+_PHP_CALLABLE_TABLES = ["Method", "Function"]
+
+
+def build_php_workflows(store) -> int:
+    """Returns the number of Workflow nodes emitted. Parallel to (not a
+    modification of) build_jvm_workflows/build_python_workflows. PHP's
+    routing signal was already converted to ordinary HAS_ANNOTATION edges
+    at extraction time (see php/calls.py's emit_calls_and_routes_in_file,
+    via _emit_route_annotation) -- so the entry-point-gathering half of this
+    function needs no query union at all, it's a direct copy of
+    build_jvm_workflows's. The BFS half additionally walks Function nodes
+    (see _PHP_CALLABLE_TABLES), mirroring build_python_workflows's
+    multi-table approach rather than build_jvm_workflows's Method-only one.
+    """
+    ann_rows = _rows(
+        store,
+        "MATCH (n:Method)-[r:HAS_ANNOTATION]->(a:AnnotationType) "
+        "RETURN n.id AS nodeId, a.name AS annName, r.value AS value",
+    )
+    ann_index: dict[str, dict[str, str]] = {}
+    for row in ann_rows:
+        ann_index.setdefault(row["nodeId"], {})[row["annName"]] = row["value"]
+
+    routes = {nid: resolve_route(anns) for nid, anns in ann_index.items()}
+    entry_points = {nid: route for nid, route in routes.items() if route is not None}
+    if not entry_points:
+        return 0
+
+    node_info: dict[str, dict] = {}
+    node_table: dict[str, str] = {}
+    for table in _PHP_CALLABLE_TABLES:
+        for row in _rows(store, f"MATCH (n:{table}) RETURN n.id AS id, n.name AS name, n.qualifiedName AS qualifiedName"):
+            node_info[row["id"]] = row
+            node_table[row["id"]] = table
+
+    calls_by_source: dict[str, list[str]] = {}
+    for from_table in _PHP_CALLABLE_TABLES:
+        for to_table in _PHP_CALLABLE_TABLES:
+            rows = _rows(
+                store,
+                f"MATCH (a:{from_table})-[c:CALLS]->(b:{to_table}) WHERE c.confidence >= 0.9 "
+                "RETURN a.id AS src, b.id AS tgt",
+            )
+            for row in rows:
+                calls_by_source.setdefault(row["src"], []).append(row["tgt"])
+
+    emitted_workflow_ids: set[str] = set()
+    for entry_id, (http_method, http_path) in entry_points.items():
+        _bfs_and_emit(node_info, calls_by_source, entry_id, http_method, http_path, "php",
+                      emitted_workflow_ids, store, is_terminal=_is_php_terminal, node_table=node_table)
+
+    print(f"WorkflowBuilder (PHP): emitted {len(emitted_workflow_ids)} workflows from "
+          f"{len(entry_points)} entry points", file=sys.stderr)
+    return len(emitted_workflow_ids)
