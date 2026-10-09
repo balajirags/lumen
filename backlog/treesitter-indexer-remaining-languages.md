@@ -1,31 +1,28 @@
-# Tree-sitter indexer: remaining languages (PHP, JS/TS/React, Kotlin)
+# Tree-sitter indexer: remaining languages (JS/TS/React, Kotlin)
 
 ## How to resume this work (read this first)
 
 Everything below is written to be self-contained — you shouldn't need to re-read old
 conversation history to pick this back up. Start here:
 
-0. **Current uncommitted state** (as of this writing, `git status --short` on
-   `feature/treesitter-java-indexer` shows): this file itself is untracked and not yet
-   committed — commit it (with a one-line message per the convention below) once you've read
-   it, so it isn't lost. `backlog/incremental-reindexing.md` and
-   `backlog/multi-repo-cross-service-graph.md` are also untracked but **unrelated** to this
-   indexer work (pre-existing scratch files from earlier work on this branch) — don't assume
-   they belong together or bundle them into the same commit.
-   `indexer/parsers/python/__pycache__/store.cpython-311.pyc` shows modified but is a stray
-   bytecode-cache diff from running the *old* Python indexer's tests, also unrelated — fine to
-   leave alone or `git checkout` it away, don't include it in any indexer-work commit.
-1. `git checkout feature/treesitter-java-indexer` (all of this work — Java, Python, and every
-   future language increment — lives on this one branch; the name is stale now that it covers
-   more than Java, not worth renaming mid-flight).
-2. `git log --oneline -15` to see what's landed. As of this writing, the newest relevant commits
-   are `85875e1` (Python increment) and the several `Generalize .../Detect .../Extend ...`
-   commits below it (Java increment's later generalization work — HTTP dependencies, workflow
-   entry-points, layer labeling — all framework-agnostic, see "Conventions" below).
+0. **Current uncommitted state**: as of the PHP increment's completion, everything relevant is
+   committed. `backlog/incremental-reindexing.md` and `backlog/multi-repo-cross-service-graph.md`
+   remain untracked but **unrelated** to this indexer work (pre-existing scratch files from
+   earlier work on this branch) — don't assume they belong together.
+   `indexer/parsers/python/__pycache__/store.cpython-311.pyc` may show modified (stray bytecode
+   cache from running the *old* Python indexer's tests) — unrelated, leave alone.
+1. `git checkout feature/treesitter-java-indexer` (all of this work — Java, Python, PHP, and
+   every future language increment — lives on this one branch; the name is stale now that it
+   covers more than Java, not worth renaming mid-flight).
+2. `git log --oneline -20` to see what's landed. As of this writing, the newest relevant commit
+   is `2063a65` (PHP pipeline wiring); the PHP increment spans roughly `baba1a5`..`2063a65`, with
+   `85875e1` being the earlier Python increment and `0fc208a`/the file at
+   `docs/superpowers/plans/2026-10-09-php-tree-sitter-indexer.md` being PHP's design+plan docs
+   (good reference for how much detail to put in the next language's plan).
 3. Sanity-check the existing engine still works before adding anything new:
    ```bash
    cd treesitter-indexer
-   .venv/bin/python3 -m unittest discover -s tests   # expect ~57 passed, 0 failed
+   .venv/bin/python3 -m unittest discover -s tests   # expect 89 passed, 0 failed
    ```
    **Gotcha**: you must use `treesitter-indexer/.venv/bin/python3`, not a bare `python3` —
    plain `python3` will raise `ModuleNotFoundError: No module named 'ladybug'` even though the
@@ -130,21 +127,19 @@ archived `kuzu` package) currently covers:
   being new for this language and disproportionately valuable given Python's dynamic typing).
   Validated against a new `e2e-test/fixtures/mini-python-service/` fixture and
   `scripts/compare_graphs_python.py` (PASS).
+- **PHP** — complete, same branch, wired behind `--experimental-treesitter-php`. Full detail
+  (including the real bugs found via TDD, all fixed) is in the "PHP — done" section below;
+  commits span `baba1a5` (tree-sitter-php dependency) through `2063a65` (pipeline wiring), plus
+  design/plan docs at `docs/superpowers/specs/2026-10-09-php-tree-sitter-indexer-design.md` and
+  `docs/superpowers/plans/2026-10-09-php-tree-sitter-indexer.md`. 89 unit tests pass (up from
+  60 pre-PHP); `scripts/compare_graphs_php.py` reports PASS; `lumen run --experimental-treesitter-php`
+  verified end-to-end.
 
-**Recommended remaining order: PHP → JS/TS/React → Kotlin** (deviates from a literal
-python/js/typescript/react/php/kotlin listing — confirmed with the user during the Python
-increment's planning). Full reasoning is in the plan history, condensed here:
+**Recommended remaining order: JS/TS/React → Kotlin** (PHP, done above, was deliberately
+sequenced ahead of both — see rationale below, now validated: the generalized
+`resolve_call_route(calleeName, args)` resolver it built is ready for both to reuse as-is).
 
-- **PHP next**: smallest, best-scoped remaining gap (mostly `Parameter`/`RETURNS` extraction,
-  which is entirely missing today) — but more importantly, Laravel's `Route::get($path,
-  $handler)` is a **call-based** routing DSL, the same shape as Express/Fastify/NestJS routing
-  and Ktor's `routing { get(path) { ... } }`. `postprocess/http_routes.py`'s own docstring
-  already flags this as out of scope for the annotation-tokenizing approach. Building a
-  generalized `resolve_call_route(calleeName, args)` resolver here — on PHP's small, familiar
-  surface, with a working (non-generalized) reference implementation already in the old
-  `RouteExtractor` to port from — means JS/TS/React and Kotlin both inherit a proven mechanism
-  instead of inventing one under a much bigger increment's time pressure.
-- **JS/TS/React after that**: highest scope and risk of the three (real TS type extraction,
+- **JS/TS/React next**: highest scope and risk of the two remaining (real TS type extraction,
   an open React-detection design question, multiple confirmed CALLS bugs, zero existing
   fixtures) — best tackled once the confidence-tier CALLS recipe and the call-route resolver
   are both mature.
@@ -154,72 +149,67 @@ increment's planning). Full reasoning is in the plan history, condensed here:
   narrower deployment surface (non-Android JVM backends only) than Python/JS/PHP's near-universal
   presence.
 
-Each language increment should get its own `/plan` pass when its turn comes (mirroring how
-Python's plan was written) rather than trying to plan all three now — the full plan history
-for Python (including the detailed per-language research this file summarizes) is worth
-re-reading first for context; ask where it's archived if not obviously discoverable.
+Each remaining language increment should get its own `/plan` pass when its turn comes (same
+process used for Python and PHP) rather than trying to plan both now.
 
 ---
 
-## PHP
+## PHP — done
 
-### Background
+Built `treesitter-indexer/php/extractor.py` + `php/calls.py` on `tree-sitter-php`, plus the
+new `postprocess/call_routes.py::resolve_call_route(calleeName, args)` — the first call-based
+(non-annotation) routing resolver in this engine, designed generically from day one per the
+approved spec. `php/extractor.py`'s routing call-site recognition (Laravel's `Route::get/post/
+put/delete/patch/any/match(...)`, including `Route::middleware('name')->group(closure)` nesting
+and both `[Controller::class, 'method']`/`'Controller@method'` handler forms) resolves at
+*extraction* time and emits ordinary `HAS_ANNOTATION` edges (synthetic `Get`/`Post`/.../
+`Middleware` `AnnotationType` nodes) — so `postprocess/workflow_builder.py`'s new
+`build_php_workflows` is a near-direct copy of `build_jvm_workflows` reusing the existing
+`resolve_route()` unchanged, and `postprocess/domain_detector.py` needed zero PHP-specific code.
 
-The old `indexer/parsers/php/parse.php` (`nikic/php-parser`-based) already does a reasonable
-job: classes/interfaces/traits (`phpKind: 'trait'`), methods/constructors, typed properties
-(PHP 7.4+ only), class constants, and — via `RouteExtractor` — Laravel route detection that
-maps HTTP verbs onto the same annotation names Java/Spring uses (`GetMapping` etc.), so
-`WorkflowBuilder`'s JVM-shaped `HTTP_ANNOTATIONS` check already works for PHP too, by
-hardcoded-name reuse rather than genuine generalization.
+**Real bugs found and fixed via TDD while implementing (worth knowing before touching this code
+again):**
+- `resolve_call_route` initially scanned the whole argument list for any string instead of only
+  checking position 0 for the path — could misattribute a handler reference as a path.
+- `Route::any()`/`Route::match()` (explicitly in-scope per the spec) initially returned `None`
+  unconditionally — added a local `_ANY_VERB_CALLEE_WORDS = {"any", "all", "match"}` set inside
+  `call_routes.py` (deliberately NOT added to `http_routes.py`'s shared `_ROUTE_HINT_WORDS`,
+  since "matches any verb" is a different concept from "name looks route-shaped").
+- The `[Controller::class, 'method']` handler form's method-name string was never unwrapped
+  from its `array_element_initializer` wrapper node — **zero** Laravel array-form routes (or
+  `->middleware()->group()`-nested ones) would have been recognized at all without this fix.
+- Non-`$this` member calls (`$obj->method()`) returned early instead of falling through to the
+  documented 0.50 global-fallback tier — fixed in `_maybe_emit_calls_edge`.
+- **A pre-existing, cross-language schema gap surfaced by PHP's `new X()` support**: `Constructor`
+  had never appeared on `CALLS`'s TO side at all (only its FROM side) in the shared
+  `graph_store.py` schema — `Method`/`Function`/`Constructor` → `Constructor` combos were missing
+  entirely, so every `new`-expression CALLS edge from an ordinary method/function silently failed
+  to persist (same "unrecognized combo → binder exception → swallowed" failure class as two
+  earlier, already-fixed bugs in this project's history). Fixed additively in `graph_store.py`.
+- Also added `Package→Function` and `Method/Constructor→Function` CALLS/CONTAINS combos (PHP
+  commonly calls free/global helper functions directly, e.g. Laravel's `redirect()`/`response()`/
+  `view()`), and extended `build_php_workflows`'s BFS to walk `Function` nodes alongside `Method`
+  (mirroring `build_python_workflows`'s multi-table approach, unlike `build_jvm_workflows`'s
+  Method-only one) — otherwise those new combos would be schema-supported but never traversed.
 
-Confirmed gaps (verified by direct code read during this session's research):
-- **No parameter/return-type extraction at all** — `HAS_PARAMETER`/`RETURNS` are never emitted
-  for PHP. Straightforward to close from PHP 7.4+ type hints, same shape as the Python increment.
-- **`Route::middleware(...)->group(closure)` unhandled** — routes inside the closure are still
-  found (generic AST recursion), but carry no middleware/auth signal. Already scoped in
-  `backlog/php-laravel-middleware-detection.md` (that backlog targets the *old* PHP parser;
-  the new tree-sitter PHP extractor should solve this properly from the start instead of
-  porting the old gap forward).
-- **`HttpSuperglobalDetector` (raw `$_GET`/`$_POST`/`$_REQUEST` entry-point detection) is fully
-  implemented in the old parser but never instantiated** — dead code. Today, PHP entry-point
-  detection is 100% Laravel-route-based; raw-PHP apps get nothing. Worth deciding whether the
-  new extractor should support this case or explicitly scope it out.
-- **A newly-discovered old-engine bug** (`phpKind` silently dropped by the shared `KuzuStore`
-  write-allowlist) is tracked separately below under "Old-engine bugs" — it's a quick,
-  independent fix to the *existing* shipping engine, not part of this new-extractor work.
+**Explicitly deferred, not forgotten:**
+- `HttpSuperglobalDetector`-equivalent raw-PHP (`$_GET`/`$_POST`) entry-point detection — a
+  different detection mechanism (data-flow into superglobals, not call-site routing), out of
+  scope for this increment.
+- Constructor-level `$this->middleware('auth')` (only the fluent `Route::middleware(...)
+  ->group(...)` form is recognized).
+- Fixing the *old* PHP engine's `phpKind` bug — tracked separately below, independent of this
+  new-extractor work.
 
-### Goal
-
-Build `treesitter-indexer/php/extractor.py` on `tree-sitter-php`, reaching rough parity with
-the old engine's structural extraction plus the two closed gaps above, and — the one genuinely
-new piece of design work — a language-agnostic `resolve_call_route(calleeName, args)` sibling
-to `resolve_route()`, tokenizing the callee's method-name segment for an HTTP verb the same way
-`annotation_http_verb()` tokenizes annotation names. Built correctly, this should naturally
-handle `Route::middleware(...)->group(closure)` nesting and `[Controller::class, 'method']`/
-`'Controller@method'` handler forms as a side effect, not a follow-up patch.
-
-### Design questions to resolve during that increment's `/plan`
-
-- Where does `resolve_call_route` live — a new `postprocess/call_routes.py`, or folded into
-  `http_routes.py`? It needs to inspect call arguments (path string, handler reference), which
-  `resolve_route()` never does today (it only ever sees annotation name/value pairs).
-- Does `resolve_call_route` get built PHP-specific first and generalized later, or designed
-  generically from day one (recommended, since JS and Kotlin both need the identical shape
-  next) — i.e. is the call-site AST shape (`callee.method`, positional args) something that can
-  be captured once during extraction into a language-agnostic intermediate form?
-- Scope boundary for `HttpSuperglobalDetector`-equivalent raw-PHP detection: build it now (the
-  spec already exists in the old parser) or explicitly defer?
-
-### Files likely touched
-
-- `treesitter-indexer/php/extractor.py` (new), `php/calls.py` (new, PHP's existing two-tier
-  CALLS scheme — `$this->`/`self::`/`static::` at 0.95, static-class/free-function/`new` at
-  0.90 — should gain the same 0.50 global-fallback tier Python's increment added)
-- `treesitter-indexer/postprocess/http_routes.py` or a new `postprocess/call_routes.py`
-- `treesitter-indexer/graph_store.py` (only if `resolve_call_route` needs new persisted fields —
-  likely not, if call-site data is captured into the same annotation-shaped `{name: value}` map)
-- New fixture, e.g. `e2e-test/fixtures/mini-php-service/` (none exist today for the new engine)
-- `treesitter-indexer/scripts/compare_graphs_php.py` (sibling to `compare_graphs_python.py`)
+**Fixture**: `e2e-test/fixtures/mini-php-service/` — a Laravel-style app covering constructor
+property promotion, class constants, a `new X()` call, a free function, a duck-typed call (0.50
+tier), an HTTP-dependency literal, and both route-handler forms including the middleware-group
+case. Deliberately uses a static `OrderRepository::findWithBilling()` call (not purely
+constructor-injected property access) for one route, specifically so at least one entry point
+produces a real (0.90+) multi-hop Workflow trace — property-mediated `$this->repository->
+method()` calls are realistic Laravel code but only ever resolve at the 0.50 tier per the
+approved scope boundary (no type inference beyond `$this`), so a fixture using *only* that
+pattern would produce zero Workflow traces despite everything working as designed.
 
 ---
 
