@@ -284,6 +284,32 @@ public interface PlaceholderClient {
             result = store.execute("MATCH (a:ArrowFunction)-[c:HAS_ANNOTATION]->(b:AnnotationType) RETURN count(c) AS c")
             self.assertEqual(result.get_next()[0], 1)
 
+    def test_schema_accepts_function_referencing_config(self):
+        """Regression guard found via real mini-express-service fixture
+        testing: REFERENCES_CONFIG (HTTP-dependency detection) had no
+        Function/ArrowFunction on its FROM side at all, so a top-level JS
+        function's fetch('https://...') call silently failed to persist."""
+        import tempfile
+        import graph_store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = graph_store.LadybugGraphStore(f"{tmp}/test-db")
+            store.init_schema()
+            store.execute(
+                "CREATE (f:Function {id: 'f1', name: 'f', qualifiedName: 'f', "
+                "external: false, language: 'js', kind: 'Function', normKind: 'x'})"
+            )
+            store.execute(
+                "CREATE (p:ConfigProperty {id: 'p1', name: 'p', qualifiedName: 'p', "
+                "external: false, language: 'js', kind: 'ConfigProperty', normKind: 'x'})"
+            )
+            store.execute(
+                "MATCH (f:Function {id: 'f1'}), (p:ConfigProperty {id: 'p1'}) "
+                "CREATE (f)-[:REFERENCES_CONFIG {language: 'js', kind: 'REFERENCES_CONFIG', normKind: 'x'}]->(p)"
+            )
+            result = store.execute("MATCH (a:Function)-[c:REFERENCES_CONFIG]->(b:ConfigProperty) RETURN count(c) AS c")
+            self.assertEqual(result.get_next()[0], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

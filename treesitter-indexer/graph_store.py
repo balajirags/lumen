@@ -133,7 +133,13 @@ REL_DEFINITIONS = [
     # interface/class, or a Method/Constructor calling RestTemplate/WebClient/
     # HttpClient with a literal URL argument -- to a synthesized ConfigProperty
     # representing that dependency (see http_url_detection.py).
-    "CREATE REL TABLE IF NOT EXISTS REFERENCES_CONFIG (FROM Field TO ConfigProperty, FROM Parameter TO ConfigProperty, FROM Method TO ConfigProperty, FROM Constructor TO ConfigProperty, FROM Interface TO ConfigProperty, FROM Class TO ConfigProperty)",
+    # Function/ArrowFunction added for JS/TS -- HTTP-dependency detection
+    # (java/http_dependencies.py's looks_like_url, reused via
+    # http_url_detection.py) runs on any call's arguments regardless of the
+    # enclosing callable's shape, and JS/TS commonly makes such calls from a
+    # top-level Function/ArrowFunction, not just a Method/Constructor the
+    # way every prior language's callers have been.
+    "CREATE REL TABLE IF NOT EXISTS REFERENCES_CONFIG (FROM Field TO ConfigProperty, FROM Parameter TO ConfigProperty, FROM Method TO ConfigProperty, FROM Constructor TO ConfigProperty, FROM Interface TO ConfigProperty, FROM Class TO ConfigProperty, FROM Function TO ConfigProperty, FROM ArrowFunction TO ConfigProperty)",
 ]
 
 # Ported from KuzuGraphStore.java -- created after the base node tables (Workflow/

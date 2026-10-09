@@ -56,6 +56,14 @@ def main() -> int:
     for row in q(conn, "MATCH (m:Method)-[r:HAS_ANNOTATION]->(a:AnnotationType) "
                        "RETURN m.qualifiedName AS method, a.name AS annotation, r.value AS value"):
         ann_by_method.setdefault(row["method"], {})[row["annotation"]] = row["value"]
+    # Function/ArrowFunction added for JS/TS -- Express/Fastify route
+    # handlers are commonly a plain top-level Function or ArrowFunction,
+    # not a class Method the way every prior annotation-based language's
+    # routes have been (see js/calls.py's emit_calls_and_routes_in_file).
+    for table in ("Function", "ArrowFunction"):
+        for row in q(conn, f"MATCH (m:{table})-[r:HAS_ANNOTATION]->(a:AnnotationType) "
+                           "RETURN m.qualifiedName AS method, a.name AS annotation, r.value AS value"):
+            ann_by_method.setdefault(row["method"], {})[row["annotation"]] = row["value"]
     # Python has no HAS_ANNOTATION convention -- decorators land in
     # Decorator/DECORATES instead (see python/decorators.py).
     for row in q(conn, "MATCH (d:Decorator)-[r:DECORATES]->(n) "
