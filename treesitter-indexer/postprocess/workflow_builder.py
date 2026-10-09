@@ -394,12 +394,15 @@ def _is_kotlin_terminal(info: dict) -> bool:
     return "reposit" in qn or "dao" in qn or "producer" in name or "publisher" in name
 
 
-# Method AND SuspendFunction both participate (unlike build_jvm_workflows's
-# Method-only BFS) because a Spring/Ktor-annotated Kotlin entry point is
-# just as likely to be a suspend function (idiomatic for coroutine-based
-# endpoints) as a plain method -- build_jvm_workflows's Method-only
-# HAS_ANNOTATION query would silently miss it entirely.
-_KOTLIN_CALLABLE_TABLES = ["Method", "SuspendFunction"]
+# Method AND SuspendFunction AND Function all participate (unlike
+# build_jvm_workflows's Method-only BFS): a Spring-annotated Kotlin entry
+# point is just as likely to be a suspend function (idiomatic for
+# coroutine-based endpoints) as a plain method, AND Ktor's routing{} DSL
+# registers routes on plain top-level Functions, not class Methods at all
+# -- found via real mini-kotlin-service fixture testing (a Ktor route's
+# Function-typed handler was invisible to this BFS until Function was
+# added here too, even though it had a real HAS_ANNOTATION edge).
+_KOTLIN_CALLABLE_TABLES = ["Method", "SuspendFunction", "Function"]
 
 
 def build_kotlin_workflows(store) -> int:
@@ -419,6 +422,9 @@ def build_kotlin_workflows(store) -> int:
         "RETURN n.id AS nodeId, a.name AS annName, r.value AS value "
         "UNION "
         "MATCH (n:SuspendFunction)-[r:HAS_ANNOTATION]->(a:AnnotationType) "
+        "RETURN n.id AS nodeId, a.name AS annName, r.value AS value "
+        "UNION "
+        "MATCH (n:Function)-[r:HAS_ANNOTATION]->(a:AnnotationType) "
         "RETURN n.id AS nodeId, a.name AS annName, r.value AS value",
     )
     ann_index: dict[str, dict[str, str]] = {}

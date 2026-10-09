@@ -67,7 +67,16 @@ REL_DEFINITIONS = [
     # need Constructor (both have primary constructors exactly like
     # ordinary classes); SealedInterface needs Method/Property (sealed
     # interfaces have body members too).
-    "CREATE REL TABLE IF NOT EXISTS CONTAINS (FROM Package TO Class, FROM Package TO Interface, FROM Package TO Enum, FROM Package TO Record, FROM Package TO Function, FROM Package TO DataClass, FROM Package TO SealedClass, FROM Package TO SealedInterface, FROM Class TO Method, FROM Class TO Constructor, FROM Class TO Field, FROM Interface TO Method, FROM Interface TO Field, FROM Module TO Function, FROM Module TO ArrowFunction, FROM Module TO Component, FROM Module TO Hook, FROM Module TO Class, FROM Class TO Function, FROM Class TO ArrowFunction, FROM DataClass TO Method, FROM DataClass TO Property, FROM DataClass TO Constructor, FROM SealedClass TO Method, FROM SealedClass TO Property, FROM SealedClass TO Constructor, FROM SealedInterface TO Method, FROM SealedInterface TO Property, FROM ObjectDecl TO Method, FROM ObjectDecl TO Property, FROM CompanionObject TO Method, FROM CompanionObject TO Property, FROM Class TO Property, FROM Class TO InitBlock, FROM Package TO TypeAlias, FROM Package TO ObjectDecl, FROM ConfigFile TO ConfigProperty)",
+    # Further Kotlin additions to CONTAINS, found via real mini-kotlin-
+    # service fixture testing (not caught by Task 2's upfront audit):
+    # kotlin/extractor.py models EVERY property declaration as a generic
+    # Field node (consistent with every other language in this engine --
+    # NOT the pre-declared-but-unused `TO Property` combos below, which
+    # this increment deliberately does not emit), so every container kind
+    # needs `TO Field`; a SuspendFunction can be a method of ANY container
+    # kind (Class/Interface/DataClass/SealedClass/SealedInterface/
+    # ObjectDecl/CompanionObject), not just Method/Function.
+    "CREATE REL TABLE IF NOT EXISTS CONTAINS (FROM Package TO Class, FROM Package TO Interface, FROM Package TO Enum, FROM Package TO Record, FROM Package TO Function, FROM Package TO DataClass, FROM Package TO SealedClass, FROM Package TO SealedInterface, FROM Class TO Method, FROM Class TO Constructor, FROM Class TO Field, FROM Class TO SuspendFunction, FROM Interface TO Method, FROM Interface TO Field, FROM Interface TO SuspendFunction, FROM Module TO Function, FROM Module TO ArrowFunction, FROM Module TO Component, FROM Module TO Hook, FROM Module TO Class, FROM Class TO Function, FROM Class TO ArrowFunction, FROM DataClass TO Method, FROM DataClass TO Property, FROM DataClass TO Field, FROM DataClass TO Constructor, FROM DataClass TO SuspendFunction, FROM SealedClass TO Method, FROM SealedClass TO Property, FROM SealedClass TO Field, FROM SealedClass TO Constructor, FROM SealedClass TO SuspendFunction, FROM SealedInterface TO Method, FROM SealedInterface TO Property, FROM SealedInterface TO Field, FROM SealedInterface TO SuspendFunction, FROM ObjectDecl TO Method, FROM ObjectDecl TO Property, FROM ObjectDecl TO Field, FROM ObjectDecl TO SuspendFunction, FROM CompanionObject TO Method, FROM CompanionObject TO Property, FROM CompanionObject TO Field, FROM CompanionObject TO SuspendFunction, FROM Class TO Property, FROM Class TO InitBlock, FROM Package TO TypeAlias, FROM Package TO ObjectDecl, FROM ConfigFile TO ConfigProperty)",
     # Kotlin additions to EXTENDS: SealedClass was never a valid TO target
     # at all (the entire sealed-subtype pattern `class Foo : SealedParent()`
     # could never persist), and ObjectDecl was never a valid FROM side (the
@@ -104,12 +113,22 @@ REL_DEFINITIONS = [
     # calling a locally-defined helper ArrowFunction, a Hook calling
     # another Hook, etc.), so they're added now rather than discovered one
     # silent-failure at a time during fixture testing.
-    "CREATE REL TABLE IF NOT EXISTS CALLS (FROM Method TO Method, FROM Method TO Function, FROM Method TO Constructor, FROM Constructor TO Method, FROM Constructor TO Function, FROM Constructor TO Constructor, FROM Function TO Function, FROM Function TO Method, FROM Function TO Constructor, FROM Function TO ArrowFunction, FROM Function TO Component, FROM ArrowFunction TO Function, FROM ArrowFunction TO Method, FROM ArrowFunction TO ArrowFunction, FROM ArrowFunction TO Constructor, FROM Component TO Function, FROM Component TO Component, FROM Component TO ArrowFunction, FROM Component TO Hook, FROM Component TO Method, FROM Hook TO Function, FROM Hook TO ArrowFunction, FROM Hook TO Hook, FROM Hook TO Method, FROM AsyncFunction TO Function, FROM ExtensionFunction TO Method, FROM ExtensionFunction TO Function, FROM SuspendFunction TO Method, FROM SuspendFunction TO Function, FROM Lambda TO Method, FROM Lambda TO Function, FROM InitBlock TO Method, lineNumber INT64, confidence DOUBLE, reason STRING)",
+    # Kotlin additions to CALLS: SuspendFunction was missing as a TO target
+    # for itself and for Constructor -- found via real mini-kotlin-service
+    # fixture testing (a suspend function calling another suspend function
+    # across classes, below CALLS's 0.9 global-fallback threshold, still
+    # needs to persist the edge itself).
+    "CREATE REL TABLE IF NOT EXISTS CALLS (FROM Method TO Method, FROM Method TO Function, FROM Method TO Constructor, FROM Constructor TO Method, FROM Constructor TO Function, FROM Constructor TO Constructor, FROM Function TO Function, FROM Function TO Method, FROM Function TO Constructor, FROM Function TO ArrowFunction, FROM Function TO Component, FROM ArrowFunction TO Function, FROM ArrowFunction TO Method, FROM ArrowFunction TO ArrowFunction, FROM ArrowFunction TO Constructor, FROM Component TO Function, FROM Component TO Component, FROM Component TO ArrowFunction, FROM Component TO Hook, FROM Component TO Method, FROM Hook TO Function, FROM Hook TO ArrowFunction, FROM Hook TO Hook, FROM Hook TO Method, FROM AsyncFunction TO Function, FROM ExtensionFunction TO Method, FROM ExtensionFunction TO Function, FROM SuspendFunction TO Method, FROM SuspendFunction TO Function, FROM SuspendFunction TO SuspendFunction, FROM SuspendFunction TO Constructor, FROM Lambda TO Method, FROM Lambda TO Function, FROM InitBlock TO Method, lineNumber INT64, confidence DOUBLE, reason STRING)",
     # Function->Class/Interface/Enum/Record added for Python's top-level
     # functions (e.g. a Flask/FastAPI route handler's own return-type hint) --
     # the original set only covered Method, since the Java-only increment
     # never emits a top-level, non-method Function node.
-    "CREATE REL TABLE IF NOT EXISTS RETURNS (FROM Method TO Class, FROM Method TO Interface, FROM Method TO Enum, FROM Method TO Record, FROM Function TO Class, FROM Function TO Interface, FROM Function TO Enum, FROM Function TO Record, FROM ExtensionFunction TO Class, FROM SuspendFunction TO Class, FROM Component TO Class, FROM Hook TO Class)",
+    # Kotlin additions to RETURNS: DataClass/SealedClass/SealedInterface/
+    # ObjectDecl were never valid TO targets at all -- found via real
+    # mini-kotlin-service fixture testing (`fun show(id: String): Order`,
+    # where Order is a data class). Idiomatic Kotlin returns any of these
+    # kinds just as often as a plain Class (e.g. a sealed result type).
+    "CREATE REL TABLE IF NOT EXISTS RETURNS (FROM Method TO Class, FROM Method TO Interface, FROM Method TO Enum, FROM Method TO Record, FROM Method TO DataClass, FROM Method TO SealedClass, FROM Method TO SealedInterface, FROM Method TO ObjectDecl, FROM Function TO Class, FROM Function TO Interface, FROM Function TO Enum, FROM Function TO Record, FROM Function TO DataClass, FROM Function TO SealedClass, FROM Function TO SealedInterface, FROM Function TO ObjectDecl, FROM ExtensionFunction TO Class, FROM ExtensionFunction TO DataClass, FROM ExtensionFunction TO SealedClass, FROM ExtensionFunction TO SealedInterface, FROM ExtensionFunction TO ObjectDecl, FROM SuspendFunction TO Class, FROM SuspendFunction TO DataClass, FROM SuspendFunction TO SealedClass, FROM SuspendFunction TO SealedInterface, FROM SuspendFunction TO ObjectDecl, FROM Component TO Class, FROM Hook TO Class)",
     # Component/Hook added for JS/React -- a Component/Hook is structurally
     # just a Function/ArrowFunction with a naming-heuristic override (see
     # js/extractor.py's _callable_kind), so it needs parameters/return-type

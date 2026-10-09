@@ -43,6 +43,8 @@ def main() -> int:
     for table in ["Package", "Module", "Class", "Interface", "Enum", "Record", "Method",
                   "Constructor", "Function", "ArrowFunction", "Component", "Hook",
                   "AsyncFunction", "Generator", "Decorator",
+                  "DataClass", "SealedClass", "SealedInterface", "ObjectDecl",
+                  "CompanionObject", "ExtensionFunction", "SuspendFunction", "Property",
                   "Field", "Parameter", "AnnotationType", "Workflow", "Domain",
                   "ConfigFile", "ConfigProperty"]:
         try:
@@ -61,7 +63,9 @@ def main() -> int:
     # handlers are commonly a plain top-level Function or ArrowFunction,
     # not a class Method the way every prior annotation-based language's
     # routes have been (see js/calls.py's emit_calls_and_routes_in_file).
-    for table in ("Function", "ArrowFunction"):
+    # SuspendFunction added for Kotlin -- Spring/JAX-RS-annotated suspend
+    # functions are a distinct table from Method (see kotlin/extractor.py).
+    for table in ("Function", "ArrowFunction", "SuspendFunction"):
         for row in q(conn, f"MATCH (m:{table})-[r:HAS_ANNOTATION]->(a:AnnotationType) "
                            "RETURN m.qualifiedName AS method, a.name AS annotation, r.value AS value"):
             ann_by_method.setdefault(row["method"], {})[row["annotation"]] = row["value"]
