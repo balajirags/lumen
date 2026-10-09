@@ -1,55 +1,56 @@
-# Tree-sitter indexer: remaining languages (Kotlin)
+# Tree-sitter indexer: remaining languages (none — rollout complete)
 
 ## How to resume this work (read this first)
 
-Everything below is written to be self-contained — you shouldn't need to re-read old
-conversation history to pick this back up. Start here:
+The originally-planned 4-language rollout (Java → Python → PHP → JS/TS/React → Kotlin) is
+**complete** as of the Kotlin increment. This file is kept as the historical record of all
+five increments (Java was the initial prototype, not separately sectioned below) and the
+reference for how the next *new* language (if any) should be approached — not an active task
+list. Everything below is self-contained — you shouldn't need to re-read old conversation
+history to pick this back up.
 
-0. **Current uncommitted state**: as of the JS/TS/React increment's completion, everything
-   relevant is committed. `backlog/incremental-reindexing.md` and
+0. **Current uncommitted state**: as of the Kotlin increment's completion, everything relevant
+   is committed. `backlog/incremental-reindexing.md` and
    `backlog/multi-repo-cross-service-graph.md` remain untracked but **unrelated** to this
    indexer work (pre-existing scratch files from earlier work on this branch) — don't assume
    they belong together. `indexer/parsers/python/__pycache__/store.cpython-311.pyc` may show
    modified (stray bytecode cache from running the *old* Python indexer's tests) — unrelated,
    leave alone.
 1. `git checkout feature/treesitter-java-indexer` (all of this work — Java, Python, PHP,
-   JS/TS/React, and the final Kotlin increment — lives on this one branch; the name is stale
-   now that it covers more than Java, not worth renaming mid-flight).
-2. `git log --oneline -30` to see what's landed. As of this writing, the newest relevant commit
-   is `143ca70` (JS/TS/React pipeline wiring); that increment spans roughly `de0ff1d`..`143ca70`,
-   with `baba1a5`..`2063a65` being the earlier PHP increment and `85875e1` being Python. Design+
-   plan docs for each live under `docs/superpowers/specs/` and `docs/superpowers/plans/`
-   (`2026-10-09-js-ts-react-tree-sitter-indexer-{design,plan}...` for the most recent — good
-   reference for how much detail to put in Kotlin's plan).
+   JS/TS/React, and Kotlin — lives on this one branch; the name is stale now that it covers
+   more than Java, not worth renaming after the fact).
+2. `git log --oneline -40` to see what's landed. Design+plan docs for each increment live under
+   `docs/superpowers/specs/` and `docs/superpowers/plans/` (one `{design,plan}` pair per
+   language, e.g. `2026-10-09-kotlin-tree-sitter-indexer-{design,plan}.md` for the most recent —
+   good reference for how much detail to put in a future increment's plan).
 3. Sanity-check the existing engine still works before adding anything new:
    ```bash
    cd treesitter-indexer
-   .venv/bin/python3 -m unittest discover -s tests   # expect 120 passed, 0 failed
+   .venv/bin/python3 -m unittest discover -s tests   # expect 142 passed, 0 failed
    ```
    **Gotcha**: you must use `treesitter-indexer/.venv/bin/python3`, not a bare `python3` —
    plain `python3` will raise `ModuleNotFoundError: No module named 'ladybug'` even though the
    tests look like they should pass. If `.venv/` is missing, run `./install.sh` first.
 4. To see the engine actually working end-to-end on an example fixture:
    ```bash
-   .venv/bin/python3 parse_python.py ../e2e-test/fixtures/mini-python-service \
-     --db-path /tmp/scratch-db --repo-name mini-python-service --clear
-   .venv/bin/python3 scripts/inspect_graph.py /tmp/scratch-db/mini-python-service-db
+   .venv/bin/python3 parse_kotlin.py ../e2e-test/fixtures/mini-kotlin-service \
+     --db-path /tmp/scratch-db --repo-name mini-kotlin-service --clear
+   .venv/bin/python3 scripts/inspect_graph.py /tmp/scratch-db/mini-kotlin-service-db
    ```
-   (swap `parse_python.py` / the fixture path for `parse.py` + `mini-spring-app` to see the
-   Java engine instead). `inspect_graph.py` prints entry points, Workflows, Domains, and sample
-   CALLS edges with their confidence tier — the fastest way to eyeball whether a new language's
-   extraction is producing real signal, without going through `lumen run` or an LLM at all.
-5. `pipeline/tests/test_indexer.py` has `should_use_treesitter_java`/`should_use_treesitter_python`
-   tests — the CLI/pipeline wiring pattern (`--experimental-treesitter-<language>` flag →
+   (swap `parse_kotlin.py` / the fixture path for `parse.py`/`parse_python.py`/`parse_php.py`/
+   `parse_js.py` + the matching fixture to see any other language's engine instead).
+   `inspect_graph.py` prints entry points, Workflows, Domains, and sample CALLS edges with their
+   confidence tier — the fastest way to eyeball whether a language's extraction is producing
+   real signal, without going through `lumen run` or an LLM at all.
+5. `pipeline/tests/test_indexer.py` has `should_use_treesitter_<language>` tests for all five
+   languages — the CLI/pipeline wiring pattern (`--experimental-treesitter-<language>` flag →
    `should_use_treesitter_<language>()` gate → dispatch to `cmg-<language>-ts` binary instead of
-   the old one) is meant to be copied exactly for each new language; see
-   `pipeline/codedoc/stages/indexer.py` and `pipeline/codedoc/cli.py` for the two existing
-   examples to mirror.
-6. When starting the next language's increment (PHP first, per the recommended order below),
-   run a fresh `/plan` for it rather than trying to implement straight from this backlog file —
-   this file is the research/design *input* to that plan, not a replacement for planning. The
-   Python increment's plan (written the same way) is a good template for how much detail to
-   put in a from-scratch language-increment plan.
+   the old one) is the template to copy exactly for any future new language; see
+   `pipeline/codedoc/stages/indexer.py` and `pipeline/codedoc/cli.py`.
+6. If a genuinely new language gets added in the future, run a fresh `/plan` for it rather than
+   trying to implement straight from a backlog file — a backlog entry is the research/design
+   *input* to that plan, not a replacement for planning. The Kotlin increment's design+plan docs
+   (written the same way as every prior increment) are the most recent template.
 
 ## Conventions established so far (apply to every future increment)
 
@@ -144,17 +145,22 @@ archived `kuzu` package) currently covers:
   `docs/superpowers/plans/2026-10-09-js-ts-react-tree-sitter-indexer.md`. 120 unit tests pass
   (up from 89 pre-JS); `scripts/compare_graphs_js.py` reports PASS on both new fixtures;
   `lumen run --experimental-treesitter-js` verified end-to-end.
+- **Kotlin** — complete, same branch, wired behind `--experimental-treesitter-kotlin`. Kotlin
+  shares the pipeline's `"jvm"` language-category key with Java (there is no dedicated
+  `"kotlin"` key) — `should_use_treesitter_kotlin()` distinguishes the two via
+  `state.language_flavors` instead, only engaging when the repo is Kotlin-only (no `.java`
+  files present). Full detail (including 8 real bugs found via TDD, all fixed) is in the
+  "Kotlin — done" section below; design+plan docs at
+  `docs/superpowers/specs/2026-10-09-kotlin-tree-sitter-indexer-design.md` and
+  `docs/superpowers/plans/2026-10-09-kotlin-tree-sitter-indexer.md`. 142 unit tests pass (up
+  from 120 pre-Kotlin); `scripts/compare_graphs_kotlin.py` reports PASS;
+  `lumen run --experimental-treesitter-kotlin` verified end-to-end (`status: "done"`,
+  `graph_backend: "ladybug"`, `indexed_languages: ["jvm"]`).
 
-**Recommended remaining order: Kotlin** (the only language left). Lowest new-design risk for
-its dominant case (Spring/JAX-RS-annotated JVM backends — near-exact repeat of Java's
-`HAS_ANNOTATION`/`resolve_route` pattern), but the largest raw grammar surface (data classes,
-sealed types, coroutines, delegation), and a narrower deployment surface (non-Android JVM
-backends only) than Python/JS/PHP's near-universal presence. Ktor's call-based routing DSL
-should reuse `postprocess/call_routes.py::resolve_call_route()` — proven twice now (PHP's
-Laravel, JS's Express/Fastify) — rather than inventing a third variant.
-
-This final remaining increment should get its own `/plan` pass when picked up (same process
-used for Python, PHP, and JS/TS/React).
+**The originally-planned 4-language rollout (Java → Python → PHP → JS/TS/React → Kotlin) is now
+complete.** Any further language support is a new, separately-scoped increment and should get
+its own `/plan` pass from scratch (same process used for every increment above), not an
+extension of this file's task list.
 
 ---
 
@@ -286,61 +292,82 @@ of the `this.method()` fix, inside realistic React code rather than a synthetic 
 
 ---
 
-## Kotlin
+## Kotlin — done
 
-### Background
+Built `treesitter-indexer/kotlin/extractor.py` + `kotlin/calls.py` on `tree-sitter-kotlin`,
+explicitly not touching the old PSI-based `KotlinSourceParser.java` (used only as a structural
+spec to port from). Populated the node/rel tables that already existed in `graph_store.py`'s
+schema but were unused by any extractor (`DataClass`, `SealedClass`, `SealedInterface`,
+`ObjectDecl`, `CompanionObject`, `ExtensionFunction`, `SuspendFunction`, plus rel tables
+`SEALED_SUBTYPE`, `DELEGATES_TO`, `COMPANION_OF`), and added the two genuinely new mechanisms:
+annotation-*usage* extraction (the old parser only ever had annotation-*declaration* detection,
+so Kotlin+Spring repos produced zero `HAS_ANNOTATION` edges and zero HTTP entry points) and
+Ktor's call-based `routing { get("/path") { ... } }` DSL, converted to ordinary `HAS_ANNOTATION`
+edges at extraction time (same pattern as PHP's Laravel/JS's Express) so `resolve_route()` works
+unchanged. `SEALED_SUBTYPE` and `SUSPENDS` were populated as plain syntactic features per the
+approved spec (not deferred) — the old engine's "needs more sophisticated analysis" comment
+turned out not to reflect a real grammar limitation.
 
-Kotlin support today lives entirely inside the *old* JVM/Gradle indexer
-(`indexer/app/.../KotlinSourceParser.java`, using the real Kotlin compiler PSI — richer than a
-lightweight parser). It already models data classes, sealed classes/interfaces, object
-declarations, companion objects (`COMPANION_OF`), extension functions (`EXTENSION_OF`),
-suspend functions, and property delegation. Conveniently, **all of these target node/rel tables
-already exist in `treesitter-indexer/graph_store.py`'s schema but are currently unpopulated**
-(confirmed by direct read): `DataClass`, `SealedClass`, `SealedInterface`, `ObjectDecl`,
-`CompanionObject`, `ExtensionFunction`, `SuspendFunction`, `Property`, plus rel tables
-`SEALED_SUBTYPE`, `DELEGATES_TO`, `COMPANION_OF`, `SUSPENDS`, `EXTENSION_OF` — so this increment
-is largely "populate tables that already exist," not new schema design.
+Kotlin shares the pipeline's `"jvm"` language-category key with Java — there is no dedicated
+`"kotlin"` key in `pipeline/codedoc/language_registry.py`. `should_use_treesitter_kotlin()`
+(`pipeline/codedoc/stages/indexer.py`) distinguishes the two via `state.language_flavors`,
+only engaging when `"kotlin"` is present and `"java"` is not (a mixed Java+Kotlin repo falls
+back to the old engine, same conservative default every other language's flag uses for
+ambiguous cases).
 
-Confirmed gaps in the *old* Kotlin parser, beyond the schema-mismatch bug tracked separately
-below:
-- **No annotation-*usage* extraction at all** — only annotation-*declaration* detection exists
-  (`JavaSourceParser.java` has a full `visitAnnotations()` walk; `KotlinSourceParser.java` has
-  no equivalent). Consequence: a Kotlin+Spring repo produces **zero** `HAS_ANNOTATION` edges,
-  therefore zero HTTP entry points, therefore zero Workflow traces today, independent of the
-  CALLS bug. This is the single highest-value new-design item for Kotlin — once fixed, it
-  unlocks `resolve_route`/`layer_from_annotation` for Kotlin+Spring with **zero** further
-  postprocess/ changes, exactly like Java.
-- **Zero Ktor support anywhere** — Ktor's routing DSL (`routing { get("/path") { ... } }`) is
-  call-based, the same category as Express/Laravel, and should reuse `resolve_call_route`
-  (built during the PHP increment, extended during JS) rather than inventing a third variant.
-- Several schema entries are declared but the old parser never populates them even for Kotlin:
-  `SEALED_SUBTYPE` (comment in the code says it needs more sophisticated analysis, never
-  implemented), `SUSPENDS`, dedicated `Lambda` nodes (lambda bodies are walked but attributed to
-  the enclosing function).
-- Call resolution is simple-name-only (no receiver-type or overload resolution) — weaker than
-  even the old Java engine's.
-- Android repos are correctly rejected early (`AndroidManifest.xml` detection) before any of
-  this runs — Kotlin support targets non-Android backend/JVM services specifically.
+**Real bugs found and fixed via TDD while implementing (worth knowing before touching this code
+again):**
+- A class/sealed-type/object/companion modifier keyword (`data`, `sealed`, `object`, `companion`)
+  is an *unnamed* (anonymous) token in tree-sitter-kotlin's grammar — it shows up in a
+  `modifiers` node's `.children`, not `.named_children`. Checking `.named_children` (the more
+  common idiom) silently found zero modifiers on every declaration.
+- Kotlin extension functions are overwhelmingly defined on built-in/primitive types
+  (`fun String.foo()`) — the generic `_ensure_type_node` helper (shared with every other
+  language) skips primitive types by design, which would have made `EXTENSION_OF` always empty.
+  Added a parallel `_ensure_type_node_allow_primitive` used only for `EXTENSION_OF`.
+- Ktor's `get("/path") { ... }` parses as an *outer* `call_expression` wrapping an *inner*
+  `call_expression` plus a trailing lambda — genuinely different from `routing { ... }`'s flat
+  shape, and from the Express/Laravel call-routing shapes ported from earlier increments. Needed
+  a dedicated `_find_wrapped_route_calls` walk rather than reusing the flat-call detection as-is.
+- `build_kotlin_workflows`'s `_KOTLIN_CALLABLE_TABLES` (and its `HAS_ANNOTATION` union query)
+  initially only listed `Method`/`SuspendFunction`, on the assumption that annotated Kotlin entry
+  points are always class members (true for Spring/JAX-RS). Ktor routes land on plain top-level
+  `Function` nodes instead — invisible to that BFS even though they had a real `HAS_ANNOTATION`
+  edge — until `Function` was added to both the table list and the union query. Caught via real
+  mini-kotlin-service fixture testing, not by the unit tests (which only exercised Spring-style
+  Method/SuspendFunction entry points individually).
+- `scripts/inspect_graph.py`'s node-count list and entry-points query were missing every
+  Kotlin-specific table (`DataClass`/`SealedClass`/`SealedInterface`/`ObjectDecl`/
+  `CompanionObject`/`ExtensionFunction`/`SuspendFunction`/`Property`) — same display-only gap
+  class as JS/TS's `Component`/`Hook` omission in the prior increment. Generalized the same way.
+- Four `graph_store.py` schema gaps surfaced only by the real fixture (not the unit tests):
+  `CONTAINS` was missing `→Field` and `→SuspendFunction` for every Kotlin container kind
+  (`Class`/`Interface`/`DataClass`/`SealedClass`/`SealedInterface`/`ObjectDecl`/
+  `CompanionObject`) — the extractor models every property as a generic `Field` node like every
+  other language, not the pre-declared-but-unused `→Property` combos, and a `SuspendFunction`
+  can be a member of any container kind, not just `Method`/`Function`; `RETURNS` was missing
+  `DataClass`/`SealedClass`/`SealedInterface`/`ObjectDecl` as valid targets (idiomatic Kotlin
+  returns a sealed result type or data class at least as often as a plain class); `CALLS` was
+  missing `SuspendFunction→SuspendFunction` and `SuspendFunction→Constructor`.
 
-### Goal
+**Explicitly deferred, not forgotten (per the approved spec):**
+- Dedicated `Lambda` nodes — same accepted divergence as the old engine (lambda bodies
+  attributed to the enclosing function).
+- The *old* Kotlin engine's suspected `CALLS` persistence bug — tracked below, now
+  runtime-confirmed during this increment's own validation run (not just statically suspected).
+- Receiver-type or overload-aware call resolution beyond the standard
+  `this`/same-file/import-resolved/global-fallback shape (e.g. a constructor-injected property
+  access like `repository.findOrderAsync(id)` resolves only at the 0.50 global tier, same
+  documented scope boundary as every other language's property-mediated calls).
 
-Build `treesitter-indexer/kotlin/extractor.py` on `tree-sitter-kotlin`, explicitly **not**
-touching or extending the old `KotlinSourceParser.java` (same decoupling philosophy as every
-other increment) — using it purely as a structural spec to port from, the same way Java's
-tree-sitter extractor was informed by `JavaSourceParser.java`. Two genuinely new pieces of work,
-beyond "port the structural model":
-1. Annotation-usage extraction (the highest-value item — see above).
-2. Ktor's call-based routing DSL, via the shared `resolve_call_route` mechanism.
-
-### Files likely touched
-
-- `treesitter-indexer/kotlin/extractor.py` (new), `kotlin/calls.py` (new)
-- `postprocess/workflow_builder.py` — Kotlin's Spring/JAX-RS case should need **zero** new
-  postprocess code (reuses `build_jvm_workflows` if Kotlin nodes are typed compatibly with
-  Java's, e.g. `Method`/`Class`) or a small parallel function if not; Ktor needs the
-  `resolve_call_route` mechanism instead
-- New fixture, e.g. `e2e-test/fixtures/mini-kotlin-service/`
-- `treesitter-indexer/scripts/compare_graphs_kotlin.py`
+**Fixture**: `e2e-test/fixtures/mini-kotlin-service/` — a Spring-style `@RestController` with
+both a plain method and a `suspend fun` entry point (one of which is only reachable via a
+0.50-tier property-mediated call, by design), a data class, a sealed class, and a separate
+Ktor `routing { }` file whose `exportOrder -> fetchFromRepository` chain is the one entry point
+that produces a real (0.95) multi-hop Workflow trace — deliberately named so the terminal
+function's name satisfies `_is_kotlin_terminal`'s repository-detection heuristic, after the
+first draft's chain produced zero Workflow traces at all (every version's documented "at least
+one >=0.9 trace" requirement, same gotcha PHP's and JS's fixtures already hit).
 
 ---
 
@@ -352,16 +379,18 @@ already-fixed `HAS_ANNOTATION value STRING` and i18n-resource-bundle bugs found 
 project's history. Deliberately deferred (user decision) during the Python increment's planning
 rather than fixed then, so they remain open:
 
-- **Kotlin CALLS edges likely silently fail to persist (100% of them)**: `KotlinSourceParser.java`
-  sets a `resolved` boolean property on every CALLS edge it creates, but the shared CALLS rel
-  table schema only declares `lineNumber`/`confidence`/`reason` — no `resolved` column. Unlike
-  the node-property write path (which filters/allowlists before writing), the relationship-write
-  path dumps the full property map straight into the `CREATE` Cypher literal with no filtering;
-  an unrecognized property on a KuzuDB relationship CREATE typically fails the whole statement,
-  silently caught by a blanket per-relationship try/catch. **Not yet runtime-confirmed** (static
-  analysis only) — first step of the fix should be confirming this by running the old Kotlin
-  indexer against a real repo and inspecting whether any CALLS edges exist at all. If confirmed,
-  the fix is a one-line property rename/alignment, or extending the rel-write path with the same
+- **Kotlin CALLS edges silently fail to persist (100% of them) — now runtime-confirmed**:
+  `KotlinSourceParser.java` sets a `resolved` boolean property on every CALLS edge it creates,
+  but the shared CALLS rel table schema only declares `lineNumber`/`confidence`/`reason` — no
+  `resolved` column. Unlike the node-property write path (which filters/allowlists before
+  writing), the relationship-write path dumps the full property map straight into the `CREATE`
+  Cypher literal with no filtering; an unrecognized property on a KuzuDB relationship CREATE
+  fails the whole statement, silently caught by a blanket per-relationship try/catch. Confirmed
+  during the Kotlin tree-sitter increment's `compare_graphs_kotlin.py` validation run: running
+  `cmg-java` against `mini-kotlin-service` printed `Method calls: 9 resolved, 4 best-effort
+  (unresolved)` during parsing, but the written KuzuDB graph reported `0 CALLS edges` — the old
+  engine resolves calls correctly in memory and then drops every one of them on write. The fix
+  is a one-line property rename/alignment, or extending the rel-write path with the same
   filtering the node-write path already has.
 - **PHP `phpKind` silently dropped**: `indexer/parsers/php/parse.php` correctly sets
   `phpKind: 'trait'`/`phpKind: 'constant'` in the JSON graph it produces, but the shared
