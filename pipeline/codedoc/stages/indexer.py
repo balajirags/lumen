@@ -44,6 +44,14 @@ def should_use_treesitter_python(state: PipelineState, ordered_languages: list[s
     return state.experimental_treesitter_python and ordered_languages == ["python"]
 
 
+def should_use_treesitter_php(state: PipelineState, ordered_languages: list[str]) -> bool:
+    """Whether to dispatch to the experimental cmg-php-ts instead of
+    cmg-php. Only used for single-language PHP repos, same rationale as
+    should_use_treesitter_python.
+    """
+    return state.experimental_treesitter_php and ordered_languages == ["php"]
+
+
 def detect_languages(repo_path: str) -> dict[str, int]:
     """Return all supported language categories found in the repo with their file counts."""
     metrics = classify_repo(repo_path)
@@ -140,6 +148,17 @@ def run_indexer(state: PipelineState) -> PipelineState:
         state.graph_backend = "ladybug"
         state.log(stage, "Using experimental tree-sitter Python indexer (cmg-python-ts)")
 
+    use_treesitter_php = should_use_treesitter_php(state, ordered_languages)
+    if state.experimental_treesitter_php and not use_treesitter_php:
+        state.log(
+            stage,
+            "--experimental-treesitter-php requested but this repo is polyglot; "
+            "falling back to cmg-php for compatibility.",
+        )
+    if use_treesitter_php:
+        state.graph_backend = "ladybug"
+        state.log(stage, "Using experimental tree-sitter PHP indexer (cmg-php-ts)")
+
     _log.start_indexer_progress([LANGUAGE_CATEGORY_BY_KEY[lang].display_name for lang in ordered_languages])
     try:
         for language in ordered_languages:
@@ -147,9 +166,10 @@ def run_indexer(state: PipelineState) -> PipelineState:
             use_treesitter_for_language = (
                 (use_treesitter_java and language == "jvm")
                 or (use_treesitter_python and language == "python")
+                or (use_treesitter_php and language == "php")
             )
             if use_treesitter_for_language:
-                binary_name = "cmg-java-ts" if language == "jvm" else "cmg-python-ts"
+                binary_name = {"jvm": "cmg-java-ts", "python": "cmg-python-ts", "php": "cmg-php-ts"}[language]
                 binary = Path(state.treesitter_indexer_bin_dir) / binary_name
                 cli_language = None
             else:

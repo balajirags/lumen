@@ -3,7 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from codedoc.state import PipelineState
-from codedoc.stages.indexer import detect_languages, should_use_treesitter_java, should_use_treesitter_python
+from codedoc.stages.indexer import (
+    detect_languages,
+    should_use_treesitter_java,
+    should_use_treesitter_python,
+    should_use_treesitter_php,
+)
 
 
 def _state(**overrides) -> PipelineState:
@@ -43,6 +48,21 @@ def test_should_use_treesitter_python_false_when_flag_unset():
 def test_should_use_treesitter_python_false_for_polyglot_repo():
     state = _state(experimental_treesitter_python=True)
     assert should_use_treesitter_python(state, ["python", "jvm"]) is False
+
+
+def test_should_use_treesitter_php_when_flag_set_and_php_only():
+    state = _state(experimental_treesitter_php=True)
+    assert should_use_treesitter_php(state, ["php"]) is True
+
+
+def test_should_use_treesitter_php_false_when_flag_unset():
+    state = _state(experimental_treesitter_php=False)
+    assert should_use_treesitter_php(state, ["php"]) is False
+
+
+def test_should_use_treesitter_php_false_for_polyglot_repo():
+    state = _state(experimental_treesitter_php=True)
+    assert should_use_treesitter_php(state, ["php", "jvm"]) is False
 
 
 def test_detect_languages_mixed_repo(tmp_path):
