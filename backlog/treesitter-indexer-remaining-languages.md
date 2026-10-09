@@ -1,28 +1,30 @@
-# Tree-sitter indexer: remaining languages (JS/TS/React, Kotlin)
+# Tree-sitter indexer: remaining languages (Kotlin)
 
 ## How to resume this work (read this first)
 
 Everything below is written to be self-contained — you shouldn't need to re-read old
 conversation history to pick this back up. Start here:
 
-0. **Current uncommitted state**: as of the PHP increment's completion, everything relevant is
-   committed. `backlog/incremental-reindexing.md` and `backlog/multi-repo-cross-service-graph.md`
-   remain untracked but **unrelated** to this indexer work (pre-existing scratch files from
-   earlier work on this branch) — don't assume they belong together.
-   `indexer/parsers/python/__pycache__/store.cpython-311.pyc` may show modified (stray bytecode
-   cache from running the *old* Python indexer's tests) — unrelated, leave alone.
-1. `git checkout feature/treesitter-java-indexer` (all of this work — Java, Python, PHP, and
-   every future language increment — lives on this one branch; the name is stale now that it
-   covers more than Java, not worth renaming mid-flight).
-2. `git log --oneline -20` to see what's landed. As of this writing, the newest relevant commit
-   is `2063a65` (PHP pipeline wiring); the PHP increment spans roughly `baba1a5`..`2063a65`, with
-   `85875e1` being the earlier Python increment and `0fc208a`/the file at
-   `docs/superpowers/plans/2026-10-09-php-tree-sitter-indexer.md` being PHP's design+plan docs
-   (good reference for how much detail to put in the next language's plan).
+0. **Current uncommitted state**: as of the JS/TS/React increment's completion, everything
+   relevant is committed. `backlog/incremental-reindexing.md` and
+   `backlog/multi-repo-cross-service-graph.md` remain untracked but **unrelated** to this
+   indexer work (pre-existing scratch files from earlier work on this branch) — don't assume
+   they belong together. `indexer/parsers/python/__pycache__/store.cpython-311.pyc` may show
+   modified (stray bytecode cache from running the *old* Python indexer's tests) — unrelated,
+   leave alone.
+1. `git checkout feature/treesitter-java-indexer` (all of this work — Java, Python, PHP,
+   JS/TS/React, and the final Kotlin increment — lives on this one branch; the name is stale
+   now that it covers more than Java, not worth renaming mid-flight).
+2. `git log --oneline -30` to see what's landed. As of this writing, the newest relevant commit
+   is `143ca70` (JS/TS/React pipeline wiring); that increment spans roughly `de0ff1d`..`143ca70`,
+   with `baba1a5`..`2063a65` being the earlier PHP increment and `85875e1` being Python. Design+
+   plan docs for each live under `docs/superpowers/specs/` and `docs/superpowers/plans/`
+   (`2026-10-09-js-ts-react-tree-sitter-indexer-{design,plan}...` for the most recent — good
+   reference for how much detail to put in Kotlin's plan).
 3. Sanity-check the existing engine still works before adding anything new:
    ```bash
    cd treesitter-indexer
-   .venv/bin/python3 -m unittest discover -s tests   # expect 89 passed, 0 failed
+   .venv/bin/python3 -m unittest discover -s tests   # expect 120 passed, 0 failed
    ```
    **Gotcha**: you must use `treesitter-indexer/.venv/bin/python3`, not a bare `python3` —
    plain `python3` will raise `ModuleNotFoundError: No module named 'ladybug'` even though the
@@ -134,23 +136,25 @@ archived `kuzu` package) currently covers:
   `docs/superpowers/plans/2026-10-09-php-tree-sitter-indexer.md`. 89 unit tests pass (up from
   60 pre-PHP); `scripts/compare_graphs_php.py` reports PASS; `lumen run --experimental-treesitter-php`
   verified end-to-end.
+- **JS/TS/React** — complete, same branch, wired behind `--experimental-treesitter-js` (the
+  pipeline's existing JS/TS/JSX/TSX/MJS/CJS language-category key is `"js"`, confirmed in
+  `pipeline/codedoc/language_registry.py` — NOT `"javascript"`). Full detail (including 6 real
+  bugs found via TDD, all fixed) is in the "JS/TS/React — done" section below; design+plan docs
+  at `docs/superpowers/specs/2026-10-09-js-ts-react-tree-sitter-indexer-design.md` and
+  `docs/superpowers/plans/2026-10-09-js-ts-react-tree-sitter-indexer.md`. 120 unit tests pass
+  (up from 89 pre-JS); `scripts/compare_graphs_js.py` reports PASS on both new fixtures;
+  `lumen run --experimental-treesitter-js` verified end-to-end.
 
-**Recommended remaining order: JS/TS/React → Kotlin** (PHP, done above, was deliberately
-sequenced ahead of both — see rationale below, now validated: the generalized
-`resolve_call_route(calleeName, args)` resolver it built is ready for both to reuse as-is).
+**Recommended remaining order: Kotlin** (the only language left). Lowest new-design risk for
+its dominant case (Spring/JAX-RS-annotated JVM backends — near-exact repeat of Java's
+`HAS_ANNOTATION`/`resolve_route` pattern), but the largest raw grammar surface (data classes,
+sealed types, coroutines, delegation), and a narrower deployment surface (non-Android JVM
+backends only) than Python/JS/PHP's near-universal presence. Ktor's call-based routing DSL
+should reuse `postprocess/call_routes.py::resolve_call_route()` — proven twice now (PHP's
+Laravel, JS's Express/Fastify) — rather than inventing a third variant.
 
-- **JS/TS/React next**: highest scope and risk of the two remaining (real TS type extraction,
-  an open React-detection design question, multiple confirmed CALLS bugs, zero existing
-  fixtures) — best tackled once the confidence-tier CALLS recipe and the call-route resolver
-  are both mature.
-- **Kotlin last**: lowest new-design risk for its dominant case (Spring/JAX-RS-annotated JVM
-  backends — near-exact repeat of Java's `HAS_ANNOTATION`/`resolve_route` pattern), but the
-  largest raw grammar surface (data classes, sealed types, coroutines, delegation), and a
-  narrower deployment surface (non-Android JVM backends only) than Python/JS/PHP's near-universal
-  presence.
-
-Each remaining language increment should get its own `/plan` pass when its turn comes (same
-process used for Python and PHP) rather than trying to plan both now.
+This final remaining increment should get its own `/plan` pass when picked up (same process
+used for Python, PHP, and JS/TS/React).
 
 ---
 
@@ -213,78 +217,72 @@ pattern would produce zero Workflow traces despite everything working as designe
 
 ---
 
-## JS/TS/React
+## JS/TS/React — done
 
-### Background
+Built `treesitter-indexer/js/extractor.py` + `js/calls.py` on two grammars for the first time
+in this engine (`tree-sitter-javascript` for `.js`/`.jsx`/`.mjs`/`.cjs`, `tree-sitter-typescript`'s
+`language_typescript()`/`language_tsx()` for `.ts`/`.tsx`, selected per file by extension). Both
+backend-routing mechanisms (Express/Fastify call-based via `resolve_call_route()`, NestJS
+decorator-based via `annotation_http_verb()` directly) convert to ordinary `HAS_ANNOTATION`
+edges at extraction time — same pattern as PHP's Laravel routes — so `build_js_workflows` reads
+`HAS_ANNOTATION` and calls the existing `resolve_route()` unchanged, needing no query union.
+React component/hook detection stayed a pure naming heuristic (PascalCase/`use*`-prefix) as
+planned — no JSX-return-type analysis. The pipeline's language-category key for this whole
+family is `"js"` (not `"javascript"`), confirmed in `pipeline/codedoc/language_registry.py`.
 
-The old `indexer/parsers/javascript/parse.js` (Babel-based, ~1090 lines) has several confirmed,
-concrete bugs beyond mere feature gaps:
-- **React "component-ness" is pure naming convention** (PascalCase regex for components,
-  `/^use[A-Z]/` for hooks) — no check that a "component" actually returns JSX.
-- **CALLS has only 2 of the usual 3 tiers, with no 0.50 fallback at all** — edges are *dropped*,
-  not downgraded, when they don't match. Relative-import resolution only (no `node_modules`,
-  no `tsconfig.json` path aliases, no directory `index.js` resolution).
-- **`this.method()` inside a class never produces a resolvable CALLS edge** — the code builds
-  a wrong target id that never matches an existing node, so the edge is silently dropped by a
-  final id-existence filter. Intra-class method calls are structurally invisible in the current
-  JS call graph. This is likely the single highest-value CALLS fix of the three languages.
-- **Schema/emission mismatches silently drop edges**: several shapes the parser tries to create
-  (`ArrowFunction->ArrowFunction`, `Component->Component`, `Hook->ArrowFunction`) aren't declared
-  combos in the `CALLS`/`USES_HOOK` rel tables — the resulting KuzuDB binder exceptions are
-  unconditionally caught-and-discarded by `store.js`, with zero visibility into how much data
-  is lost this way.
-- **Zero backend framework detection** (Express/NestJS/Fastify/Next.js API routes) — see
-  `backlog/js-backend-entrypoint-detection.md` (already-scoped, unimplemented). A separate,
-  purely textual/regex signal in `pipeline/codedoc/repo_classification.py` feeds repo-type
-  classification only — it never reaches the graph.
-- **TypeScript**: class property type annotations work; interface *method* signatures
-  (`TSMethodSignature`) are silently skipped; the `isInterface: true` flag is dropped by
-  `store.js`'s property write-allowlist, so classes and interfaces are indistinguishable in the
-  persisted graph; no type-alias or generics extraction at all.
-- **Zero existing JS/TS/React fixtures or tests anywhere in the repo** — this increment starts
-  its validation harness from nothing, unlike PHP/Python which can extend existing precedent.
-- (Documentation note, not an indexer bug, but worth fixing while in this area: `CLAUDE.md`
-  currently states route-map/component-boundaries artifacts are conditionally "suppressed for
-  JS-frontend repos" — confirmed stale; they were later removed from `artifact_planner.py`'s
-  packs entirely, for every repo type. Two existing tests fail today asserting the old,
-  superseded conditional-suppression behavior:
-  `test_fullstack_route_map_becomes_conditional_with_weak_frontend_signal` and
-  `test_fullstack_route_map_stays_required_with_strong_frontend_signal`. Unrelated to the new
-  indexer engine — a separate, small, independent fix worth doing whenever convenient.)
+**Real bugs found and fixed via TDD while implementing (worth knowing before touching this code
+again):**
+- A class property's name is in tree-sitter's `property` field, not `name` (unlike
+  `method_definition`, which does use `name`) — this silently broke the common React
+  class-component `handleClick = () => {...}` pattern (every such field got an empty name).
+- Inline named function expressions passed directly as a route handler
+  (`app.get('/x', function show(req, res) {...})`) were never captured by the top-level scan
+  (which only walks declared top-level callables) — the route would never resolve a target at
+  all. Fixed by emitting the handler as its own `Function` node on first use, inside the routing
+  recognition code itself.
+- **Decorators parse with a fundamentally different AST shape between the two grammars**: in
+  plain JS, a decorator is nested *inside* `method_definition` as a child; in TS, it's a
+  positional sibling in `class_body` before the member it decorates. The decorator-pairing logic
+  only handles the TS shape — confirmed empirically this is fine in practice, since NestJS (the
+  only decorator-based routing framework in scope) is always written in TypeScript; the fixture
+  originally tried a `.js`-file decorator case and silently produced zero entry points until
+  moved to a `.ts` file.
+- `REFERENCES_CONFIG` (HTTP-dependency detection) and `HAS_PARAMETER`/`RETURNS` all lacked
+  `Function`/`ArrowFunction`/`Component`/`Hook` on their FROM side — JS is the first language
+  where non-Method/Constructor callables are extremely common (top-level functions, React
+  components/hooks), so every one of these silently dropped a real edge until fixed additively.
+  Same "unrecognized combo → binder exception → swallowed" failure class as every prior
+  increment's schema gaps.
+- `scripts/inspect_graph.py`'s entry-points and node-count sections were hardcoded to `Method`
+  and a fixed table list respectively — generalized to also check `Function`/`ArrowFunction`
+  (entry points) and include `Component`/`Hook`/`ArrowFunction` (node counts), since this is the
+  first language where real signal lives on those tables.
+- `compare_graphs_js.py`'s own `EXPECTED_NEW_ONLY_*` checks were initially global rather than
+  per-fixture — `mini-react-app` (no HTTP routes at all) was falsely flagged for not having
+  `Workflow`/`WORKFLOW_STEP` nodes that only `mini-express-service` is expected to produce.
 
-### Goal
+**Explicitly deferred, not forgotten:**
+- Next.js file-based API routing (`pages/api/*.js`/`app/api/*/route.js`) — a third routing shape
+  (filesystem convention, not call-based or decorator-based) genuinely different from both
+  mechanisms this increment built.
+- `tsconfig.json` path aliases and `node_modules` resolution for CALLS/imports.
+- Full generic-parameter modeling (`Array<User>` only captures the base name `Array`).
+- CommonJS `require()`/`module.exports` is NOT modeled as import resolution at all — only ES
+  `import`/`export` syntax resolves cross-file (confirmed via real fixture testing: a
+  `require()`-based handler reference across files never resolves a target, falling through to
+  the 0.50 global tier at best). The `mini-express-service` fixture uses ES modules for exactly
+  this reason, despite CommonJS being very common in real Express code.
+- The stale `CLAUDE.md` route-map/component-boundaries claim — unrelated documentation fix.
 
-Build the new extractor on `tree-sitter-javascript` + `tree-sitter-typescript` (two grammars,
-selected by file extension — a first for this project). Bundles four largely independent
-problems, each needing its own explicit design decision:
-
-1. Fix the `this.method()` id-construction bug and add the missing 0.50 CALLS tier, applying
-   the same same-corpus type-index recipe used for Java/Python.
-2. Fix the schema/emission mismatches by aligning emitted shapes with declared table combos
-   from the start — no silent-catch-and-discard inherited from the old engine.
-3. Real TypeScript structure: interface method signatures, a real `isInterface`/`isClass`
-   distinction that survives persistence, type aliases, generics — none of which have a
-   Python/PHP/Java analog to reuse.
-4. An explicit decision on React component detection: continue the PascalCase/`use*` naming
-   heuristic (cheap, consistent with the engine's syntactic-not-semantic philosophy elsewhere)
-   vs. real JSX-return-type detection (more accurate, first semantic-analysis-flavored
-   departure from that philosophy). Recommendation from this session's research: start with the
-   heuristic for parity and revisit only if fixture testing shows a real accuracy problem.
-5. Apply the `resolve_call_route` mechanism built during the PHP increment to
-   Express/Fastify/NestJS/Next.js routing — extending it for NestJS's decorator-based routes
-   (`@Get()`) via the `HAS_ANNOTATION` mechanism once JS decorators are wired into it, rather
-   than inventing a JS-specific decorator mechanism from scratch.
-
-### Files likely touched
-
-- `treesitter-indexer/javascript/extractor.py` (new) — or `js/`, naming TBD when this increment
-  is planned; needs a strategy for TS-vs-JS grammar selection per file
-- `javascript/calls.py` (new)
-- `postprocess/workflow_builder.py` — new `build_js_workflows` (parallel to `build_jvm_workflows`
-  and `build_python_workflows`, not a modification of either)
-- `postprocess/http_routes.py` / wherever `resolve_call_route` ends up living after PHP
-- New fixtures under `e2e-test/fixtures/` — first ones for this language family
-- `treesitter-indexer/scripts/compare_graphs_js.py`
+**Fixtures**: two, since no single fixture exercises both gaps closed —
+`e2e-test/fixtures/mini-express-service/` (Express call-based routes via named top-level
+functions/arrow-functions, a NestJS `@Get()` controller in a `.ts` file, a same-file `this`-free
+constructor-target CALLS edge, a free-function import-resolved (0.90) chain producing a real
+Workflow trace, and a module-level-instance property-mediated call demonstrating the documented
+0.50-tier scope boundary) and `e2e-test/fixtures/mini-react-app/` (a function component + hook
+via naming heuristic, `USES_HOOK` vs. `CALLS` distinction, and a class component's
+`handleClick = () => { this.increment(); }` pattern — the single most direct regression-proof
+of the `this.method()` fix, inside realistic React code rather than a synthetic unit test).
 
 ---
 
