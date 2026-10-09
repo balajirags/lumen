@@ -336,6 +336,79 @@ public interface PlaceholderClient {
             result = store.execute("MATCH (a:Component)-[c:HAS_PARAMETER]->(b:Parameter) RETURN count(c) AS c")
             self.assertEqual(result.get_next()[0], 1)
 
+    def test_schema_accepts_package_containing_data_class(self):
+        """Regression guard: a top-level data/sealed class had nowhere to
+        attach its package-containment edge at all."""
+        import tempfile
+        import graph_store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = graph_store.LadybugGraphStore(f"{tmp}/test-db")
+            store.init_schema()
+            store.execute(
+                "CREATE (p:Package {id: 'pkg1', name: 'com.example', qualifiedName: 'com.example', "
+                "external: false, language: 'kotlin', kind: 'Package', normKind: 'x'})"
+            )
+            store.execute(
+                "CREATE (d:DataClass {id: 'd1', name: 'Order', qualifiedName: 'com.example.Order', "
+                "external: false, language: 'kotlin', kind: 'DataClass', normKind: 'x'})"
+            )
+            store.execute(
+                "MATCH (p:Package {id: 'pkg1'}), (d:DataClass {id: 'd1'}) "
+                "CREATE (p)-[:CONTAINS {language: 'kotlin', kind: 'CONTAINS', normKind: 'x'}]->(d)"
+            )
+            result = store.execute("MATCH (p:Package)-[c:CONTAINS]->(d:DataClass) RETURN count(c) AS c")
+            self.assertEqual(result.get_next()[0], 1)
+
+    def test_schema_accepts_class_extending_sealed_class(self):
+        """Regression guard: SealedClass was never a valid EXTENDS target at
+        all, so the entire sealed-subtype pattern could never persist."""
+        import tempfile
+        import graph_store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = graph_store.LadybugGraphStore(f"{tmp}/test-db")
+            store.init_schema()
+            store.execute(
+                "CREATE (s:SealedClass {id: 's1', name: 'PaymentResult', qualifiedName: 'PaymentResult', "
+                "external: false, language: 'kotlin', kind: 'SealedClass', normKind: 'x'})"
+            )
+            store.execute(
+                "CREATE (c:Class {id: 'c1', name: 'PaymentSuccess', qualifiedName: 'PaymentSuccess', "
+                "external: false, language: 'kotlin', kind: 'Class', normKind: 'x'})"
+            )
+            store.execute(
+                "MATCH (c:Class {id: 'c1'}), (s:SealedClass {id: 's1'}) "
+                "CREATE (c)-[:EXTENDS {language: 'kotlin', kind: 'EXTENDS', normKind: 'x'}]->(s)"
+            )
+            result = store.execute("MATCH (c:Class)-[e:EXTENDS]->(s:SealedClass) RETURN count(e) AS c")
+            self.assertEqual(result.get_next()[0], 1)
+
+    def test_schema_accepts_class_level_delegation(self):
+        """Regression guard: DELEGATES_TO only had Property on its FROM side,
+        but real Kotlin class-level delegation (`class D(h: Helper) : Helper
+        by h`) is FROM the class itself, not a property."""
+        import tempfile
+        import graph_store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = graph_store.LadybugGraphStore(f"{tmp}/test-db")
+            store.init_schema()
+            store.execute(
+                "CREATE (c:Class {id: 'c1', name: 'DelegatingClass', qualifiedName: 'DelegatingClass', "
+                "external: false, language: 'kotlin', kind: 'Class', normKind: 'x'})"
+            )
+            store.execute(
+                "CREATE (i:Interface {id: 'i1', name: 'Helper', qualifiedName: 'Helper', "
+                "external: false, language: 'kotlin', kind: 'Interface', normKind: 'x'})"
+            )
+            store.execute(
+                "MATCH (c:Class {id: 'c1'}), (i:Interface {id: 'i1'}) "
+                "CREATE (c)-[:DELEGATES_TO {language: 'kotlin', kind: 'DELEGATES_TO', normKind: 'x'}]->(i)"
+            )
+            result = store.execute("MATCH (c:Class)-[d:DELEGATES_TO]->(i:Interface) RETURN count(d) AS c")
+            self.assertEqual(result.get_next()[0], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -61,9 +61,21 @@ NODE_TYPES = [
 # Same shape as store.py's REL_DEFINITIONS, except CALLS carries
 # confidence/reason (Java's shape) instead of resolved BOOLEAN.
 REL_DEFINITIONS = [
-    "CREATE REL TABLE IF NOT EXISTS CONTAINS (FROM Package TO Class, FROM Package TO Interface, FROM Package TO Enum, FROM Package TO Record, FROM Package TO Function, FROM Class TO Method, FROM Class TO Constructor, FROM Class TO Field, FROM Interface TO Method, FROM Interface TO Field, FROM Module TO Function, FROM Module TO ArrowFunction, FROM Module TO Component, FROM Module TO Hook, FROM Module TO Class, FROM Class TO Function, FROM Class TO ArrowFunction, FROM DataClass TO Method, FROM DataClass TO Property, FROM SealedClass TO Method, FROM SealedClass TO Property, FROM ObjectDecl TO Method, FROM ObjectDecl TO Property, FROM CompanionObject TO Method, FROM CompanionObject TO Property, FROM Class TO Property, FROM Class TO InitBlock, FROM Package TO TypeAlias, FROM Package TO ObjectDecl, FROM ConfigFile TO ConfigProperty)",
-    "CREATE REL TABLE IF NOT EXISTS EXTENDS (FROM Class TO Class, FROM Interface TO Interface, FROM Component TO Class, FROM DataClass TO Class, FROM SealedClass TO Class)",
-    "CREATE REL TABLE IF NOT EXISTS IMPLEMENTS (FROM Class TO Interface, FROM DataClass TO Interface, FROM SealedClass TO Interface, FROM ObjectDecl TO Interface)",
+    # Kotlin additions to CONTAINS: Package needs DataClass/SealedClass/
+    # SealedInterface (a top-level data/sealed class/interface had nowhere
+    # to attach its package-containment edge at all); DataClass/SealedClass
+    # need Constructor (both have primary constructors exactly like
+    # ordinary classes); SealedInterface needs Method/Property (sealed
+    # interfaces have body members too).
+    "CREATE REL TABLE IF NOT EXISTS CONTAINS (FROM Package TO Class, FROM Package TO Interface, FROM Package TO Enum, FROM Package TO Record, FROM Package TO Function, FROM Package TO DataClass, FROM Package TO SealedClass, FROM Package TO SealedInterface, FROM Class TO Method, FROM Class TO Constructor, FROM Class TO Field, FROM Interface TO Method, FROM Interface TO Field, FROM Module TO Function, FROM Module TO ArrowFunction, FROM Module TO Component, FROM Module TO Hook, FROM Module TO Class, FROM Class TO Function, FROM Class TO ArrowFunction, FROM DataClass TO Method, FROM DataClass TO Property, FROM DataClass TO Constructor, FROM SealedClass TO Method, FROM SealedClass TO Property, FROM SealedClass TO Constructor, FROM SealedInterface TO Method, FROM SealedInterface TO Property, FROM ObjectDecl TO Method, FROM ObjectDecl TO Property, FROM CompanionObject TO Method, FROM CompanionObject TO Property, FROM Class TO Property, FROM Class TO InitBlock, FROM Package TO TypeAlias, FROM Package TO ObjectDecl, FROM ConfigFile TO ConfigProperty)",
+    # Kotlin additions to EXTENDS: SealedClass was never a valid TO target
+    # at all (the entire sealed-subtype pattern `class Foo : SealedParent()`
+    # could never persist), and ObjectDecl was never a valid FROM side (the
+    # common `object Success : SealedParent()` sealed-subtype-as-object
+    # pattern).
+    "CREATE REL TABLE IF NOT EXISTS EXTENDS (FROM Class TO Class, FROM Interface TO Interface, FROM Component TO Class, FROM DataClass TO Class, FROM SealedClass TO Class, FROM Class TO SealedClass, FROM DataClass TO SealedClass, FROM ObjectDecl TO Class, FROM ObjectDecl TO SealedClass, FROM SealedInterface TO Interface)",
+    # Kotlin addition to IMPLEMENTS: FROM SealedInterface TO Interface
+    "CREATE REL TABLE IF NOT EXISTS IMPLEMENTS (FROM Class TO Interface, FROM DataClass TO Interface, FROM SealedClass TO Interface, FROM ObjectDecl TO Interface, FROM SealedInterface TO Interface)",
     # Method->Function / Constructor->Function added for PHP, which (unlike
     # Java) commonly calls free/global functions directly from inside a class
     # method (e.g. Laravel's redirect()/response()/view() helpers) -- the
@@ -128,9 +140,21 @@ REL_DEFINITIONS = [
     "CREATE REL TABLE IF NOT EXISTS DECORATES (FROM Decorator TO Function, FROM Decorator TO Method, FROM Decorator TO Class, FROM Decorator TO AsyncFunction, value STRING)",
     "CREATE REL TABLE IF NOT EXISTS YIELDS (FROM Generator TO Class)",
     "CREATE REL TABLE IF NOT EXISTS EXTENSION_OF (FROM ExtensionFunction TO Class, FROM ExtensionFunction TO Interface, FROM ExtensionFunction TO DataClass)",
-    "CREATE REL TABLE IF NOT EXISTS DELEGATES_TO (FROM Property TO Class, FROM Property TO Interface)",
-    "CREATE REL TABLE IF NOT EXISTS SEALED_SUBTYPE (FROM SealedClass TO Class, FROM SealedClass TO DataClass, FROM SealedClass TO ObjectDecl, FROM SealedInterface TO Class, FROM SealedInterface TO Interface)",
-    "CREATE REL TABLE IF NOT EXISTS COMPANION_OF (FROM CompanionObject TO Class, FROM CompanionObject TO DataClass, FROM CompanionObject TO SealedClass)",
+    # Kotlin addition to DELEGATES_TO: real class-level interface delegation
+    # (`class D(h: Helper) : Helper by h`) is FROM the class itself, not a
+    # Property -- property-level delegation (`val x by lazy {...}`)
+    # delegates to an EXPRESSION, not a type, so it is deliberately NOT
+    # modeled as an edge at all (same as the old KotlinSourceParser.java,
+    # which only sets an `isDelegated`-shaped flag) -- see
+    # kotlin/extractor.py's module docstring. The existing FROM Property
+    # TO ... combo is left alone (unused by this increment, harmless).
+    "CREATE REL TABLE IF NOT EXISTS DELEGATES_TO (FROM Property TO Class, FROM Property TO Interface, FROM Class TO Class, FROM Class TO Interface, FROM DataClass TO Interface, FROM SealedClass TO Interface, FROM ObjectDecl TO Interface)",
+    # Kotlin additions to SEALED_SUBTYPE: interface-side equivalents of what
+    # already exists for classes, plus nested sealed-class hierarchies.
+    "CREATE REL TABLE IF NOT EXISTS SEALED_SUBTYPE (FROM SealedClass TO Class, FROM SealedClass TO DataClass, FROM SealedClass TO ObjectDecl, FROM SealedClass TO SealedClass, FROM SealedInterface TO Class, FROM SealedInterface TO Interface, FROM SealedInterface TO DataClass, FROM SealedInterface TO ObjectDecl, FROM SealedInterface TO SealedInterface)",
+    # Kotlin addition to COMPANION_OF: a companion object can be declared
+    # inside an interface, not just a class.
+    "CREATE REL TABLE IF NOT EXISTS COMPANION_OF (FROM CompanionObject TO Class, FROM CompanionObject TO DataClass, FROM CompanionObject TO SealedClass, FROM CompanionObject TO Interface, FROM CompanionObject TO SealedInterface)",
     "CREATE REL TABLE IF NOT EXISTS SUSPENDS (FROM SuspendFunction TO SuspendFunction, FROM SuspendFunction TO Method)",
     # Links a @Value("${...}")-annotated Java field/parameter/method to the
     # ConfigProperty it reads (config/extractor.py's link_config_usages()), and
