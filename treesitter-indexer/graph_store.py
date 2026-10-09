@@ -121,7 +121,13 @@ REL_DEFINITIONS = [
     # handler (the target of a resolved resolve_call_route() call) is very
     # commonly a plain Function or ArrowFunction, not a class Method the
     # way every prior annotation-based language's routes have been.
-    "CREATE REL TABLE IF NOT EXISTS HAS_ANNOTATION (FROM Class TO AnnotationType, FROM Interface TO AnnotationType, FROM Method TO AnnotationType, FROM Constructor TO AnnotationType, FROM Field TO AnnotationType, FROM Property TO AnnotationType, FROM ExtensionFunction TO AnnotationType, FROM Function TO AnnotationType, FROM ArrowFunction TO AnnotationType, value STRING)",
+    # SuspendFunction/DataClass/SealedClass/SealedInterface/ObjectDecl added
+    # for Kotlin -- annotation usage is emitted on every declaration type
+    # kotlin/extractor.py's _emit_annotations is called on (any class kind,
+    # any function kind), including realistic Spring patterns like
+    # `@ConfigurationProperties data class AppConfig(...)` or a suspend
+    # function annotated as a Ktor/Spring handler.
+    "CREATE REL TABLE IF NOT EXISTS HAS_ANNOTATION (FROM Class TO AnnotationType, FROM Interface TO AnnotationType, FROM Method TO AnnotationType, FROM Constructor TO AnnotationType, FROM Field TO AnnotationType, FROM Property TO AnnotationType, FROM ExtensionFunction TO AnnotationType, FROM Function TO AnnotationType, FROM ArrowFunction TO AnnotationType, FROM SuspendFunction TO AnnotationType, FROM DataClass TO AnnotationType, FROM SealedClass TO AnnotationType, FROM SealedInterface TO AnnotationType, FROM ObjectDecl TO AnnotationType, value STRING)",
     "CREATE REL TABLE IF NOT EXISTS OVERRIDES (FROM Method TO Method, FROM ExtensionFunction TO Method)",
     "CREATE REL TABLE IF NOT EXISTS THROWS (FROM Method TO Class)",
     "CREATE REL TABLE IF NOT EXISTS SOURCE_FILE (FROM Class TO File, FROM Interface TO File, FROM Enum TO File, FROM Record TO File, FROM AnnotationType TO File, FROM Module TO File, FROM Component TO File, FROM Function TO File, FROM DataClass TO File, FROM SealedClass TO File, FROM SealedInterface TO File, FROM ObjectDecl TO File, FROM ExtensionFunction TO File)",
@@ -179,7 +185,11 @@ ABSTRACTION_NODE_DEFS = [
 ]
 
 ABSTRACTION_REL_DEFS = [
-    "CREATE REL TABLE IF NOT EXISTS WORKFLOW_STEP (FROM Method TO Workflow, FROM Function TO Workflow, FROM AsyncFunction TO Workflow, FROM ArrowFunction TO Workflow, FROM Component TO Workflow, FROM Hook TO Workflow, step INT64)",
+    # SuspendFunction added for Kotlin -- build_kotlin_workflows's BFS
+    # walks Method AND SuspendFunction nodes (a coroutine-based entry point
+    # is as likely as a plain method), so a Workflow step landing on a
+    # SuspendFunction needs this combo to persist.
+    "CREATE REL TABLE IF NOT EXISTS WORKFLOW_STEP (FROM Method TO Workflow, FROM Function TO Workflow, FROM AsyncFunction TO Workflow, FROM ArrowFunction TO Workflow, FROM Component TO Workflow, FROM Hook TO Workflow, FROM SuspendFunction TO Workflow, step INT64)",
     "CREATE REL TABLE IF NOT EXISTS IN_DOMAIN (FROM Class TO Domain, FROM Interface TO Domain, FROM Method TO Domain, FROM Component TO Domain, FROM Module TO Domain, FROM AsyncFunction TO Domain, FROM Function TO Domain, FROM ArrowFunction TO Domain)",
 ]
 

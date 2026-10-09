@@ -409,6 +409,33 @@ public interface PlaceholderClient {
             result = store.execute("MATCH (c:Class)-[d:DELEGATES_TO]->(i:Interface) RETURN count(d) AS c")
             self.assertEqual(result.get_next()[0], 1)
 
+    def test_schema_accepts_suspend_function_with_annotation(self):
+        """Regression guard found via real build_kotlin_workflows testing:
+        HAS_ANNOTATION had no SuspendFunction on its FROM side at all, so a
+        suspend-function Spring/Ktor handler's annotation usage could never
+        persist."""
+        import tempfile
+        import graph_store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = graph_store.LadybugGraphStore(f"{tmp}/test-db")
+            store.init_schema()
+            store.execute(
+                "CREATE (f:SuspendFunction {id: 's1', name: 's', qualifiedName: 's', "
+                "external: false, language: 'kotlin', kind: 'SuspendFunction', normKind: 'x'})"
+            )
+            store.execute(
+                "CREATE (t:AnnotationType {id: 'ann1', name: 'GetMapping', qualifiedName: 'GetMapping', "
+                "external: true, language: 'kotlin', kind: 'AnnotationType', normKind: 'x'})"
+            )
+            store.execute(
+                "MATCH (f:SuspendFunction {id: 's1'}), (t:AnnotationType {id: 'ann1'}) "
+                "CREATE (f)-[:HAS_ANNOTATION {value: '/orders', "
+                "language: 'kotlin', kind: 'HAS_ANNOTATION', normKind: 'x'}]->(t)"
+            )
+            result = store.execute("MATCH (a:SuspendFunction)-[c:HAS_ANNOTATION]->(b:AnnotationType) RETURN count(c) AS c")
+            self.assertEqual(result.get_next()[0], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
