@@ -3,10 +3,11 @@ set -euo pipefail
 
 # Wholly independent install script -- mirrors the shape of
 # indexer/install.sh's cmg-* stanzas but is self-contained and never touches
-# anything under indexer/. Produces bin/cmg-java-ts, bin/cmg-python-ts, and
-# bin/cmg-php-ts, dispatched to from pipeline/codedoc/stages/indexer.py when
+# anything under indexer/. Produces bin/cmg-java-ts, bin/cmg-python-ts,
+# bin/cmg-php-ts, and bin/cmg-js-ts, dispatched to from
+# pipeline/codedoc/stages/indexer.py when
 # --experimental-treesitter-java/--experimental-treesitter-python/
-# --experimental-treesitter-php is set.
+# --experimental-treesitter-php/--experimental-treesitter-js is set.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BIN_DIR="$SCRIPT_DIR/bin"
@@ -45,3 +46,10 @@ exec "$VENV_DIR/bin/python3" "$SCRIPT_DIR/parse_php.py" "\$@"
 EOF
 chmod +x "$BIN_DIR/cmg-php-ts"
 echo "  ✓ bin/cmg-php-ts"
+
+cat > "$BIN_DIR/cmg-js-ts" <<EOF
+#!/usr/bin/env bash
+exec "$VENV_DIR/bin/python3" "$SCRIPT_DIR/parse_js.py" "\$@"
+EOF
+chmod +x "$BIN_DIR/cmg-js-ts"
+echo "  ✓ bin/cmg-js-ts"
