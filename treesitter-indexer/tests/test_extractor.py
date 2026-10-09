@@ -179,6 +179,32 @@ public interface PlaceholderClient {
         props = [n for n in graph["nodes"] if n["type"] == "CONFIG_PROPERTY"]
         self.assertEqual(props, [])
 
+    def test_schema_accepts_method_calling_free_function(self):
+        """Regression guard for the PHP increment's additive CALLS combo --
+        must not regress Java, which never emits this combo itself but must
+        not error if graph_store.py's schema is malformed."""
+        import tempfile
+        import graph_store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = graph_store.LadybugGraphStore(f"{tmp}/test-db")
+            store.init_schema()
+            store.execute(
+                "CREATE (m:Method {id: 'm1', name: 'm', qualifiedName: 'm', "
+                "external: false, language: 'java', kind: 'Method', normKind: 'x'})"
+            )
+            store.execute(
+                "CREATE (f:Function {id: 'f1', name: 'f', qualifiedName: 'f', "
+                "external: false, language: 'php', kind: 'Function', normKind: 'x'})"
+            )
+            store.execute(
+                "MATCH (m:Method {id: 'm1'}), (f:Function {id: 'f1'}) "
+                "CREATE (m)-[:CALLS {confidence: 0.9, reason: 'import-resolved', "
+                "language: 'php', kind: 'CALLS', normKind: 'x'}]->(f)"
+            )
+            result = store.execute("MATCH (a:Method)-[c:CALLS]->(b:Function) RETURN count(c) AS c")
+            self.assertEqual(result.get_next()[0], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
