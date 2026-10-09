@@ -18,12 +18,13 @@ Preflight and the indexer are shared, unmodified, by every pipeline. Only the ag
 (stage 2) is pluggable — new pipelines add a new CLI command + pipeline module + agent-stage
 module and reuse preflight/indexer as-is. See "Pluggable agent-stage pipelines" below.
 
-This is a monorepo containing two sub-projects:
+This is a monorepo containing three sub-projects:
 
 | Directory | Former repo | Purpose |
 |---|---|---|
 | `pipeline/` | `reverse-eng-agent` | Python LLM pipeline: indexer stage, agent (supervisor+subagents), MkDocs builder |
-| `indexer/` | `code-mem-graph` | Indexer runtimes: Java fat JAR, JS parser, Python parser, PHP parser |
+| `indexer/` | `code-mem-graph` | Stable indexer runtimes: Java fat JAR, JS parser, Python parser, PHP parser (writes to KuzuDB) |
+| `treesitter-indexer/` | — (new) | Experimental, opt-in replacement indexer engine: one Python + tree-sitter codebase covering Java, Python, PHP, JS/TS/React, and Kotlin, writing to LadybugDB. See "Sub-project: treesitter-indexer/" below. |
 
 ---
 
@@ -80,6 +81,15 @@ cd pipeline && uv run lumen run /path/to/repo --provider anthropic --model claud
 # security-audit pipeline
 make lumen-security-audit REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
 cd pipeline && uv run lumen security-audit /path/to/repo --provider anthropic --model claude-sonnet-4-6
+```
+
+Optional: build the experimental tree-sitter indexer engine (`treesitter-indexer/`, see
+"Sub-project: treesitter-indexer/" below) to try `--experimental-treesitter-<language>` on
+`lumen run`:
+```bash
+cd treesitter-indexer && ./install.sh    # requires uv; not wired into make lumen-install
+cd pipeline && uv run lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6 \
+  --experimental-treesitter-python   # or -java / -php / -js / -kotlin
 ```
 
 ### Native bundle (no Docker, no dev tools)
@@ -209,7 +219,7 @@ Key files:
 - `pipeline/codedoc/mcp_server.py` — MCP server backed by `kg_tools`; supports the HTTP MCP flow exposed by `make lumen-mcp` and `make lumen-docker-mcp`
 - `pipeline/codedoc/llm.py` — LLM abstraction: `ClaudeProvider`, `OllamaProvider`, `OpenAIProvider`
 - `pipeline/codedoc/kg_tools/toolkit.py` — `ReverseEngineerToolkit` (40+ graph query tools including `get_workflows`, `get_workflow_steps`, `get_domains`)
-- `pipeline/codedoc/kg_tools/backends.py` — `KuzuBackend`, `Neo4jBackend`
+- `pipeline/codedoc/kg_tools/backends.py` — `KuzuBackend`, `LadybugBackend`, `Neo4jBackend`; `create_graph_backend(db_path, backend=None)` auto-detects KuzuDB vs. LadybugDB from the on-disk file header and imports only the matching native module, since `kuzu`'s and `ladybug`'s native extensions cannot coexist in one process in either import order
 - `pipeline/codedoc/prompts/analyst-domain.md` — Business Analyst system prompt (writes 2 artifacts)
 - `pipeline/codedoc/prompts/analyst-flows.md` — Integration Architect system prompt (writes 2–3 artifacts)
 - `pipeline/codedoc/prompts/analyst-tech.md` — Staff Engineer system prompt (writes 1 artifact)
@@ -406,6 +416,94 @@ Release workflow:
 
 ---
 
+## Sub-project: treesitter-indexer/
+
+Experimental, opt-in replacement for `indexer/`'s per-language indexers. Not wired into Docker,
+the native bundle, or any Makefile target yet — it's a standalone Python package with its own
+`install.sh`/`.venv`, invoked only via `lumen run`'s `--experimental-treesitter-<language>`
+flags (off by default; falls back to the stable `indexer/`-based engine for every repo unless a
+flag is passed). `pipeline/` can read either engine's output: `create_graph_backend()`
+(`pipeline/codedoc/kg_tools/backends.py`) auto-detects which one wrote a given database from its
+file header, so the rest of the agent pipeline (toolkit, prompts, builder) runs unmodified
+regardless of which indexer produced the graph.
+
+**Why it exists**: KuzuDB (used by every `indexer/` runtime) was archived in Oct 2025 after
+Kùzu Inc.'s acquisition by Apple. LadybugDB is the actively maintained fork. Rather than
+migrate the existing four per-language indexers in place, this is a from-scratch replatform:
+one Python + tree-sitter codebase instead of four separate runtimes (Java fat JAR, Node/Babel
+parser, Python AST parser, PHP/`nikic`-parser), writing to one canonical LadybugDB schema. It
+was built and validated one language at a time, each increment checked against the stable
+engine via a `compare_graphs_<language>.py` script before moving to the next. **All five
+language increments (Java, Python, PHP, JS/TS/React, Kotlin) are complete** — full per-language
+design docs, plans, and bug-by-bug history are in
+`backlog/treesitter-indexer-remaining-languages.md` and `docs/superpowers/specs/` /
+`docs/superpowers/plans/` (one `{design,plan}` pair per language); this section is a summary,
+not a replacement for that detail.
+
+Key files:
+- `treesitter-indexer/graph_store.py` — the single cross-language LadybugDB schema (all node/rel
+  tables for every language live in one file; purely additive — a new language only ever adds
+  new FROM/TO combos or new tables, never changes an existing combo's meaning)
+- `treesitter-indexer/graph_model.py` — in-memory graph representation shared by every
+  extractor before it's handed to `graph_store.py` for writing
+- `treesitter-indexer/{java,python,php,js,kotlin}/extractor.py` + `calls.py` — one pair per
+  language: a tree-sitter AST walk producing structural nodes/rels, plus a same-corpus CALLS
+  confidence-tier resolver (0.95 same-file / 0.90 import-resolved / 0.50 global-fallback,
+  reimplemented per language, not shared code, because the actual resolution rules differ)
+- `treesitter-indexer/postprocess/workflow_builder.py` — `build_<language>_workflows()` per
+  language: BFS from HTTP-annotated entry points to repository/event terminals, emitting
+  `Workflow`/`WORKFLOW_STEP` nodes (mirrors `indexer/app/.../WorkflowBuilder.java`'s role for the
+  old engine)
+- `treesitter-indexer/postprocess/domain_detector.py` — label-propagation `Domain` clustering,
+  same role as `indexer/app/.../DomainDetector.java`
+- `treesitter-indexer/postprocess/http_routes.py` — `resolve_route()`/`annotation_http_verb()`:
+  generic, vocabulary-tokenizing (never framework-name-hardcoded) resolution for
+  annotation/decorator-shaped routing (Spring, JAX-RS, FastAPI, NestJS decorators, Kotlin+Spring)
+- `treesitter-indexer/postprocess/call_routes.py` — `resolve_call_route()`: the equivalent
+  resolver for *call-based* routing DSLs (Laravel's `Route::get(...)`, Express/Fastify,
+  Ktor's `routing { get(...) { ... } }`) — built once during the PHP increment, reused unchanged
+  by JS/TS and Kotlin
+- `treesitter-indexer/postprocess/layer_classification.py` — architectural-layer labeling
+  (controller/service/repository/etc.), same tokenize-and-match philosophy as `http_routes.py`
+- `treesitter-indexer/http_url_detection.py` — `looks_like_url()`: generic HTTP-dependency
+  string-literal detection, shared by every language's extractor
+- `treesitter-indexer/parse_{java→parse.py,python,php,js,kotlin}.py` — one CLI entry point per
+  language (`parse.py` is Java's, named before the other languages existed)
+- `treesitter-indexer/install.sh` — builds `.venv` via `uv sync` and generates the
+  `bin/cmg-{java,python,php,js,kotlin}-ts` wrapper binaries `pipeline/codedoc/stages/indexer.py`
+  dispatches to; run manually (`cd treesitter-indexer && ./install.sh`) before using any
+  `--experimental-treesitter-*` flag — there is no Makefile target for this yet
+- `treesitter-indexer/scripts/inspect_graph.py` — prints entry points, Workflows, Domains, and
+  sample CALLS edges (with confidence tier) for any LadybugDB database; the fastest way to
+  eyeball whether extraction produced real signal without going through `lumen run` or an LLM
+- `treesitter-indexer/scripts/compare_graphs_<language>.py` — per-language validation harness:
+  runs both the old engine and the new one against a shared fixture and diffs counts.
+  Comparisons are *intentionally asymmetric* — each script lists the specific tables/edges the
+  old engine is known to never produce and asserts zero-on-old/non-zero-on-new for exactly those,
+  rather than treating any count mismatch as a regression
+- `treesitter-indexer/scripts/_dump_graph.py` — subprocess-isolated query runner; `kuzu`
+  (old engine) and `ladybug` (new engine) cannot both be imported in one process, so any tool
+  needing to read both (like `compare_graphs_<language>.py`) must dispatch each read via
+  `python3 _dump_graph.py --backend kuzu|ladybug` as a separate subprocess
+- `treesitter-indexer/tests/` — unit tests, one file per language/mechanism; run via
+  `treesitter-indexer/.venv/bin/python3 -m unittest discover -s tests` (must use that venv's
+  `python3`, not a bare one — plain `python3` lacks the `ladybug` package)
+
+Dedicated fixtures (never a mutation of an `e2e-test/fixtures/` entry used by the *old* engine's
+regression suite): `mini-spring-app` (Java), `mini-python-service` (Python), `mini-php-service`
+(PHP), `mini-express-service` + `mini-react-app` (JS/TS/React), `mini-kotlin-service` (Kotlin).
+None of these are wired into `e2e-test/test-lumen.sh` — they're used only by their language's own
+`compare_graphs_<language>.py`.
+
+The pipeline's language-category keys (`pipeline/codedoc/language_registry.py`) are `"jvm"`
+(Java **and** Kotlin share this one key), `"js"`, `"php"`, `"python"` — there is no dedicated
+`"kotlin"` key. `should_use_treesitter_kotlin()` (`pipeline/codedoc/stages/indexer.py`)
+distinguishes Java from Kotlin via `state.language_flavors` instead, only engaging
+`--experimental-treesitter-kotlin` for Kotlin-only repos (falls back to the stable `cmg-java`,
+which has its own built-in Kotlin support, whenever `.java` files are also present).
+
+---
+
 ## KuzuDB conventions (used across all sub-projects)
 
 - `label(n)` not `labels(n)[0]`
@@ -498,3 +596,14 @@ Release workflow:
 | `lumen-security-audit`/`lumen-docker-security-audit` Makefile targets + `scripts/lumen-docker-security-audit.sh` | Gives the new pipeline make/Docker convenience parity with `run`, matching the existing pattern instead of leaving it reachable only via raw `uv run lumen security-audit` / `docker run ... lumen security-audit`. The Docker wrapper script is a deliberate byte-for-byte copy of `lumen-docker-run.sh` with only the subcommand changed — no generic "any pipeline" Make/Docker abstraction, since `ENTRYPOINT ["lumen"]` and the native launcher are already subcommand-agnostic and copying the ~40-line script per pipeline is simpler than parameterizing it. |
 | `log.py`'s live fan-out/fan-in dashboard (`start_agent_boxes`, `_render_agent_columns`, `_render_workflow_panel`, `print_progress_line`) is data-driven, not hardcoded | Originally hardcoded to the docs pipeline's exact 3 analyst names + synthesis/architect/summary phases, so `security-audit`'s 2 reviewers never rendered into the live boxes and fell back to plain dim-text lines — visibly inconsistent with `lumen run`. `start_agent_boxes(agent_names=..., workflow_phases=...)` now takes the role/phase names as parameters (defaulting to the docs pipeline's original 3+3, so `lumen run`'s output is byte-for-byte unchanged), and `print_progress_line` routes per-turn events into whichever boxes were registered by membership check instead of `tag.startswith("analyst/"/"architect"/"summary")`. Every new pipeline must call `start_agent_boxes`/`update_agent_box`/`print_researcher_done`/`print_tool_usage_table`/`update_workflow_phase`/`print_synthesizer_done`/`stop_agent_boxes` with its own names (see `security_audit_agent.py` and `docs/adding-a-pipeline.md`'s `run_agent` skeleton) to get this styling — it is not automatic just from using `run_loop`. |
 | `security-audit` reviewer prompts require an explicit TURN N tool-call sequence + an explicit forbidden-tool list | The original `security-analyst-access.md`/`security-analyst-dependencies.md` gave an open-ended tool list with no turn discipline; this was invisible on the tiny e2e fixture but on a real Spring Boot repo (`inventory-service`) the access reviewer spiraled into 20 turns of ad-hoc `query()` Cypher calls chasing auth-annotation names and per-class lookups, hit KuzuDB binder exceptions on nonexistent properties, and never called `write_artifact` (0 artifacts produced); the dependency reviewer narrowly avoided the same fate. All three reviewer prompts (`security-analyst-access.md`, `security-analyst-dependencies.md`, `security-threat-model.md`) now prescribe an exact TURN 1/2/3 tool sequence, explicitly forbid `get_class_details`/`get_method_signature`/`get_callees`/`get_callers`/`get_control_flow`/`get_data_flow`/raw `query` (source-level tools that invite chasing individual names), and instruct the model to write immediately once past the halfway point of its turn budget rather than keep exploring. |
+| LadybugDB (not KuzuDB) for the new `treesitter-indexer/` engine | KuzuDB was archived in Oct 2025 after Kùzu Inc.'s acquisition by Apple; LadybugDB is the actively maintained fork. The old `indexer/` runtimes keep writing to KuzuDB unchanged — this is a from-scratch replatform target, not an in-place migration. |
+| `treesitter-indexer/` as a standalone top-level directory, never nested inside or merged with `indexer/` | Fully decoupled rewrite: the old engines (`indexer/app/`, `indexer/parsers/`) are never touched or extended during the rollout, so they keep shipping unchanged until/unless a repo explicitly opts into the new one. |
+| One Python + tree-sitter engine replacing four separate per-language runtimes | Single grammar family, one writer (`graph_store.py`), one confidence-tier CALLS recipe — shared maintenance burden instead of a Java fat JAR, a Node/Babel parser, a Python AST parser, and a PHP/`nikic`-parser bridge. |
+| Rollout gated behind `--experimental-treesitter-<language>` flags, off by default, one language at a time | Lets each language be validated against the stable, currently-shipping engine on real repos before the next increment starts, without risking default `lumen run` behavior. Each flag only engages for a single-language-category repo; falls back to the old engine otherwise (e.g. a mixed Java+Kotlin repo always uses `cmg-java`, never `cmg-kotlin-ts`). |
+| Per-language `<language>/extractor.py` + `<language>/calls.py`, not shared code | CALLS resolution rules are genuinely language-specific (Python's `self`, Kotlin's implicit-`this` bare calls, import resolution shapes) — but the three-tier shape (0.95 same-file / 0.90 import-resolved / 0.50 global fallback) stays identical across all five languages so downstream `WHERE c.confidence >= 0.9` filters work unchanged regardless of source language. |
+| `create_graph_backend()` auto-detects KuzuDB vs. LadybugDB from the on-disk file header | `kuzu` and `ladybug`'s native (pybind11) extensions cannot coexist in one process in either import order — confirmed empirically. The pipeline/agent must import exactly one per run; deciding from the DB file itself (not a flag the caller has to thread through) lets `pipeline/` read either engine's output with zero code changes elsewhere in the agent/toolkit/builder stages. |
+| `postprocess/call_routes.py::resolve_call_route()` as a second, call-based routing resolver | `postprocess/http_routes.py::resolve_route()` only handles annotation/decorator-shaped routing (`@GetMapping`, `@app.route`). Call-based DSLs (Laravel's `Route::get(path, handler)`, Express/Fastify, Ktor's `routing { get(path) { ... } }`) need the callee name tokenized instead — built once during the PHP increment and reused unchanged by JS/TS and Kotlin rather than inventing a third variant. |
+| `compare_graphs_<language>.py` validation scripts use intentionally asymmetric diffs | Each language increment closes specific, named gaps in its old engine (e.g. Kotlin's old parser never extracted annotation usage at all). The script lists exactly those tables/edges and asserts zero-on-old/non-zero-on-new, rather than treating any count mismatch between old and new as a regression — a same-language regression check would be the wrong tool here. |
+| Every `treesitter-indexer/` language gets its own dedicated fixture under `e2e-test/fixtures/`, never a mutation of an existing one | Pre-existing fixtures (e.g. `mini-flask-app`) are wired into `e2e-test/test-lumen.sh`'s regression suite for the *old* engines — changing them risks breaking that suite. New fixtures (`mini-spring-app`, `mini-python-service`, `mini-php-service`, `mini-express-service`, `mini-react-app`, `mini-kotlin-service`) are used only by their language's own `compare_graphs_<language>.py`, never added to `test-lumen.sh`. |
+| Kotlin shares the pipeline's `"jvm"` language-category key with Java; no dedicated `"kotlin"` key | `pipeline/codedoc/language_registry.py` already treats Java+Kotlin as one JVM category for the old engine (`cmg-java` has built-in Kotlin support). `should_use_treesitter_kotlin()` distinguishes the two via `state.language_flavors` instead of a language-category key, only engaging `--experimental-treesitter-kotlin` when `"kotlin"` is present and `"java"` is not. |
+| `build_kotlin_workflows`'s callable-table list includes `Function` alongside `Method`/`SuspendFunction` | Spring/JAX-RS-annotated Kotlin entry points are always class members, but Ktor's `routing { }` DSL registers routes on plain top-level `Function` nodes — invisible to a `Method`/`SuspendFunction`-only BFS even though they carry a real `HAS_ANNOTATION` edge. Found via real fixture testing (a Ktor route's handler produced zero Workflow traces until `Function` was added to both the callable-table list and the `HAS_ANNOTATION` union query). |

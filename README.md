@@ -168,6 +168,30 @@ with what you want the new pipeline to analyze, and it walks through every file 
 (prompts, agent stage, pipeline module, CLI command, make/Docker wiring) so the result is
 predictable and consistent with `security-audit`.
 
+### Experimental: tree-sitter indexer engine
+
+`indexer/` (Java fat JAR, Node, Python, PHP parsers) is the stable, default indexer and writes
+to KuzuDB. Because KuzuDB was archived after Kùzu Inc.'s acquisition by Apple, lumen is
+incrementally building a replacement engine in `treesitter-indexer/`: a single Python +
+tree-sitter codebase covering the same five languages (Java, Python, PHP, JS/TS/React, Kotlin)
+and writing to LadybugDB, KuzuDB's actively maintained fork. All five language increments are
+now complete, but the new engine is still **opt-in and off by default** — `lumen run` uses the
+stable `indexer/` engine unless you explicitly ask for the new one, one language at a time:
+
+```bash
+cd treesitter-indexer && ./install.sh    # one-time setup, requires uv
+
+cd pipeline && uv run lumen run /path/to/repo \
+  --provider anthropic --model claude-sonnet-4-6 \
+  --experimental-treesitter-python   # or -java / -php / -js / -kotlin
+```
+
+Each flag only takes effect for a single-language-category repo matching that language
+(e.g. `--experimental-treesitter-kotlin` requires a Kotlin-only repo with no `.java` files) —
+mixed-language repos always fall back to the stable engine. See `CLAUDE.md`'s
+"Sub-project: treesitter-indexer/" section and `backlog/treesitter-indexer-remaining-languages.md`
+for full implementation detail.
+
 ## Getting Started
 
 Set your LLM provider credentials:
@@ -377,6 +401,13 @@ lumen run REPO_PATH [OPTIONS]
   --repo-size-check   off | warn | strict (default: warn)
   --allow-xlarge      Force full pipeline on xlarge repos
   --verbose           Stream logs as the pipeline runs
+
+  # Experimental (opt-in, off by default — see "Experimental: tree-sitter indexer engine" below)
+  --experimental-treesitter-java      Use the tree-sitter Java indexer instead of cmg-java
+  --experimental-treesitter-python    Use the tree-sitter Python indexer instead of cmg-python
+  --experimental-treesitter-php       Use the tree-sitter PHP indexer instead of cmg-php
+  --experimental-treesitter-js        Use the tree-sitter JS/TS/React indexer instead of cmg-js
+  --experimental-treesitter-kotlin    Use the tree-sitter Kotlin indexer instead of cmg-java's Kotlin support
 ```
 
 ```
