@@ -73,6 +73,10 @@ def common_pipeline_options(f):
               help="Use the experimental tree-sitter JS/TS/React indexer prototype "
                    "(treesitter-indexer/) instead of the stable cmg-js. "
                    "Single-language-category JS/TS repos only.")
+@click.option("--experimental-treesitter-kotlin", is_flag=True, default=False,
+              help="Use the experimental tree-sitter Kotlin indexer prototype "
+                   "(treesitter-indexer/) instead of cmg-java's built-in Kotlin support. "
+                   "Kotlin-only jvm-category repos only (no .java files mixed in).")
 def run(
     repo_path: str,
     output_dir: str | None,
@@ -90,6 +94,7 @@ def run(
     experimental_treesitter_python: bool,
     experimental_treesitter_php: bool,
     experimental_treesitter_js: bool,
+    experimental_treesitter_kotlin: bool,
 ) -> None:
     """Run the full pipeline: index → agent → build.
 
@@ -110,6 +115,7 @@ def run(
         "experimental_treesitter_python": experimental_treesitter_python or None,
         "experimental_treesitter_php": experimental_treesitter_php or None,
         "experimental_treesitter_js": experimental_treesitter_js or None,
+        "experimental_treesitter_kotlin": experimental_treesitter_kotlin or None,
     })
 
     state = run_pipeline(
@@ -133,6 +139,7 @@ def run(
         experimental_treesitter_python=cfg.experimental_treesitter_python,
         experimental_treesitter_php=cfg.experimental_treesitter_php,
         experimental_treesitter_js=cfg.experimental_treesitter_js,
+        experimental_treesitter_kotlin=cfg.experimental_treesitter_kotlin,
         treesitter_indexer_bin_dir=cfg.treesitter_indexer_bin_dir,
         agent_prompt=cfg.agent_prompt,
         build_script=cfg.build_script,

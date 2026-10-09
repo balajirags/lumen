@@ -60,6 +60,24 @@ def should_use_treesitter_js(state: PipelineState, ordered_languages: list[str])
     return state.experimental_treesitter_js and ordered_languages == ["js"]
 
 
+def should_use_treesitter_kotlin(state: PipelineState, ordered_languages: list[str]) -> bool:
+    """Whether to dispatch to the experimental cmg-kotlin-ts instead of
+    cmg-java (which handles Kotlin internally today). Mirror image of
+    should_use_treesitter_java: only Kotlin-ONLY jvm-category repos (no
+    .java files mixed in), because kotlin/extractor.py only understands
+    Kotlin syntax, exactly why the Java increment excludes Kotlin-
+    containing repos. A mixed Java+Kotlin repo falls back to cmg-java for
+    its entire jvm category either way -- this increment does not attempt
+    mixed-language JVM repos.
+    """
+    return (
+        state.experimental_treesitter_kotlin
+        and ordered_languages == ["jvm"]
+        and "kotlin" in (state.language_flavors or [])
+        and "java" not in (state.language_flavors or [])
+    )
+
+
 def detect_languages(repo_path: str) -> dict[str, int]:
     """Return all supported language categories found in the repo with their file counts."""
     metrics = classify_repo(repo_path)
@@ -178,6 +196,17 @@ def run_indexer(state: PipelineState) -> PipelineState:
         state.graph_backend = "ladybug"
         state.log(stage, "Using experimental tree-sitter JS indexer (cmg-js-ts)")
 
+    use_treesitter_kotlin = should_use_treesitter_kotlin(state, ordered_languages)
+    if state.experimental_treesitter_kotlin and not use_treesitter_kotlin:
+        state.log(
+            stage,
+            "--experimental-treesitter-kotlin requested but this repo is polyglot, has no "
+            "Kotlin files, or mixes Java and Kotlin; falling back to cmg-java for compatibility.",
+        )
+    if use_treesitter_kotlin:
+        state.graph_backend = "ladybug"
+        state.log(stage, "Using experimental tree-sitter Kotlin indexer (cmg-kotlin-ts)")
+
     _log.start_indexer_progress([LANGUAGE_CATEGORY_BY_KEY[lang].display_name for lang in ordered_languages])
     try:
         for language in ordered_languages:
@@ -187,10 +216,13 @@ def run_indexer(state: PipelineState) -> PipelineState:
                 or (use_treesitter_python and language == "python")
                 or (use_treesitter_php and language == "php")
                 or (use_treesitter_js and language == "js")
+                or (use_treesitter_kotlin and language == "jvm")
             )
             if use_treesitter_for_language:
-                binary_name = {"jvm": "cmg-java-ts", "python": "cmg-python-ts",
-                                "php": "cmg-php-ts", "js": "cmg-js-ts"}[language]
+                if language == "jvm":
+                    binary_name = "cmg-kotlin-ts" if use_treesitter_kotlin else "cmg-java-ts"
+                else:
+                    binary_name = {"python": "cmg-python-ts", "php": "cmg-php-ts", "js": "cmg-js-ts"}[language]
                 binary = Path(state.treesitter_indexer_bin_dir) / binary_name
                 cli_language = None
             else:

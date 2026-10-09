@@ -9,6 +9,7 @@ from codedoc.stages.indexer import (
     should_use_treesitter_python,
     should_use_treesitter_php,
     should_use_treesitter_js,
+    should_use_treesitter_kotlin,
 )
 
 
@@ -79,6 +80,29 @@ def test_should_use_treesitter_js_false_when_flag_unset():
 def test_should_use_treesitter_js_false_for_polyglot_repo():
     state = _state(experimental_treesitter_js=True)
     assert should_use_treesitter_js(state, ["js", "python"]) is False
+
+
+def test_should_use_treesitter_kotlin_when_flag_set_and_kotlin_only_flavor():
+    state = _state(experimental_treesitter_kotlin=True, language_flavors=["kotlin"])
+    assert should_use_treesitter_kotlin(state, ["jvm"]) is True
+
+
+def test_should_use_treesitter_kotlin_false_when_flag_unset():
+    state = _state(experimental_treesitter_kotlin=False, language_flavors=["kotlin"])
+    assert should_use_treesitter_kotlin(state, ["jvm"]) is False
+
+
+def test_should_use_treesitter_kotlin_false_for_mixed_java_and_kotlin_flavors():
+    """A mixed Java+Kotlin jvm-category repo falls back to cmg-java --
+    kotlin/extractor.py only understands Kotlin syntax, mirroring exactly
+    why should_use_treesitter_java excludes kotlin-flavored repos."""
+    state = _state(experimental_treesitter_kotlin=True, language_flavors=["java", "kotlin"])
+    assert should_use_treesitter_kotlin(state, ["jvm"]) is False
+
+
+def test_should_use_treesitter_kotlin_false_for_polyglot_category_list():
+    state = _state(experimental_treesitter_kotlin=True, language_flavors=["kotlin"])
+    assert should_use_treesitter_kotlin(state, ["jvm", "python"]) is False
 
 
 def test_detect_languages_mixed_repo(tmp_path):
