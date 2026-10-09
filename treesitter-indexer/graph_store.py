@@ -79,7 +79,20 @@ REL_DEFINITIONS = [
     # were silently dropped by the same "unrecognized combo -> binder
     # exception -> swallowed" failure mode already fixed twice elsewhere in
     # this project.
-    "CREATE REL TABLE IF NOT EXISTS CALLS (FROM Method TO Method, FROM Method TO Function, FROM Method TO Constructor, FROM Constructor TO Method, FROM Constructor TO Function, FROM Constructor TO Constructor, FROM Function TO Function, FROM Function TO Method, FROM Function TO Constructor, FROM ArrowFunction TO Function, FROM ArrowFunction TO Method, FROM Component TO Function, FROM Hook TO Function, FROM AsyncFunction TO Function, FROM ExtensionFunction TO Method, FROM ExtensionFunction TO Function, FROM SuspendFunction TO Method, FROM SuspendFunction TO Function, FROM Lambda TO Method, FROM Lambda TO Function, FROM InitBlock TO Method, lineNumber INT64, confidence DOUBLE, reason STRING)",
+    # FROM ArrowFunction TO ArrowFunction, FROM Component TO Component,
+    # FROM Hook TO ArrowFunction added for JS/TS/React -- these are the
+    # exact combos the old (pre-tree-sitter) JS engine's own documented
+    # schema/emission mismatch bug tried to create and silently lost data
+    # on (see backlog/treesitter-indexer-remaining-languages.md). The
+    # remaining additions (Function->ArrowFunction, ArrowFunction->
+    # Constructor, Component->ArrowFunction, Component->Hook, Hook->Hook,
+    # Hook->Method, Component->Method, Function->Component) were found via
+    # upfront audit during planning, not yet observed via a real failure --
+    # JS code routinely calls across all of these shapes (a Component
+    # calling a locally-defined helper ArrowFunction, a Hook calling
+    # another Hook, etc.), so they're added now rather than discovered one
+    # silent-failure at a time during fixture testing.
+    "CREATE REL TABLE IF NOT EXISTS CALLS (FROM Method TO Method, FROM Method TO Function, FROM Method TO Constructor, FROM Constructor TO Method, FROM Constructor TO Function, FROM Constructor TO Constructor, FROM Function TO Function, FROM Function TO Method, FROM Function TO Constructor, FROM Function TO ArrowFunction, FROM Function TO Component, FROM ArrowFunction TO Function, FROM ArrowFunction TO Method, FROM ArrowFunction TO ArrowFunction, FROM ArrowFunction TO Constructor, FROM Component TO Function, FROM Component TO Component, FROM Component TO ArrowFunction, FROM Component TO Hook, FROM Component TO Method, FROM Hook TO Function, FROM Hook TO ArrowFunction, FROM Hook TO Hook, FROM Hook TO Method, FROM AsyncFunction TO Function, FROM ExtensionFunction TO Method, FROM ExtensionFunction TO Function, FROM SuspendFunction TO Method, FROM SuspendFunction TO Function, FROM Lambda TO Method, FROM Lambda TO Function, FROM InitBlock TO Method, lineNumber INT64, confidence DOUBLE, reason STRING)",
     # Function->Class/Interface/Enum/Record added for Python's top-level
     # functions (e.g. a Flask/FastAPI route handler's own return-type hint) --
     # the original set only covered Method, since the Java-only increment
@@ -87,7 +100,11 @@ REL_DEFINITIONS = [
     "CREATE REL TABLE IF NOT EXISTS RETURNS (FROM Method TO Class, FROM Method TO Interface, FROM Method TO Enum, FROM Method TO Record, FROM Function TO Class, FROM Function TO Interface, FROM Function TO Enum, FROM Function TO Record, FROM ExtensionFunction TO Class, FROM SuspendFunction TO Class)",
     "CREATE REL TABLE IF NOT EXISTS HAS_PARAMETER (FROM Method TO Parameter, FROM Constructor TO Parameter, FROM Function TO Parameter, FROM ArrowFunction TO Parameter, FROM ExtensionFunction TO Parameter, FROM SuspendFunction TO Parameter, FROM Lambda TO Parameter)",
     "CREATE REL TABLE IF NOT EXISTS OF_TYPE (FROM Field TO Class, FROM Field TO Interface, FROM Field TO Enum, FROM Field TO Record, FROM Parameter TO Class, FROM Parameter TO Interface, FROM Parameter TO Enum, FROM Parameter TO Record, FROM Property TO Class, FROM Property TO Interface)",
-    "CREATE REL TABLE IF NOT EXISTS HAS_ANNOTATION (FROM Class TO AnnotationType, FROM Interface TO AnnotationType, FROM Method TO AnnotationType, FROM Constructor TO AnnotationType, FROM Field TO AnnotationType, FROM Property TO AnnotationType, FROM ExtensionFunction TO AnnotationType, value STRING)",
+    # Function/ArrowFunction added for JS/TS -- an Express/Fastify route
+    # handler (the target of a resolved resolve_call_route() call) is very
+    # commonly a plain Function or ArrowFunction, not a class Method the
+    # way every prior annotation-based language's routes have been.
+    "CREATE REL TABLE IF NOT EXISTS HAS_ANNOTATION (FROM Class TO AnnotationType, FROM Interface TO AnnotationType, FROM Method TO AnnotationType, FROM Constructor TO AnnotationType, FROM Field TO AnnotationType, FROM Property TO AnnotationType, FROM ExtensionFunction TO AnnotationType, FROM Function TO AnnotationType, FROM ArrowFunction TO AnnotationType, value STRING)",
     "CREATE REL TABLE IF NOT EXISTS OVERRIDES (FROM Method TO Method, FROM ExtensionFunction TO Method)",
     "CREATE REL TABLE IF NOT EXISTS THROWS (FROM Method TO Class)",
     "CREATE REL TABLE IF NOT EXISTS SOURCE_FILE (FROM Class TO File, FROM Interface TO File, FROM Enum TO File, FROM Record TO File, FROM AnnotationType TO File, FROM Module TO File, FROM Component TO File, FROM Function TO File, FROM DataClass TO File, FROM SealedClass TO File, FROM SealedInterface TO File, FROM ObjectDecl TO File, FROM ExtensionFunction TO File)",

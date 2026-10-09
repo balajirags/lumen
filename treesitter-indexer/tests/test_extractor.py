@@ -232,6 +232,58 @@ public interface PlaceholderClient {
             result = store.execute("MATCH (a:Method)-[c:CALLS]->(b:Constructor) RETURN count(c) AS c")
             self.assertEqual(result.get_next()[0], 1)
 
+    def test_schema_accepts_arrow_function_calling_arrow_function(self):
+        """Regression guard for the JS increment's additive CALLS combos --
+        the old engine's documented ArrowFunction->ArrowFunction/
+        Component->Component/Hook->ArrowFunction schema/emission mismatch."""
+        import tempfile
+        import graph_store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = graph_store.LadybugGraphStore(f"{tmp}/test-db")
+            store.init_schema()
+            store.execute(
+                "CREATE (a:ArrowFunction {id: 'a1', name: 'a', qualifiedName: 'a', "
+                "external: false, language: 'js', kind: 'ArrowFunction', normKind: 'x'})"
+            )
+            store.execute(
+                "CREATE (b:ArrowFunction {id: 'a2', name: 'b', qualifiedName: 'b', "
+                "external: false, language: 'js', kind: 'ArrowFunction', normKind: 'x'})"
+            )
+            store.execute(
+                "MATCH (a:ArrowFunction {id: 'a1'}), (b:ArrowFunction {id: 'a2'}) "
+                "CREATE (a)-[:CALLS {confidence: 0.95, reason: 'same-file', "
+                "language: 'js', kind: 'CALLS', normKind: 'x'}]->(b)"
+            )
+            result = store.execute("MATCH (a:ArrowFunction)-[c:CALLS]->(b:ArrowFunction) RETURN count(c) AS c")
+            self.assertEqual(result.get_next()[0], 1)
+
+    def test_schema_accepts_arrow_function_with_http_annotation(self):
+        """Regression guard for Express/Fastify route handlers being an
+        ArrowFunction, not a class Method -- HAS_ANNOTATION previously had
+        no Function/ArrowFunction on its FROM side at all."""
+        import tempfile
+        import graph_store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = graph_store.LadybugGraphStore(f"{tmp}/test-db")
+            store.init_schema()
+            store.execute(
+                "CREATE (a:ArrowFunction {id: 'h1', name: 'h', qualifiedName: 'h', "
+                "external: false, language: 'js', kind: 'ArrowFunction', normKind: 'x'})"
+            )
+            store.execute(
+                "CREATE (t:AnnotationType {id: 'ann1', name: 'Get', qualifiedName: 'Get', "
+                "external: true, language: 'js', kind: 'AnnotationType', normKind: 'x'})"
+            )
+            store.execute(
+                "MATCH (a:ArrowFunction {id: 'h1'}), (t:AnnotationType {id: 'ann1'}) "
+                "CREATE (a)-[:HAS_ANNOTATION {value: '/orders', "
+                "language: 'js', kind: 'HAS_ANNOTATION', normKind: 'x'}]->(t)"
+            )
+            result = store.execute("MATCH (a:ArrowFunction)-[c:HAS_ANNOTATION]->(b:AnnotationType) RETURN count(c) AS c")
+            self.assertEqual(result.get_next()[0], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
