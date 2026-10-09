@@ -205,6 +205,33 @@ public interface PlaceholderClient {
             result = store.execute("MATCH (a:Method)-[c:CALLS]->(b:Function) RETURN count(c) AS c")
             self.assertEqual(result.get_next()[0], 1)
 
+    def test_schema_accepts_method_calling_constructor(self):
+        """Regression guard for PHP's `new X()` expression (PHP's "new" IS a
+        call to __construct) -- found via real end-to-end fixture testing:
+        Constructor never appeared on CALLS's TO side before this, only its
+        FROM side."""
+        import tempfile
+        import graph_store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = graph_store.LadybugGraphStore(f"{tmp}/test-db")
+            store.init_schema()
+            store.execute(
+                "CREATE (m:Method {id: 'm1', name: 'm', qualifiedName: 'm', "
+                "external: false, language: 'java', kind: 'Method', normKind: 'x'})"
+            )
+            store.execute(
+                "CREATE (c:Constructor {id: 'c1', name: 'c', qualifiedName: 'c', "
+                "external: false, language: 'php', kind: 'Constructor', normKind: 'x'})"
+            )
+            store.execute(
+                "MATCH (m:Method {id: 'm1'}), (c:Constructor {id: 'c1'}) "
+                "CREATE (m)-[:CALLS {confidence: 0.9, reason: 'import-resolved', "
+                "language: 'php', kind: 'CALLS', normKind: 'x'}]->(c)"
+            )
+            result = store.execute("MATCH (a:Method)-[c:CALLS]->(b:Constructor) RETURN count(c) AS c")
+            self.assertEqual(result.get_next()[0], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

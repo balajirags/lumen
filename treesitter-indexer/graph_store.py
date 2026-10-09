@@ -69,7 +69,17 @@ REL_DEFINITIONS = [
     # method (e.g. Laravel's redirect()/response()/view() helpers) -- the
     # original CALLS combos only ever had a Function on the FROM side, never
     # the TO side, from a Method/Constructor caller.
-    "CREATE REL TABLE IF NOT EXISTS CALLS (FROM Method TO Method, FROM Method TO Function, FROM Constructor TO Method, FROM Constructor TO Function, FROM Function TO Function, FROM Function TO Method, FROM ArrowFunction TO Function, FROM ArrowFunction TO Method, FROM Component TO Function, FROM Hook TO Function, FROM AsyncFunction TO Function, FROM ExtensionFunction TO Method, FROM ExtensionFunction TO Function, FROM SuspendFunction TO Method, FROM SuspendFunction TO Function, FROM Lambda TO Method, FROM Lambda TO Function, FROM InitBlock TO Method, lineNumber INT64, confidence DOUBLE, reason STRING)",
+    #
+    # Method/Function/Constructor->Constructor added for PHP's `new X()`
+    # expression (PHP's "new" IS a call to __construct -- see php/calls.py's
+    # resolve_call_target "new" case) -- a pre-existing, cross-language gap
+    # surfaced by this: Constructor never appeared on CALLS's TO side at all
+    # before, only its FROM side (a constructor calling other things), so
+    # `new`-expression edges from an ordinary Method/Function/Constructor
+    # were silently dropped by the same "unrecognized combo -> binder
+    # exception -> swallowed" failure mode already fixed twice elsewhere in
+    # this project.
+    "CREATE REL TABLE IF NOT EXISTS CALLS (FROM Method TO Method, FROM Method TO Function, FROM Method TO Constructor, FROM Constructor TO Method, FROM Constructor TO Function, FROM Constructor TO Constructor, FROM Function TO Function, FROM Function TO Method, FROM Function TO Constructor, FROM ArrowFunction TO Function, FROM ArrowFunction TO Method, FROM Component TO Function, FROM Hook TO Function, FROM AsyncFunction TO Function, FROM ExtensionFunction TO Method, FROM ExtensionFunction TO Function, FROM SuspendFunction TO Method, FROM SuspendFunction TO Function, FROM Lambda TO Method, FROM Lambda TO Function, FROM InitBlock TO Method, lineNumber INT64, confidence DOUBLE, reason STRING)",
     # Function->Class/Interface/Enum/Record added for Python's top-level
     # functions (e.g. a Flask/FastAPI route handler's own return-type hint) --
     # the original set only covered Method, since the Java-only increment
