@@ -144,7 +144,7 @@ ABSTRACTION_NODE_DEFS = [
 ]
 
 ABSTRACTION_REL_DEFS = [
-    "CREATE REL TABLE IF NOT EXISTS WORKFLOW_STEP (FROM Method TO Workflow, FROM Function TO Workflow, FROM AsyncFunction TO Workflow, FROM ArrowFunction TO Workflow, FROM Component TO Workflow, step INT64)",
+    "CREATE REL TABLE IF NOT EXISTS WORKFLOW_STEP (FROM Method TO Workflow, FROM Function TO Workflow, FROM AsyncFunction TO Workflow, FROM ArrowFunction TO Workflow, FROM Component TO Workflow, FROM Hook TO Workflow, step INT64)",
     "CREATE REL TABLE IF NOT EXISTS IN_DOMAIN (FROM Class TO Domain, FROM Interface TO Domain, FROM Method TO Domain, FROM Component TO Domain, FROM Module TO Domain, FROM AsyncFunction TO Domain, FROM Function TO Domain, FROM ArrowFunction TO Domain)",
 ]
 

@@ -305,3 +305,84 @@ def build_php_workflows(store) -> int:
     print(f"WorkflowBuilder (PHP): emitted {len(emitted_workflow_ids)} workflows from "
           f"{len(entry_points)} entry points", file=sys.stderr)
     return len(emitted_workflow_ids)
+
+
+def _is_js_terminal(info: dict) -> bool:
+    """No Java-style package-per-layer convention and no PHP-style
+    namespace convention -- matches the qualifiedName/name substrings
+    directly, same approach as Python's/PHP's terminal check, extended
+    with "dao"/"repo" (a common short form in JS repos, e.g.
+    "userRepo.js") alongside the full "repository" word."""
+    qn = (info.get("qualifiedName") or "").lower()
+    name = (info.get("name") or "").lower()
+    return ("reposit" in qn or "repo" in qn or "dao" in qn
+            or "producer" in name or "publisher" in name)
+
+
+# All four callable tables are included in the BFS (unlike build_jvm_
+# workflows's Method-only one) because JS/TS/React route handlers and
+# their call chains routinely span Function, ArrowFunction, Method
+# (NestJS controllers), and Component/Hook (a route handler calling a
+# shared helper that happens to be PascalCase- or use-prefixed-named) --
+# the same multi-table rationale as build_python_workflows/
+# build_php_workflows, just with two more tables.
+_JS_CALLABLE_TABLES = ["Function", "ArrowFunction", "Method", "Component", "Hook"]
+
+
+def build_js_workflows(store) -> int:
+    """Returns the number of Workflow nodes emitted. Parallel to (not a
+    modification of) build_jvm_workflows/build_python_workflows/
+    build_php_workflows. Both JS routing mechanisms (Express/Fastify via
+    resolve_call_route, NestJS via annotation_http_verb) were already
+    converted to ordinary HAS_ANNOTATION edges at extraction time (see
+    js/calls.py's _emit_decorator_route and emit_calls_and_routes_in_file)
+    -- so, like PHP, this function needs no query union, just the existing
+    resolve_route() against Method AND the new Function/ArrowFunction FROM
+    sides HAS_ANNOTATION now supports (see Task 2's schema addition).
+    """
+    ann_rows = _rows(
+        store,
+        "MATCH (n:Method)-[r:HAS_ANNOTATION]->(a:AnnotationType) "
+        "RETURN n.id AS nodeId, a.name AS annName, r.value AS value "
+        "UNION "
+        "MATCH (n:Function)-[r:HAS_ANNOTATION]->(a:AnnotationType) "
+        "RETURN n.id AS nodeId, a.name AS annName, r.value AS value "
+        "UNION "
+        "MATCH (n:ArrowFunction)-[r:HAS_ANNOTATION]->(a:AnnotationType) "
+        "RETURN n.id AS nodeId, a.name AS annName, r.value AS value",
+    )
+    ann_index: dict[str, dict[str, str]] = {}
+    for row in ann_rows:
+        ann_index.setdefault(row["nodeId"], {})[row["annName"]] = row["value"]
+
+    routes = {nid: resolve_route(anns) for nid, anns in ann_index.items()}
+    entry_points = {nid: route for nid, route in routes.items() if route is not None}
+    if not entry_points:
+        return 0
+
+    node_info: dict[str, dict] = {}
+    node_table: dict[str, str] = {}
+    for table in _JS_CALLABLE_TABLES:
+        for row in _rows(store, f"MATCH (n:{table}) RETURN n.id AS id, n.name AS name, n.qualifiedName AS qualifiedName"):
+            node_info[row["id"]] = row
+            node_table[row["id"]] = table
+
+    calls_by_source: dict[str, list[str]] = {}
+    for from_table in _JS_CALLABLE_TABLES:
+        for to_table in _JS_CALLABLE_TABLES:
+            rows = _rows(
+                store,
+                f"MATCH (a:{from_table})-[c:CALLS]->(b:{to_table}) WHERE c.confidence >= 0.9 "
+                "RETURN a.id AS src, b.id AS tgt",
+            )
+            for row in rows:
+                calls_by_source.setdefault(row["src"], []).append(row["tgt"])
+
+    emitted_workflow_ids: set[str] = set()
+    for entry_id, (http_method, http_path) in entry_points.items():
+        _bfs_and_emit(node_info, calls_by_source, entry_id, http_method, http_path, "js",
+                      emitted_workflow_ids, store, is_terminal=_is_js_terminal, node_table=node_table)
+
+    print(f"WorkflowBuilder (JS): emitted {len(emitted_workflow_ids)} workflows from "
+          f"{len(entry_points)} entry points", file=sys.stderr)
+    return len(emitted_workflow_ids)
