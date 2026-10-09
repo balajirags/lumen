@@ -69,6 +69,10 @@ def common_pipeline_options(f):
 @click.option("--experimental-treesitter-php", is_flag=True, default=False,
               help="Use the experimental tree-sitter PHP indexer prototype (treesitter-indexer/) "
                    "instead of the stable cmg-php. Single-language PHP repos only.")
+@click.option("--experimental-treesitter-js", is_flag=True, default=False,
+              help="Use the experimental tree-sitter JS/TS/React indexer prototype "
+                   "(treesitter-indexer/) instead of the stable cmg-js. "
+                   "Single-language-category JS/TS repos only.")
 def run(
     repo_path: str,
     output_dir: str | None,
@@ -85,6 +89,7 @@ def run(
     experimental_treesitter_java: bool,
     experimental_treesitter_python: bool,
     experimental_treesitter_php: bool,
+    experimental_treesitter_js: bool,
 ) -> None:
     """Run the full pipeline: index → agent → build.
 
@@ -104,6 +109,7 @@ def run(
         "experimental_treesitter_java": experimental_treesitter_java or None,
         "experimental_treesitter_python": experimental_treesitter_python or None,
         "experimental_treesitter_php": experimental_treesitter_php or None,
+        "experimental_treesitter_js": experimental_treesitter_js or None,
     })
 
     state = run_pipeline(
@@ -126,6 +132,7 @@ def run(
         experimental_treesitter_java=cfg.experimental_treesitter_java,
         experimental_treesitter_python=cfg.experimental_treesitter_python,
         experimental_treesitter_php=cfg.experimental_treesitter_php,
+        experimental_treesitter_js=cfg.experimental_treesitter_js,
         treesitter_indexer_bin_dir=cfg.treesitter_indexer_bin_dir,
         agent_prompt=cfg.agent_prompt,
         build_script=cfg.build_script,

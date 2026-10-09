@@ -8,6 +8,7 @@ from codedoc.stages.indexer import (
     should_use_treesitter_java,
     should_use_treesitter_python,
     should_use_treesitter_php,
+    should_use_treesitter_js,
 )
 
 
@@ -63,6 +64,21 @@ def test_should_use_treesitter_php_false_when_flag_unset():
 def test_should_use_treesitter_php_false_for_polyglot_repo():
     state = _state(experimental_treesitter_php=True)
     assert should_use_treesitter_php(state, ["php", "jvm"]) is False
+
+
+def test_should_use_treesitter_js_when_flag_set_and_js_only():
+    state = _state(experimental_treesitter_js=True)
+    assert should_use_treesitter_js(state, ["js"]) is True
+
+
+def test_should_use_treesitter_js_false_when_flag_unset():
+    state = _state(experimental_treesitter_js=False)
+    assert should_use_treesitter_js(state, ["js"]) is False
+
+
+def test_should_use_treesitter_js_false_for_polyglot_repo():
+    state = _state(experimental_treesitter_js=True)
+    assert should_use_treesitter_js(state, ["js", "python"]) is False
 
 
 def test_detect_languages_mixed_repo(tmp_path):
