@@ -11,6 +11,8 @@ dependencies = [
     "ladybug>=0.20,<0.21",
     "tree-sitter-python>=0.23,<0.25",
     "tree-sitter-php>=0.23,<0.25",
+    "tree-sitter-javascript>=0.23,<0.25",
+    "tree-sitter-typescript>=0.23,<0.25",
 ]
 
 [project.optional-dependencies]
