@@ -97,8 +97,13 @@ REL_DEFINITIONS = [
     # functions (e.g. a Flask/FastAPI route handler's own return-type hint) --
     # the original set only covered Method, since the Java-only increment
     # never emits a top-level, non-method Function node.
-    "CREATE REL TABLE IF NOT EXISTS RETURNS (FROM Method TO Class, FROM Method TO Interface, FROM Method TO Enum, FROM Method TO Record, FROM Function TO Class, FROM Function TO Interface, FROM Function TO Enum, FROM Function TO Record, FROM ExtensionFunction TO Class, FROM SuspendFunction TO Class)",
-    "CREATE REL TABLE IF NOT EXISTS HAS_PARAMETER (FROM Method TO Parameter, FROM Constructor TO Parameter, FROM Function TO Parameter, FROM ArrowFunction TO Parameter, FROM ExtensionFunction TO Parameter, FROM SuspendFunction TO Parameter, FROM Lambda TO Parameter)",
+    "CREATE REL TABLE IF NOT EXISTS RETURNS (FROM Method TO Class, FROM Method TO Interface, FROM Method TO Enum, FROM Method TO Record, FROM Function TO Class, FROM Function TO Interface, FROM Function TO Enum, FROM Function TO Record, FROM ExtensionFunction TO Class, FROM SuspendFunction TO Class, FROM Component TO Class, FROM Hook TO Class)",
+    # Component/Hook added for JS/React -- a Component/Hook is structurally
+    # just a Function/ArrowFunction with a naming-heuristic override (see
+    # js/extractor.py's _callable_kind), so it needs parameters/return-type
+    # support exactly like any other callable; found via real
+    # mini-react-app fixture testing (a Component with a props parameter).
+    "CREATE REL TABLE IF NOT EXISTS HAS_PARAMETER (FROM Method TO Parameter, FROM Constructor TO Parameter, FROM Function TO Parameter, FROM ArrowFunction TO Parameter, FROM ExtensionFunction TO Parameter, FROM SuspendFunction TO Parameter, FROM Lambda TO Parameter, FROM Component TO Parameter, FROM Hook TO Parameter)",
     "CREATE REL TABLE IF NOT EXISTS OF_TYPE (FROM Field TO Class, FROM Field TO Interface, FROM Field TO Enum, FROM Field TO Record, FROM Parameter TO Class, FROM Parameter TO Interface, FROM Parameter TO Enum, FROM Parameter TO Record, FROM Property TO Class, FROM Property TO Interface)",
     # Function/ArrowFunction added for JS/TS -- an Express/Fastify route
     # handler (the target of a resolved resolve_call_route() call) is very

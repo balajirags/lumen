@@ -41,7 +41,8 @@ def main() -> int:
 
     print("-- Node counts --")
     for table in ["Package", "Module", "Class", "Interface", "Enum", "Record", "Method",
-                  "Constructor", "Function", "AsyncFunction", "Generator", "Decorator",
+                  "Constructor", "Function", "ArrowFunction", "Component", "Hook",
+                  "AsyncFunction", "Generator", "Decorator",
                   "Field", "Parameter", "AnnotationType", "Workflow", "Domain",
                   "ConfigFile", "ConfigProperty"]:
         try:

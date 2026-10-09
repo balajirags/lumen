@@ -310,6 +310,32 @@ public interface PlaceholderClient {
             result = store.execute("MATCH (a:Function)-[c:REFERENCES_CONFIG]->(b:ConfigProperty) RETURN count(c) AS c")
             self.assertEqual(result.get_next()[0], 1)
 
+    def test_schema_accepts_component_with_parameter(self):
+        """Regression guard found via real mini-react-app fixture testing:
+        HAS_PARAMETER/RETURNS had no Component/Hook on their FROM side at
+        all -- a Component is structurally just a Function with a naming
+        override, so it needs parameter support like any other callable."""
+        import tempfile
+        import graph_store
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = graph_store.LadybugGraphStore(f"{tmp}/test-db")
+            store.init_schema()
+            store.execute(
+                "CREATE (c:Component {id: 'c1', name: 'c', qualifiedName: 'c', "
+                "external: false, language: 'js', kind: 'Component', normKind: 'x'})"
+            )
+            store.execute(
+                "CREATE (p:Parameter {id: 'p1', name: 'p', qualifiedName: 'p', "
+                "external: false, language: 'js', kind: 'Parameter', normKind: 'x'})"
+            )
+            store.execute(
+                "MATCH (c:Component {id: 'c1'}), (p:Parameter {id: 'p1'}) "
+                "CREATE (c)-[:HAS_PARAMETER {language: 'js', kind: 'HAS_PARAMETER', normKind: 'x'}]->(p)"
+            )
+            result = store.execute("MATCH (a:Component)-[c:HAS_PARAMETER]->(b:Parameter) RETURN count(c) AS c")
+            self.assertEqual(result.get_next()[0], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
