@@ -21,6 +21,9 @@ indexer/bin/cmg-*
 indexer/kuzu_db/
 indexer/**/*.class
 
+# Python (indexer/parsers/python/, indexer/parsers/php/'s kuzu_writer.py bridge)
+indexer/**/__pycache__/
+
 # Node (ui/ and indexer/parsers/javascript/)
 ui/node_modules/
 ui/dist/
