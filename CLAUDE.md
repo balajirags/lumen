@@ -31,6 +31,7 @@ This is a monorepo containing two sub-projects:
 
 Three modes: Docker, build-from-source, and pre-built native bundle.
 Set provider credentials via `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` environment variables.
+For GitHub Copilot (`--provider copilot`), set `COPILOT_GITHUB_TOKEN` (or `GH_TOKEN`/`GITHUB_TOKEN`; falls back to the Copilot plugin login or `gh auth token`). The Docker wrappers forward those variables.
 
 ### Docker (recommended — no local prerequisites)
 
@@ -207,7 +208,7 @@ Key files:
 - `pipeline/codedoc/stages/security_audit_agent.py` — example alternative agent stage: 3 parallel reviewers (access-control, dependency-risk, threat-model) fan out via `run_parallel_tasks`, then 1 fan-in risk-synthesis `run_loop` call
 - `pipeline/codedoc/log.py` — structured progress logging, indexer progress panel, repo metrics panel, analyst live boxes
 - `pipeline/codedoc/mcp_server.py` — MCP server backed by `kg_tools`; supports the HTTP MCP flow exposed by `make lumen-mcp` and `make lumen-docker-mcp`
-- `pipeline/codedoc/llm.py` — LLM abstraction: `ClaudeProvider`, `OllamaProvider`, `OpenAIProvider`
+- `pipeline/codedoc/llm.py` — LLM abstraction: `ClaudeProvider`, `OllamaProvider`, `OpenAIProvider`, `CopilotProvider` (OpenAI-format; exchanges a GitHub OAuth token for a short-lived Copilot token and refreshes it; Claude models served via Copilot still use the OpenAI message format — `uses_anthropic_format()` decides)
 - `pipeline/codedoc/kg_tools/toolkit.py` — `ReverseEngineerToolkit` (40+ graph query tools including `get_workflows`, `get_workflow_steps`, `get_domains`)
 - `pipeline/codedoc/kg_tools/backends.py` — `KuzuBackend`, `Neo4jBackend`
 - `pipeline/codedoc/prompts/analyst-domain.md` — Business Analyst system prompt (writes 2 artifacts)

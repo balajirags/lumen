@@ -26,6 +26,7 @@ docker images | grep lumen
 ```bash
 export ANTHROPIC_API_KEY=...
 # or: export OPENAI_API_KEY=...
+# or (GitHub Copilot, --provider copilot): export COPILOT_GITHUB_TOKEN="$(gh auth token)"
 
 make lumen-docker-run REPO=/path/to/repo \
   ARGS='--provider anthropic --model claude-sonnet-4-6'
@@ -119,5 +120,5 @@ lumen mcp /path/to/repo
 - **Docker image not found**: confirm `docker images` shows `lumen` after running `lumen-docker-load.sh`
 - **Architecture mismatch**: use the bundle that matches your machine — `arm64` for Apple Silicon, `amd64` for Intel/AMD
 - **Ollama on host**: use `host.docker.internal` as the hostname in `--base-url`
-- **API key missing**: set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` before running `make`
+- **API key missing**: set `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or (for `--provider copilot`) `COPILOT_GITHUB_TOKEN` before running `make`
 - **graphviz missing** (native): docs generation requires `graphviz`; install via brew/apt

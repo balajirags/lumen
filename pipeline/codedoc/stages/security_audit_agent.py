@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from codedoc.kg_tools import KuzuBackend, ReverseEngineerToolkit
-from codedoc.llm import create_provider
+from codedoc.llm import create_provider, uses_anthropic_format
 from codedoc.stages.agent import run_loop
 from codedoc.stages.parallel import run_parallel_tasks
 
@@ -148,9 +148,7 @@ def run_agent(state) -> Any:
         return state
 
     provider = create_provider(provider=provider_name, model=model, base_url=base_url, num_ctx=ollama_num_ctx)
-    use_anthropic_format = provider_name in ("claude", "anthropic") or (
-        provider_name == "auto" and (model.startswith("claude") or model.startswith("anthropic"))
-    )
+    use_anthropic_format = uses_anthropic_format(provider_name, model, base_url)
 
     artifacts_dir = str(Path(output_dir) / "artifacts")
     Path(artifacts_dir).mkdir(parents=True, exist_ok=True)

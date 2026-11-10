@@ -41,7 +41,7 @@ from codedoc.artifact_planner import (
 )
 from codedoc.diagrams import WRITE_C4_ARTIFACT_ANTHROPIC, WRITE_C4_ARTIFACT_OPENAI, write_c4_artifact
 from codedoc.kg_tools import KuzuBackend, ReverseEngineerToolkit
-from codedoc.llm import LLMProvider, ToolCall, ToolDefinition, ToolParam, chat_with_retry, create_provider
+from codedoc.llm import LLMProvider, ToolCall, ToolDefinition, ToolParam, chat_with_retry, create_provider, uses_anthropic_format
 from codedoc.prompts import GRAPH_CONVENTIONS_BASE
 
 # ---------------------------------------------------------------------------
@@ -1956,9 +1956,7 @@ def run_agent(state) -> Any:
 
     provider = create_provider(provider=provider_name, model=model, base_url=base_url, num_ctx=ollama_num_ctx)
 
-    use_anthropic = provider_name in ("claude", "anthropic") or (
-        provider_name == "auto" and (model.startswith("claude") or model.startswith("anthropic"))
-    )
+    use_anthropic = uses_anthropic_format(provider_name, model, base_url)
 
     artifacts_dir = str(Path(output_dir) / "artifacts")
     Path(artifacts_dir).mkdir(parents=True, exist_ok=True)
@@ -2083,7 +2081,7 @@ def main() -> None:
     parser.add_argument("--output-dir", default="./output", help="Root directory for artifacts")
     parser.add_argument("--request", default="", help="Custom user request (optional)")
     parser.add_argument("--provider", default="auto",
-                        choices=["auto", "claude", "ollama", "openai"],
+                        choices=["auto", "claude", "anthropic", "ollama", "openai", "copilot"],
                         help="LLM provider (default: auto)")
     parser.add_argument("--model", default="claude-sonnet-4-6",
                         help="Model name (default: claude-sonnet-4-6)")
@@ -2110,9 +2108,7 @@ def main() -> None:
         num_ctx=getattr(args, "ollama_num_ctx", 131_072) or 131_072,
     )
 
-    use_anthropic = args.provider in ("claude", "anthropic") or (
-        args.provider == "auto" and args.model.startswith("claude")
-    )
+    use_anthropic = uses_anthropic_format(args.provider, args.model, args.base_url)
 
     prompt_path = args.prompt or str(_PROMPT_PATH)
     artifacts_dir = str(Path(args.output_dir) / repo_name)

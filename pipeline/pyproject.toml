@@ -27,4 +27,7 @@ lumen = "codedoc.cli:main"
 [tool.setuptools.packages.find]
 include = ["codedoc*", "tools*"]
 
+[tool.setuptools.package-data]
+codedoc = ["prompts/*.md"]
+
 [tool.uv]
