@@ -41,7 +41,7 @@ def common_pipeline_options(f):
         click.option("--output-dir", type=click.Path(), default=None, help="Output directory (default: ./output)"),
         click.option("--repo-name", default=None, help="Override repository name used in output directory (useful when repo is mounted at a generic path like /repo)"),
         click.option("--model", default=None, help="Model name (default: claude-sonnet-4-6). For Ollama use tool-capable models: llama3.1, qwen2.5, mistral."),
-        click.option("--provider", default=None, type=click.Choice(["auto", "anthropic", "ollama", "openai"]), help="LLM provider (default: auto-detect from model name)"),
+        click.option("--provider", default=None, type=click.Choice(["auto", "anthropic", "ollama", "openai", "copilot"]), help="LLM provider (default: auto-detect from model name)"),
         click.option("--base-url", default=None, help="Custom API base URL (e.g. http://localhost:11434/v1 for Ollama)"),
         click.option("--max-turns", type=int, default=None, help="Max agent tool turns (default: 60)"),
         click.option("--timeout", type=int, default=None, help="Per-stage timeout in seconds (default: 300)"),
