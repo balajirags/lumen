@@ -34,6 +34,11 @@ fi
 if [ -n "${OPENAI_API_KEY:-}" ]; then
   docker_args+=( -e "OPENAI_API_KEY=${OPENAI_API_KEY}" )
 fi
+for var in COPILOT_GITHUB_TOKEN GH_TOKEN GITHUB_TOKEN; do
+  if [ -n "${!var:-}" ]; then
+    docker_args+=( -e "${var}=${!var}" )
+  fi
+done
 if [ -n "${CMG_JS_HEAP_MB:-}" ]; then
   docker_args+=( -e "CMG_JS_HEAP_MB=${CMG_JS_HEAP_MB}" )
 fi

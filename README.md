@@ -174,6 +174,11 @@ Set your LLM provider credentials:
 
 ```bash
 export ANTHROPIC_API_KEY=...   # or: export OPENAI_API_KEY=...
+
+# GitHub Copilot (--provider copilot): a GitHub OAuth token for an account with Copilot.
+# Resolved from COPILOT_GITHUB_TOKEN, the Copilot plugin login, GH_TOKEN/GITHUB_TOKEN, or `gh auth token`.
+# Classic/fine-grained PATs are not accepted by Copilot's token exchange.
+export COPILOT_GITHUB_TOKEN="$(gh auth token)"
 ```
 
 lumen can be installed and run in three ways. Pick the one that fits your setup.
@@ -309,6 +314,7 @@ cd pipeline
 uv run lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
 uv run lumen run /path/to/repo --provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1
 uv run lumen run /path/to/repo --provider openai --model gpt-4o
+uv run lumen run /path/to/repo --provider copilot --model gpt-4.1
 ```
 
 #### Security-audit pipeline
@@ -368,7 +374,7 @@ lumen mcp /path/to/repo   # MCP mode → http://127.0.0.1:8765/mcp
 ```
 lumen run REPO_PATH [OPTIONS]
 
-  --provider TEXT     auto | anthropic | ollama | openai
+  --provider TEXT     auto | anthropic | ollama | openai | copilot
   --model TEXT        LLM model (default: claude-sonnet-4-6)
   --base-url TEXT     Override API endpoint (e.g. http://localhost:11434/v1)
   --repo-name TEXT    Override repo name in output dir (useful when mounted at /repo)
@@ -382,7 +388,7 @@ lumen run REPO_PATH [OPTIONS]
 ```
 lumen security-audit REPO_PATH [OPTIONS]
 
-  --provider TEXT     auto | anthropic | ollama | openai
+  --provider TEXT     auto | anthropic | ollama | openai | copilot
   --model TEXT        LLM model (default: claude-sonnet-4-6)
   --base-url TEXT     Override API endpoint (e.g. http://localhost:11434/v1)
   --repo-name TEXT    Override repo name in output dir (useful when mounted at /repo)
