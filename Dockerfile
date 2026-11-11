@@ -30,6 +30,12 @@ FROM eclipse-temurin:21-jdk-jammy@sha256:f780cc415d168cad9f6a41607092b67fc799f7d
 ARG PLANTUML_VERSION=1.2026.2
 ARG PLANTUML_SHA256=3cdce52133c424dea22425b947ae9d47f2167b0866dfcf99e714d4ea1689975c
 
+# Download a pinned PlantUML JAR and verify it before use. Placed before the source COPY so
+# indexer edits never re-download it; retries cover transient network resets.
+RUN curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors -o /plantuml.jar \
+    "https://github.com/plantuml/plantuml/releases/download/v${PLANTUML_VERSION}/plantuml-${PLANTUML_VERSION}.jar" \
+    && echo "${PLANTUML_SHA256}  /plantuml.jar" | sha256sum -c -
+
 WORKDIR /build
 COPY indexer/ .
 
@@ -51,11 +57,6 @@ RUN set -eux; \
     jar cfm "/build/$JAR.slim" META-INF/MANIFEST.MF .; \
     mv "/build/$JAR.slim" "/build/$JAR"; \
     rm -rf "$TMPDIR"
-
-# Download a pinned PlantUML JAR and verify it before use.
-RUN curl -fsSL -o /plantuml.jar \
-    "https://github.com/plantuml/plantuml/releases/download/v${PLANTUML_VERSION}/plantuml-${PLANTUML_VERSION}.jar" \
-    && echo "${PLANTUML_SHA256}  /plantuml.jar" | sha256sum -c -
 
 # Discover required modules, merge with a known-good baseline, then jlink
 RUN JAR=app/build/libs/code-mem-graph.jar && \
@@ -80,7 +81,8 @@ jdk.unsupported,jdk.crypto.ec" && \
 FROM node:20-slim@sha256:1e85773c98c31d4fe5b545e4cb17379e617b348832fb3738b22a08f68dec30f3 AS node-builder
 
 WORKDIR /build
-COPY indexer/parsers/javascript/ .
+# Manifests first so source-only edits reuse the cached npm install layer.
+COPY indexer/parsers/javascript/package.json indexer/parsers/javascript/package-lock.json ./
 
 RUN npm ci --omit=dev --silent \
     # Kuzu's postinstall copies the active native addon into kuzujs.node.
@@ -95,6 +97,8 @@ RUN npm ci --omit=dev --silent \
        -exec rm -rf {} + 2>/dev/null || true \
     && find node_modules -type f \( -name "*.md" -o -name "*.ts" -o -name "CHANGELOG*" \
        -o -name "*.map" \) -delete 2>/dev/null || true
+
+COPY indexer/parsers/javascript/ .
 
 
 # ── Stage 3: PHP parser dependencies ─────────────────────────────────────────
@@ -121,14 +125,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential graphviz libgraphviz-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# Install lumen pipeline (includes mkdocs-material, anthropic, openai, kuzu…)
+# Install third-party dependencies first (cached unless pyproject.toml or the
+# parser requirements change), then the lumen sources on top with --no-deps.
 COPY pipeline/pyproject.toml /opt/lumen-pipeline/pyproject.toml
+COPY indexer/parsers/python/requirements.txt /tmp/py-parser-requirements.txt
+RUN uv pip install --no-cache-dir --prefix=/deps -r /opt/lumen-pipeline/pyproject.toml \
+    && uv pip install --no-cache-dir --prefix=/deps -r /tmp/py-parser-requirements.txt
+
+# Install lumen pipeline itself (mkdocs-material, anthropic, openai, kuzu… are above)
 COPY pipeline/codedoc/ /opt/lumen-pipeline/codedoc/
 COPY pipeline/scripts/ /opt/lumen-pipeline/scripts/
-COPY indexer/parsers/python/requirements.txt /tmp/py-parser-requirements.txt
 
-RUN uv pip install --no-cache-dir --prefix=/deps /opt/lumen-pipeline/ \
-    && uv pip install --no-cache-dir --prefix=/deps -r /tmp/py-parser-requirements.txt \
+RUN uv pip install --no-cache-dir --prefix=/deps --no-deps /opt/lumen-pipeline/ \
     # Strip native libraries (kuzu ~150MB→80MB, tokenizers ~80MB→40MB, etc.)
     && find /deps -name "*.so" -o -name "*.so.*" \
        | xargs -r strip --strip-unneeded 2>/dev/null || true \
