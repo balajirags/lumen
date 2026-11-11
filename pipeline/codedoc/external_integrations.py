@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from codedoc.kg_tools.toolkit import ReverseEngineerToolkit
 from codedoc.kg_tools.utils import format_chain, short_node_name
 
 ARTIFACT_PATH = "current-state/external-integrations.md"
@@ -105,6 +106,184 @@ def render_integration_flow_map(repo_name: str, apis: list[dict]) -> list[str]:
     ]
 
 
+_MAX_CONTRACTS = 40
+_PARAM_LABELS = {"path": "Path param", "query": "Query param", "form": "Form field"}
+
+
+_JSON_SCALARS: dict[str, tuple[str, str | None]] = {
+    **dict.fromkeys(("string", "str", "char", "character"), ("string", None)),
+    "uuid": ("string", "uuid"),
+    **dict.fromkeys(("date", "localdatetime", "offsetdatetime", "zoneddatetime", "instant"), ("string", "date-time")),
+    "localdate": ("string", "date"),
+    "localtime": ("string", "time"),
+    "duration": ("string", "duration"),
+    **dict.fromkeys(("url", "uri"), ("string", "uri")),
+    **dict.fromkeys(("bytes", "byte[]"), ("string", "byte")),
+    **dict.fromkeys(("int", "integer", "long", "short", "byte", "biginteger"), ("integer", None)),
+    **dict.fromkeys(("double", "float", "number", "bigdecimal"), ("number", None)),
+    **dict.fromkeys(("boolean", "bool"), ("boolean", None)),
+    **dict.fromkeys(("map", "hashmap", "object", "jsonnode"), ("object", None)),
+}
+
+
+def _type_schema(type_text: str) -> dict:
+    """Schema for a declared type with no resolved fields (scalar, collection of scalars, or unresolved class)."""
+    base, is_list = ReverseEngineerToolkit._peel_type(type_text)
+    if not base or base.lower() in {"any", "unknown", "void"}:
+        item: dict = {}
+    elif base.lower() in _JSON_SCALARS:
+        kind, fmt = _JSON_SCALARS[base.lower()]
+        item = {"type": kind, **({"format": fmt} if fmt else {})}
+    else:
+        item = {"type": "object", "description": f"{base} (fields not resolved)"}
+    return {"type": "array", "items": item} if is_list else item
+
+
+def _inline_schema(names: list[str]) -> dict:
+    """Object schema from usage-inferred dotted field names (`items.id` -> items: {id})."""
+    tree: dict = {}
+    for name in names:
+        node = tree
+        for part in name.split("."):
+            node = node.setdefault(part.removesuffix("[]"), {})
+
+    def build(node: dict) -> dict:
+        if not node:
+            return {}
+        return {"type": "object", "properties": {k: build(v) for k, v in node.items()}}
+
+    return build(tree) or {"type": "object"}
+
+
+class _SchemaSet:
+    """Named object schemas (OpenAPI `components.schemas`) collected for one call; nested types become `$ref`s."""
+
+    def __init__(self) -> None:
+        self.defs: dict[str, dict] = {}
+
+    @staticmethod
+    def _ref(name: str) -> dict:
+        return {"$ref": f"#/components/schemas/{name}"}
+
+    def _define(self, name: str, fields: list[dict]) -> dict:
+        if name not in self.defs:
+            self.defs[name] = {}  # reserved first so a self-referencing type resolves to its own $ref
+            self.defs[name] = {"type": "object", "properties": {f["name"]: self.field(f) for f in fields}}
+        return self._ref(name)
+
+    def field(self, field: dict) -> dict:
+        text = field.get("type") or ""
+        base, is_list = ReverseEngineerToolkit._peel_type(text)
+        if field.get("fields"):
+            node = self._define(base or "Object", field["fields"])
+            is_list = bool(field.get("list"))
+        elif base in self.defs and base.lower() not in _JSON_SCALARS:
+            node = self._ref(base)
+        else:
+            return _type_schema(text)
+        return {"type": "array", "items": node} if is_list else node
+
+    def body(self, shape: dict) -> dict:
+        if shape.get("inline"):
+            node: dict = _inline_schema([f["name"] for f in shape["fields"]])
+        elif shape.get("fields"):
+            node = self._define(shape["type"], shape["fields"])
+        else:
+            return _type_schema(f"List<{shape['type']}>" if shape.get("list") else shape["type"])
+        return {"type": "array", "items": node} if shape.get("list") else node
+
+
+_PLAIN_YAML = re.compile(r"^[\w./-]+$")
+
+
+def _yaml_scalar(value: object) -> str:
+    text = str(value)
+    return text if _PLAIN_YAML.match(text) else "'" + text.replace("'", "''") + "'"
+
+
+def _yaml_flow(node: dict) -> str:
+    return "{ " + ", ".join(f"{k}: {_yaml_scalar(v)}" for k, v in node.items()) + " }" if node else "{}"
+
+
+def _yaml_lines(node: dict, indent: int = 0) -> list[str]:
+    """OpenAPI-style YAML: scalar-only schemas collapse to `{ type: string }`, nested ones stay in block form."""
+    pad = " " * indent
+    out: list[str] = []
+    for key, value in node.items():
+        name = _yaml_scalar(key)
+        if not isinstance(value, dict):
+            out.append(f"{pad}{name}: {_yaml_scalar(value)}")
+        elif not value or all(not isinstance(v, dict) for v in value.values()):
+            out.append(f"{pad}{name}: {_yaml_flow(value)}")
+        else:
+            out.append(f"{pad}{name}:")
+            out.extend(_yaml_lines(value, indent + 2))
+    return out
+
+
+def _body_yaml(contract: dict) -> list[str]:
+    """YAML block with the request/response bodies and every named schema they use."""
+    schemas = _SchemaSet()
+    doc: dict = {}
+    if contract.get("request"):
+        doc["request"] = schemas.body(contract["request"])
+    if contract.get("response"):
+        doc["response"] = schemas.body(contract["response"])
+    if schemas.defs:
+        doc["components"] = {"schemas": schemas.defs}
+    lines = _yaml_lines(doc)
+    if not contract.get("response"):
+        lines.append("# response type not detected")
+    return ["```yaml", *lines, "```", ""]
+
+
+def _has_contract(api: dict) -> bool:
+    c = api.get("contract") or {}
+    return bool(c.get("request") or c.get("response") or c.get("params") or c.get("headers"))
+
+
+def render_api_contracts(apis: list[dict]) -> list[str]:
+    """`## API Contracts` section: request params/headers/body and response shape per outbound call."""
+    documented = [a for a in apis if _has_contract(a)]
+    if not documented:
+        return []
+    lines = [
+        "## API Contracts [Observed]\n",
+        "Request and response details for each outbound call, read statically from the code: types come from "
+        "declared Java/TypeScript types, annotations and call arguments. Bodies are OpenAPI-style schemas "
+        "(`components.schemas` with `$ref`) resolved from the indexed classes at every nesting level. Plain-JavaScript "
+        "bodies list only the fields the calling code actually reads, and a type marked \"fields not resolved\" is "
+        "external or could not be found.\n",
+    ]
+    for api in documented[:_MAX_CONTRACTS]:
+        contract = api["contract"]
+        lines.append(f"### `{_cell(api['method'])} {_cell(api['url'])}`\n")
+        if api.get("callers"):
+            lines.append(f"Called from `{_cell(api['callers'][0]['caller'])}`"
+                         + (f" (+{len(api['callers']) - 1} more)" if len(api["callers"]) > 1 else "") + "\n")
+
+        lines.append("**Request**\n")
+        rows: list[str] = []
+        for item in contract.get("params") or []:
+            kind, _, name = item.partition(":")
+            rows.append(f"| {_PARAM_LABELS.get(kind, kind)} | `{_cell(name)}` |")
+        for header in contract.get("headers") or []:
+            rows.append(f"| Header | `{_cell(header)}` |")
+        if rows:
+            lines.extend(["| Part | Name |", "|---|---|", *rows, ""])
+        else:
+            lines.append("_No parameters or headers detected._\n")
+
+        lines.append("**Request / response bodies**\n")
+        if contract.get("request") or contract.get("response"):
+            lines.extend(_body_yaml(contract))
+        else:
+            lines.append("_No request or response body type detected._\n")
+    if len(documented) > _MAX_CONTRACTS:
+        lines.append(f"_{len(documented) - _MAX_CONTRACTS} more call(s) not shown._\n")
+    return lines
+
+
 def render_external_integrations(repo_name: str, apis: list[dict]) -> str | None:
     """Render the artifact markdown, or None when no outbound calls were detected."""
     if not apis:
@@ -152,6 +331,8 @@ def render_external_integrations(repo_name: str, apis: list[dict]) -> str | None
         if len(items) > _MAX_ENDPOINTS_PER_HOST:
             lines.append(f"\n_{len(items) - _MAX_ENDPOINTS_PER_HOST} more endpoint(s) not shown._")
         lines.append("")
+
+    lines.extend(render_api_contracts(apis))
 
     lines.extend(
         [

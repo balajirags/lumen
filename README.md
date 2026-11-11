@@ -434,7 +434,7 @@ output/<repo-name>-<timestamp>/
     │   └── coupling-hotspots.md      ← hotspot table + dead code + seam candidates
     ├── current-state/
     │   ├── api-spec.yaml             ← OpenAPI spec (required for backend/fullstack repos)
-    │   ├── external-integrations.md  ← outbound HTTP calls grouped by remote host (conditional; Java + Node.js; generated from the graph)
+    │   ├── external-integrations.md  ← outbound HTTP calls grouped by remote host, with request/response contracts (conditional; Java + Node.js; generated from the graph)
     │   ├── ui-to-api-interactions.md ← UI/component to API/client interaction view, with import-fallback when direct call edges are weak
     │   └── module-dependency-map.md  ← dependency and seam summary
     ├── target-state/

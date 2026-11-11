@@ -232,6 +232,15 @@ final class ExternalApiSupport {
      */
     void addCall(CodeGraph graph, String callerId, String httpMethod, String url, String client,
                  int line, double confidence, String reason, String language) {
+        addCall(graph, callerId, httpMethod, url, client, line, confidence, reason, language, Map.of());
+    }
+
+    /**
+     * Same as above, with optional payload properties on the edge
+     * ({@code requestType}, {@code responseType}, {@code params}, {@code requestHeaders}).
+     */
+    void addCall(CodeGraph graph, String callerId, String httpMethod, String url, String client,
+                 int line, double confidence, String reason, String language, Map<String, String> extras) {
         String method = httpMethod == null ? "UNKNOWN" : httpMethod.toUpperCase(Locale.ROOT);
         String resolvedUrl = resolvePlaceholders(url == null || url.isBlank() ? "{dynamic}" : url);
         String apiId = "extapi:" + method + " " + resolvedUrl;
@@ -243,10 +252,16 @@ final class ExternalApiSupport {
                     .withProperty("client", client)
                     .withProperty("language", language));
         }
-        graph.addRelationship(new CodeRelationship(callerId, apiId, RelationshipType.CALLS_EXTERNAL)
+        CodeRelationship edge = new CodeRelationship(callerId, apiId, RelationshipType.CALLS_EXTERNAL)
                 .withProperty("lineNumber", line)
                 .withProperty("client", client)
                 .withProperty("confidence", confidence)
-                .withProperty("reason", reason));
+                .withProperty("reason", reason);
+        for (Map.Entry<String, String> extra : extras.entrySet()) {
+            if (extra.getValue() != null && !extra.getValue().isBlank()) {
+                edge.withProperty(extra.getKey(), extra.getValue());
+            }
+        }
+        graph.addRelationship(edge);
     }
 }

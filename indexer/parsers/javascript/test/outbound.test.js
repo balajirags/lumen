@@ -117,3 +117,50 @@ export function b(app) { return request(app).get('https://also-not.example.com')
     });
     assert.deepStrictEqual(apis.map(a => a.name), []);
 });
+
+test('captures request/response shapes, params and headers', () => {
+    const { edges, apis } = indexRepo({
+        'src/api.ts': `
+import axios from 'axios';
+
+interface OwnerRequest { name: string }
+interface Owner { id: number }
+
+export async function createOwner(req: OwnerRequest) {
+  const res = await axios.post<Owner>('https://owners.example.com/owners', req, { headers: { Authorization: 'x', 'X-Trace': '1' } });
+  return res.data;
+}
+export async function loadPet(id) {
+  const { data } = await axios.get('https://pets.example.com/pets/' + id, { params: { expand: true } });
+  return data.name + data.owner.city;
+}
+export async function search(q) {
+  const res = await fetch('https://search.example.com/q', { method: 'POST', body: JSON.stringify({ query: q, limit: 5 }) });
+  const body = await res.json();
+  return body.total + body.items.length;
+}
+export async function ping() {
+  const r = await axios.get('https://ping.example.com/p');
+  return r.data.status;
+}
+`,
+    });
+    const byUrl = (u) => {
+        const api = apis.find(a => a.name.endsWith(u));
+        return edges.find(e => e.targetId === api.id).properties;
+    };
+    const post = byUrl('https://owners.example.com/owners');
+    assert.strictEqual(post.requestType, 'OwnerRequest');
+    assert.strictEqual(post.responseType, 'Owner');
+    assert.strictEqual(post.requestHeaders, 'Authorization,X-Trace');
+
+    const get = byUrl('https://pets.example.com/pets/{id}');
+    assert.strictEqual(get.responseType, '{name,owner.city}');
+    assert.strictEqual(get.params, 'query:expand');
+
+    const search = byUrl('https://search.example.com/q');
+    assert.strictEqual(search.requestType, '{query,limit}');
+    assert.strictEqual(search.responseType, '{total,items}');
+
+    assert.strictEqual(byUrl('https://ping.example.com/p').responseType, '{status}');
+});

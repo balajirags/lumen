@@ -840,7 +840,7 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer, outbound) {
 
             if (outboundCtx) {
                 try {
-                    outbound.detect(outboundCtx, node, caller);
+                    outbound.detect(outboundCtx, node, caller, nodePath);
                 } catch (e) {
                     console.error(`Outbound detection failed in ${state.filePath}: ${e.message}`);
                 }

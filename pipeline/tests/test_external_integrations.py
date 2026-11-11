@@ -2,6 +2,7 @@ from codedoc.artifact_planner import build_artifact_plan
 from codedoc.diagrams.c4 import write_c4_artifact
 from codedoc.external_integrations import (
     merge_outbound_into_c4_spec,
+    render_api_contracts,
     render_external_integrations,
     render_outbound_journeys,
 )
@@ -12,14 +13,27 @@ from codedoc.stages.agent import _append_outbound_journeys, _backfill_required_a
 class FakeBackend:
     """Answers the handful of Cypher shapes the outbound-call helpers issue."""
 
-    def __init__(self, outbound_rows, workflows, calls):
+    def __init__(self, outbound_rows, workflows, calls, classes=None):
         self.outbound_rows = outbound_rows
         self.workflows = workflows
         self.calls = calls  # callee id -> [caller ids]
+        self.classes = classes or {}  # class name -> [(field name, field type)]
 
     def execute(self, cypher, *args, **kwargs):
         if "CALLS_EXTERNAL" in cypher:
+            if "requestType" in cypher and not any("request_type" in r for r in self.outbound_rows):
+                raise RuntimeError("no such column")
             return self.outbound_rows
+        if "(c:Class) WHERE c.name = '" in cypher:
+            name = cypher.split("c.name = '", 1)[1].split("'", 1)[0]
+            return [{"id": f"type:com.acme.{name}", "qn": f"com.acme.{name}"}] if name in self.classes else []
+        if "STARTS WITH 'field:" in cypher:
+            qn = cypher.split("STARTS WITH 'field:", 1)[1].split("'", 1)[0]
+            name = qn.rsplit(".", 2)[-2]
+            return [
+                {"id": f"{qn}{fname}", "name": fname, "type": ftype, "static": False}
+                for fname, ftype in self.classes.get(name, [])
+            ]
         if "MATCH (w:Workflow)" in cypher and "entryPointId" in cypher:
             return self.workflows
         if "[c:CALLS]" in cypher:
@@ -31,8 +45,8 @@ class FakeBackend:
         return []
 
 
-def _toolkit(outbound_rows=(), workflows=(), calls=None):
-    return ReverseEngineerToolkit(FakeBackend(list(outbound_rows), list(workflows), calls or {}))
+def _toolkit(outbound_rows=(), workflows=(), calls=None, classes=None):
+    return ReverseEngineerToolkit(FakeBackend(list(outbound_rows), list(workflows), calls or {}, classes))
 
 
 ROW = {
@@ -237,3 +251,113 @@ def test_integration_map_marks_calls_without_inbound_endpoint_and_runtime_hosts(
     content = render_external_integrations("orders", _toolkit([row]).outbound_api_calls())
     assert 'subgraph g0["Runtime-resolved: getUri()"]' in content
     assert ":::bg" in content and "PaymentClient.charge" in content
+
+
+def test_outbound_api_calls_resolve_request_response_contracts():
+    row = {
+        **ROW,
+        "method": "POST",
+        "url": "https://pay.example.com/v1/charges/{id}?currency=USD",
+        "api_id": "extapi:POST https://pay.example.com/v1/charges/{id}?currency=USD",
+        "request_type": "ChargeRequest",
+        "response_type": "List<Receipt>",
+        "params": "query:retry",
+        "req_headers": "X-Key",
+    }
+    classes = {
+        "ChargeRequest": [("amount", "int"), ("card", "Card")],
+        "Card": [("number", "String"), ("holder", "Holder")],
+        "Holder": [("name", "String")],
+        "Receipt": [("id", "String")],
+    }
+
+    (api,) = _toolkit([row], classes=classes).outbound_api_calls()
+
+    contract = api["contract"]
+    assert contract["params"] == ["query:retry", "path:id", "query:currency"]
+    assert contract["headers"] == ["X-Key"]
+    assert contract["response"]["list"] and contract["response"]["type"] == "Receipt"
+    request_fields = {f["name"]: f for f in contract["request"]["fields"]}
+    assert request_fields["amount"]["type"] == "int"
+    # every nested level resolves: ChargeRequest -> Card -> Holder
+    card = request_fields["card"]
+    assert [f["name"] for f in card["fields"]] == ["number", "holder"]
+    assert [f["name"] for f in card["fields"][1]["fields"]] == ["name"]
+
+    md = render_external_integrations("svc", [api])
+    assert "## API Contracts [Observed]" in md
+    assert "| Header | `X-Key` |" in md
+    assert (
+        "request: { $ref: '#/components/schemas/ChargeRequest' }\n"
+        "response:\n"
+        "  type: array\n"
+        "  items: { $ref: '#/components/schemas/Receipt' }\n"
+        "components:\n"
+        "  schemas:\n"
+        "    ChargeRequest:\n"
+        "      type: object\n"
+        "      properties:\n"
+        "        amount: { type: integer }\n"
+        "        card: { $ref: '#/components/schemas/Card' }\n"
+        "    Card:\n"
+        "      type: object\n"
+        "      properties:\n"
+        "        number: { type: string }\n"
+        "        holder: { $ref: '#/components/schemas/Holder' }\n"
+        "    Holder:\n"
+        "      type: object\n"
+        "      properties:\n"
+        "        name: { type: string }\n"
+        "    Receipt:\n"
+        "      type: object\n"
+        "      properties:\n"
+        "        id: { type: string }\n"
+    ) in md
+
+
+def test_api_contract_schema_refs_recursive_types_and_nests_inline_fields():
+    classes = {"Node": [("id", "long"), ("children", "List<Node>"), ("tags", "List<String>"), ("owner", "Person")],
+               "Person": [("born", "LocalDate"), ("parent", "Person")]}
+    row = {**ROW, "response_type": "Node", "request_type": "{total,items.id}"}
+    (api,) = _toolkit([row], classes=classes).outbound_api_calls()
+    md = render_external_integrations("svc", [api])
+    assert (
+        "    Node:\n"
+        "      type: object\n"
+        "      properties:\n"
+        "        id: { type: integer }\n"
+        "        children:\n"
+        "          type: array\n"
+        "          items: { $ref: '#/components/schemas/Node' }\n"
+        "        tags:\n"
+        "          type: array\n"
+        "          items: { type: string }\n"
+        "        owner: { $ref: '#/components/schemas/Person' }\n"
+        "    Person:\n"
+        "      type: object\n"
+        "      properties:\n"
+        "        born: { type: string, format: date }\n"
+        "        parent: { $ref: '#/components/schemas/Person' }\n"
+    ) in md
+    assert (
+        "request:\n"
+        "  type: object\n"
+        "  properties:\n"
+        "    total: {}\n"
+        "    items:\n"
+        "      type: object\n"
+        "      properties:\n"
+        "        id: {}\n"
+    ) in md
+
+
+def test_outbound_api_contract_handles_inline_shapes_and_old_indexes():
+    row = {**ROW, "request_type": "{name,limit}", "response_type": "{total,items.id}"}
+    (api,) = _toolkit([row]).outbound_api_calls()
+    assert api["contract"]["request"]["inline"]
+    assert [f["name"] for f in api["contract"]["response"]["fields"]] == ["total", "items.id"]
+
+    # an index built before payload capture has no payload columns: the query falls back and the call still lists
+    (old,) = _toolkit([dict(ROW)]).outbound_api_calls()
+    assert old["contract"]["request"] is None and old["contract"]["params"] == ["path:id"]
+    assert render_api_contracts([{**old, "contract": {**old["contract"], "params": []}}]) == []

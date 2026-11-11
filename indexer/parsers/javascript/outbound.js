@@ -65,6 +65,11 @@ const ENV_FILE = /^\.env(\..+)?$/;
 const ENV_SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'target', 'coverage', 'vendor', '.git']);
 const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|specs?|e2e|cypress)\/|\.(test|spec|stories)\.[cm]?[jt]sx?$/i;
 const MAX_CONST_DEPTH = 6;
+// Families whose verb helpers take (url, data, config) for post/put/patch; others take (url, options).
+const DATA_ARG_FAMILIES = new Set(['axios', 'nest-http', 'angular-http']);
+const BODY_VERBS = new Set(['post', 'put', 'patch']);
+const NON_FIELD_MEMBERS = new Set(['map', 'forEach', 'filter', 'find', 'reduce', 'some', 'every', 'length', 'push', 'join', 'slice', 'concat', 'includes', 'sort', 'then', 'catch', 'toString']);
+const MAX_SHAPE_FIELDS = 25;
 
 const TOKEN_RE = /\u0001([^\u0001]+)\u0001/g;
 
@@ -594,8 +599,9 @@ class OutboundDetector {
     // ── Detection ──────────────────────────────────────────────────────────
 
     /** Inspect one CallExpression. `caller` is the graph id of the enclosing callable/class/module. */
-    detect(ctx, node, caller) {
+    detect(ctx, node, caller, nodePath) {
         if (ctx.skip) return;
+        this.currentPath = nodePath || null;
         const callee = node.callee;
         const args = node.arguments;
         if (callee.type === 'Identifier') return this.detectIdentifierCall(ctx, node, caller, callee.name, args);
@@ -614,7 +620,7 @@ class OutboundDetector {
                 if (!args.length) return;
                 const url = this.resolveUrl(args[0], ctx, 0);
                 const verb = this.verbFromNode(this.objectProp(args[1], 'method'), ctx) || 'GET';
-                this.emit(ctx, caller, verb, url, 'fetch', node);
+                this.emit(ctx, caller, verb, url, 'fetch', node, undefined, this.payloadFor(ctx, node, 'fetch', null, args[1]));
                 break;
             }
             case 'undici-request': {
@@ -650,7 +656,8 @@ class OutboundDetector {
         if (!urlNode && !baseUrl && !(optionsNode && this.objectProp(optionsNode, 'baseURL'))) return;
         const verb = this.verbFromNode(this.objectProp(optionsNode, 'method'), ctx) || 'GET';
         const base = baseUrl || this.objectString(optionsNode, ['baseURL', 'baseUrl', 'prefixUrl'], ctx);
-        this.emit(ctx, caller, verb, urlNode ? this.resolveUrl(urlNode, ctx, 0) : '', CLIENT_LABEL[family], node, base);
+        this.emit(ctx, caller, verb, urlNode ? this.resolveUrl(urlNode, ctx, 0) : '', CLIENT_LABEL[family], node, base,
+            this.payloadFor(ctx, node, family, null, optionsNode));
     }
 
     detectMemberCall(ctx, node, caller, callee, args) {
@@ -687,7 +694,8 @@ class OutboundDetector {
         }
         if (inst.kind === 'angular-http') {
             if (VERB_METHODS.has(method) && args.length) {
-                this.emit(ctx, caller, method, this.resolveUrl(args[0], ctx, 0), label, node);
+                this.emit(ctx, caller, method, this.resolveUrl(args[0], ctx, 0), label, node, undefined,
+                    this.verbPayload(ctx, node, inst.kind, method, args));
             } else if (method === 'request' && args.length >= 2) {
                 this.emit(ctx, caller, this.verbFromNode(args[0], ctx) || 'GET', this.resolveUrl(args[1], ctx, 0), label, node);
             }
@@ -695,7 +703,8 @@ class OutboundDetector {
         }
         // axios / got / ky / nest-http all take (url, ...) for verb helpers and (config) for request()
         if (VERB_METHODS.has(method) && args.length) {
-            this.emit(ctx, caller, method, this.resolveUrl(args[0], ctx, 0), label, node, inst.baseUrl);
+            this.emit(ctx, caller, method, this.resolveUrl(args[0], ctx, 0), label, node, inst.baseUrl,
+                this.verbPayload(ctx, node, inst.kind, method, args));
         } else if (method === 'request') {
             this.emitConfigCall(ctx, caller, inst.kind === 'nest-http' ? 'axios' : inst.kind, args, inst.baseUrl, node);
         }
@@ -723,7 +732,8 @@ class OutboundDetector {
             return;
         }
         if (VERB_METHODS.has(method) && args.length) {
-            this.emit(ctx, caller, method, this.resolveUrl(args[0], ctx, 0), label, node);
+            this.emit(ctx, caller, method, this.resolveUrl(args[0], ctx, 0), label, node, undefined,
+                this.verbPayload(ctx, node, family, method, args));
         } else if (method === 'request' && args.length) {
             this.emitConfigCall(ctx, caller, family, args, null, node);
         }
@@ -743,7 +753,7 @@ class OutboundDetector {
         return `${scheme}://${hostStr}${portStr}${p ? this.resolveUrl(p, ctx, 0) : ''}`;
     }
 
-    emit(ctx, caller, verb, url, client, node, baseUrl) {
+    emit(ctx, caller, verb, url, client, node, baseUrl, payload) {
         let fullUrl = url || '';
         if (baseUrl && !isAbsoluteUrl(fullUrl)) fullUrl = joinUrl(baseUrl, fullUrl);
         else if (baseUrl && !fullUrl) fullUrl = baseUrl;
@@ -758,7 +768,222 @@ class OutboundDetector {
             client,
             line: node.loc && node.loc.start ? node.loc.start.line : 0,
             language: String(ctx.state.fileLanguage || 'javascript').toLowerCase(),
+            payload: payload || {},
         });
+    }
+
+    // ── Request / response capture ─────────────────────────────────────────
+
+    /** (url, data?, config?) for axios-style post/put/patch; (url, options) otherwise. */
+    verbPayload(ctx, node, family, method, args) {
+        if (DATA_ARG_FAMILIES.has(family)) {
+            return BODY_VERBS.has(method)
+                ? this.payloadFor(ctx, node, family, args[1], args[2])
+                : this.payloadFor(ctx, node, family, null, args[1]);
+        }
+        return this.payloadFor(ctx, node, family, null, args[1]);
+    }
+
+    payloadFor(ctx, node, family, dataNode, optionsNode) {
+        const out = {};
+        try {
+            const body = dataNode || this.firstProp(optionsNode, ['data', 'body', 'json', 'form']);
+            const requestType = body ? this.shapeOf(ctx, body, 0) : null;
+            if (requestType) out.requestType = requestType;
+
+            const params = [];
+            for (const key of this.propKeys(this.firstProp(optionsNode, ['params', 'searchParams', 'query', 'qs']))) {
+                params.push(`query:${key}`);
+            }
+            if (params.length) out.params = params.join(',');
+
+            const headers = this.propKeys(this.objectProp(optionsNode, 'headers'));
+            if (headers.length) out.requestHeaders = headers.join(',');
+
+            const generic = this.typeArgText(node);
+            const responseType = generic || this.inferResponseFields(family, node);
+            if (responseType) out.responseType = responseType;
+        } catch (e) {
+            // payload capture is best-effort and must never block call detection
+        }
+        return out;
+    }
+
+    firstProp(objectNode, names) {
+        for (const n of names) {
+            const v = this.objectProp(objectNode, n);
+            if (v) return v;
+        }
+        return null;
+    }
+
+    propKeys(objectNode) {
+        objectNode = this.unwrap(objectNode);
+        if (!objectNode || objectNode.type !== 'ObjectExpression') return [];
+        const keys = [];
+        for (const prop of objectNode.properties) {
+            if (prop.type !== 'ObjectProperty' && prop.type !== 'ObjectMethod') continue;
+            if (prop.computed) continue;
+            const key = prop.key.name || prop.key.value;
+            if (key !== undefined) keys.push(String(key));
+        }
+        return keys.slice(0, MAX_SHAPE_FIELDS);
+    }
+
+    /** `{a,b}` for object literals, the TS type name for annotated identifiers, null when unknown. */
+    shapeOf(ctx, node, depth) {
+        node = this.unwrap(node);
+        if (!node || depth > 3) return null;
+        if (node.type === 'CallExpression' && node.arguments.length && this.isStringify(node.callee)) {
+            return this.shapeOf(ctx, node.arguments[0], depth + 1);
+        }
+        if (node.type === 'NewExpression' && node.callee.type === 'Identifier') {
+            return node.callee.name === 'URLSearchParams' || node.callee.name === 'FormData' ? null : node.callee.name;
+        }
+        if (node.type === 'ObjectExpression') {
+            const keys = this.propKeys(node);
+            return keys.length ? `{${keys.join(',')}}` : null;
+        }
+        if (node.type === 'Identifier' && this.currentPath) {
+            const binding = this.currentPath.scope.getBinding(node.name);
+            const decl = binding && binding.path && binding.path.node;
+            if (!decl) return null;
+            const ann = decl.id && decl.id.typeAnnotation && decl.id.typeAnnotation.typeAnnotation
+                || decl.typeAnnotation && decl.typeAnnotation.typeAnnotation;
+            const typed = ann && this.tsTypeText(ann);
+            if (typed) return typed;
+            if (decl.type === 'VariableDeclarator' && decl.init) return this.shapeOf(ctx, decl.init, depth + 1);
+        }
+        return null;
+    }
+
+    isStringify(callee) {
+        return callee.type === 'MemberExpression' && !callee.computed && callee.property.name === 'stringify'
+            && callee.object.type === 'Identifier' && callee.object.name === 'JSON';
+    }
+
+    tsTypeText(t) {
+        if (!t) return null;
+        if (t.type === 'TSTypeReference' && t.typeName && t.typeName.type === 'Identifier') {
+            const args = t.typeParameters && t.typeParameters.params;
+            if (!args || !args.length) return t.typeName.name;
+            const inner = args.map(a => this.tsTypeText(a)).filter(Boolean);
+            return inner.length ? `${t.typeName.name}<${inner.join(',')}>` : t.typeName.name;
+        }
+        if (t.type === 'TSArrayType') {
+            const inner = this.tsTypeText(t.elementType);
+            return inner ? `List<${inner}>` : null;
+        }
+        return null;
+    }
+
+    /** axios.get<Owner>(...) / http.get<Owner[]>(...) */
+    typeArgText(node) {
+        const params = node.typeParameters && node.typeParameters.params || node.typeArguments && node.typeArguments.params;
+        if (!params || !params.length) return null;
+        return this.tsTypeText(params[0]);
+    }
+
+    /** Best effort: find `res.data.x` / `const {a,b} = res.data` / `(await res.json()).x` usages of the call's result. */
+    inferResponseFields(family, node) {
+        const path = this.currentPath;
+        if (!path) return null;
+        let target = path;
+        while (target.parentPath && ['AwaitExpression', 'TSAsExpression', 'ParenthesizedExpression'].includes(target.parentPath.node.type)) {
+            target = target.parentPath;
+        }
+        const fields = new Set();
+        const parent = target.parentPath && target.parentPath.node;
+        if (parent && parent.type === 'VariableDeclarator' && target.parentPath.get('init') === target) {
+            this.collectFromBinding(target.parentPath.get('id'), family, fields, false);
+        } else if (parent && parent.type === 'MemberExpression' && parent.property.name === 'then') {
+            const call = target.parentPath.parentPath;
+            const cb = call && call.node.type === 'CallExpression' ? call.get('arguments.0') : null;
+            if (cb && cb.node && /Function/.test(cb.node.type) && cb.node.params.length) {
+                this.collectFromBinding(cb.get('params.0'), family, fields, false);
+            }
+        }
+        if (!fields.size) return null;
+        return `{${[...fields].slice(0, MAX_SHAPE_FIELDS).join(',')}}`;
+    }
+
+    /** `viaWrapper` true means the binding already holds the response body (post `.data` / `.json()`). */
+    collectFromBinding(idPath, family, fields, viaWrapper) {
+        const node = idPath.node;
+        const wrapperProp = family === 'got' || family === 'ky' || family === 'needle' || family === 'request' ? 'body' : 'data';
+        if (node.type === 'Identifier') {
+            const binding = idPath.scope.getBinding(node.name);
+            if (!binding) return;
+            for (const ref of binding.referencePaths) this.collectRef(ref, family, fields, viaWrapper, wrapperProp);
+        } else if (node.type === 'ObjectPattern' && !viaWrapper) {
+            for (const [i, prop] of node.properties.entries()) {
+                if (prop.type !== 'ObjectProperty' || (prop.key.name || prop.key.value) !== wrapperProp) continue;
+                const valuePath = idPath.get(`properties.${i}.value`);
+                if (valuePath.node.type === 'ObjectPattern') this.patternKeys(valuePath.node, fields);
+                else this.collectFromBinding(valuePath, family, fields, true);
+            }
+        } else if (node.type === 'ObjectPattern' && viaWrapper) {
+            this.patternKeys(node, fields);
+        }
+    }
+
+    patternKeys(pattern, fields) {
+        for (const prop of pattern.properties) {
+            if (prop.type === 'ObjectProperty' && !prop.computed) {
+                const key = String(prop.key.name || prop.key.value);
+                if (prop.value.type === 'ObjectPattern') {
+                    for (const inner of prop.value.properties) {
+                        if (inner.type === 'ObjectProperty' && !inner.computed) fields.add(`${key}.${inner.key.name || inner.key.value}`);
+                    }
+                } else fields.add(key);
+            }
+        }
+    }
+
+    collectRef(ref, family, fields, viaWrapper, wrapperProp) {
+        let member = ref.parentPath;
+        if (!member || member.node.type !== 'MemberExpression' || member.node.object !== ref.node || member.node.computed) return;
+        const first = member.node.property.name;
+        if (!viaWrapper) {
+            if (first === 'json' || first === 'text') {
+                // fetch: await res.json()
+                let call = member.parentPath;
+                if (!call || call.node.type !== 'CallExpression') return;
+                let holder = call;
+                while (holder.parentPath && holder.parentPath.node.type === 'AwaitExpression') holder = holder.parentPath;
+                const decl = holder.parentPath && holder.parentPath.node;
+                if (decl && decl.type === 'VariableDeclarator' && decl.init === holder.node) {
+                    this.collectFromBinding(holder.parentPath.get('id'), family, fields, true);
+                } else if (holder.parentPath && holder.parentPath.node.type === 'MemberExpression') {
+                    this.collectMemberChain(holder, fields);
+                }
+                return;
+            }
+            if (first !== wrapperProp) return;
+            const wrapped = member.parentPath;
+            if (wrapped && wrapped.node.type === 'MemberExpression' && wrapped.node.object === member.node) {
+                this.collectMemberChain(member, fields);
+            } else if (wrapped && wrapped.node.type === 'VariableDeclarator' && wrapped.node.init === member.node) {
+                this.collectFromBinding(wrapped.get('id'), family, fields, true);
+            }
+            return;
+        }
+        this.collectMemberChain(ref, fields);
+    }
+
+    /** Walks `<base>.a.b.c` upwards from `base` adding `a.b` (two levels max, skipping array/method names). */
+    collectMemberChain(base, fields) {
+        const names = [];
+        let cur = base;
+        while (cur.parentPath && cur.parentPath.node.type === 'MemberExpression'
+            && cur.parentPath.node.object === cur.node && !cur.parentPath.node.computed
+            && cur.parentPath.node.property.type === 'Identifier') {
+            const name = cur.parentPath.node.property.name;
+            if (NON_FIELD_MEMBERS.has(name)) break;
+            names.push(name);
+            cur = cur.parentPath;
+        }
+        if (names.length) fields.add(names.slice(0, 2).join('.'));
     }
 
     /** Resolve cross-file tokens and write nodes/edges into the graph. Call once after all files. */
@@ -782,6 +1007,7 @@ class OutboundDetector {
                 client: call.client,
                 confidence: url.includes('{') ? 0.7 : 0.9,
                 reason: 'http-client',
+                ...call.payload,
             });
             this.callCount++;
         }

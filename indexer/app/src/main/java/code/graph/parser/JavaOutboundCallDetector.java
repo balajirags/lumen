@@ -5,11 +5,15 @@ import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.body.*;
 import com.github.javaparser.ast.expr.*;
+import com.github.javaparser.ast.NodeList;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
+import com.github.javaparser.ast.type.Type;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -44,6 +48,28 @@ final class JavaOutboundCallDetector {
     private static final Pattern HTTP_METHOD_REF = Pattern.compile("HttpMethod\\.(\\w+)");
     private static final Pattern FORMAT_SPECIFIER = Pattern.compile("%[-#+ 0,(]*\\d*(?:\\.\\d+)?[a-zA-Z]");
     private static final int MAX_DEPTH = 5;
+    private static final Set<String> PAYLOAD_WRAPPERS = Set.of("Mono", "Call", "ResponseEntity", "Optional",
+            "CompletableFuture", "HttpEntity", "RequestEntity", "Single", "Maybe", "DeferredResult", "ListenableFuture");
+    private static final Set<String> RESPONSE_READERS = Set.of("bodyToMono", "bodyToFlux", "toEntity", "toEntityList", "body");
+    private static final Set<String> RESPONSE_STARTERS = Set.of("retrieve", "exchange", "exchangeToMono", "exchangeToFlux");
+    private static final Set<String> OK_HEADER_CALLS = Set.of("header", "addHeader");
+
+    /** Request/response shape captured for one outbound call; written as edge properties. */
+    private static final class Payload {
+        String requestType;
+        String responseType;
+        final Set<String> params = new LinkedHashSet<>();
+        final Set<String> headers = new LinkedHashSet<>();
+
+        Map<String, String> toMap() {
+            Map<String, String> m = new LinkedHashMap<>();
+            if (requestType != null) m.put("requestType", requestType);
+            if (responseType != null) m.put("responseType", responseType);
+            if (!params.isEmpty()) m.put("params", String.join(",", params));
+            if (!headers.isEmpty()) m.put("requestHeaders", String.join(",", headers));
+            return m;
+        }
+    }
 
     private final CodeGraph graph;
     private final ExternalApiSupport support;
@@ -98,7 +124,8 @@ final class JavaOutboundCallDetector {
                 Optional<AnnotationExpr> ann = findAnnotation(method.getAnnotations(), e.getKey());
                 if (ann.isPresent() && owner.get() instanceof ClassOrInterfaceDeclaration cid && cid.isInterface()) {
                     String path = annotationString(ann.get(), method, "value");
-                    emit(methodId, e.getValue(), path == null ? "" : path, "Retrofit", line, "retrofit-annotation");
+                    emit(methodId, e.getValue(), path == null ? "" : path, "Retrofit", line, "retrofit-annotation",
+                            declarativePayload(method, "Body"));
                     return;
                 }
             }
@@ -118,7 +145,21 @@ final class JavaOutboundCallDetector {
         String verb = REST_TEMPLATE_VERBS.get(call.getNameAsString());
         if (verb.equals("?")) verb = verbFromArguments(call);
         String url = resolveUrl(call.getArgument(0), call, 0);
-        emit(callerId, verb, url, "RestTemplate", line, "rest-template-call");
+        Payload payload = new Payload();
+        List<Expression> args = call.getArguments();
+        for (int i = 1; i < args.size() && payload.responseType == null; i++) {
+            Expression a = args.get(i);
+            boolean typeToken = a instanceof ClassExpr
+                    || a instanceof ObjectCreationExpr oc && oc.getType().getNameAsString().equals("ParameterizedTypeReference");
+            if (typeToken) payload.responseType = exprType(a, call);
+        }
+        String callName = call.getNameAsString();
+        int bodyIndex = callName.equals("exchange") ? 2
+                : callName.startsWith("postFor") || callName.equals("put") || callName.equals("patchForObject") ? 1 : -1;
+        if (bodyIndex > 0 && bodyIndex < args.size() && !(args.get(bodyIndex) instanceof ClassExpr)) {
+            payload.requestType = exprType(args.get(bodyIndex), call);
+        }
+        emit(callerId, verb, url, "RestTemplate", line, "rest-template-call", payload);
     }
 
     private String verbFromArguments(MethodCallExpr call) {
@@ -158,7 +199,36 @@ final class JavaOutboundCallDetector {
             String base = findBaseUrl(uriCall);
             if (base != null) path = ExternalApiSupport.joinUrl(base, path);
         }
-        emit(callerId, verb, path, client, line, client.equals("WebClient") ? "webclient-chain" : "restclient-chain");
+        Payload payload = fluentPayload(uriCall);
+        emit(callerId, verb, path, client, line, client.equals("WebClient") ? "webclient-chain" : "restclient-chain", payload);
+    }
+
+    /** Request body, response type, headers and query params from the calls chained around .uri(...). */
+    private Payload fluentPayload(MethodCallExpr uriCall) {
+        Payload payload = new Payload();
+        List<MethodCallExpr> chain = inwardChain(uriCall);
+        for (MethodCallExpr c : outwardChain(uriCall)) if (!chain.contains(c)) chain.add(c);
+        boolean responseSide = false;
+        boolean needsFallback = false;
+        for (MethodCallExpr c : chain) {
+            String n = c.getNameAsString();
+            if (n.equals("uri") && !c.getArguments().isEmpty()) collectQueryParams(c.getArgument(0), payload);
+            collectHeaderCall(c, payload);
+            if (RESPONSE_STARTERS.contains(n)) {
+                responseSide = true;
+            } else if (!responseSide && (n.equals("bodyValue") || n.equals("body")) && !c.getArguments().isEmpty()) {
+                // WebClient .body(publisher, Foo.class) names the element type explicitly
+                payload.requestType = c.getArguments().size() > 1 && c.getArgument(1) instanceof ClassExpr
+                        ? exprType(c.getArgument(1), c) : exprType(c.getArgument(0), c);
+            } else if (responseSide && RESPONSE_READERS.contains(n)) {
+                if (c.getArguments().isEmpty()) continue;
+                String type = exprType(c.getArgument(0), c);
+                if (type == null) needsFallback = true;
+                else payload.responseType = n.equals("bodyToFlux") || n.equals("toEntityList") ? "List<" + type + ">" : type;
+            }
+        }
+        if (payload.responseType == null && needsFallback) payload.responseType = enclosingReturnType(uriCall);
+        return payload;
     }
 
     /** java.net.http: HttpRequest.newBuilder().uri(URI.create("...")).GET()... */
@@ -169,27 +239,31 @@ final class JavaOutboundCallDetector {
         String url = null;
         if (!newBuilder.getArguments().isEmpty()) url = resolveUrl(newBuilder.getArgument(0), newBuilder, 0);
         String verb = "GET";
+        Payload payload = new Payload();
         for (MethodCallExpr c : outwardChain(newBuilder)) {
             String n = c.getNameAsString();
+            collectHeaderCall(c, payload);
             if (n.equals("uri") && !c.getArguments().isEmpty()) url = resolveUrl(c.getArgument(0), c, 0);
             else if (ExternalApiSupport.HTTP_VERBS.contains(n)) verb = n;
             else if (n.equals("method") && !c.getArguments().isEmpty()) verb = literalOr(c.getArgument(0), verb);
         }
-        if (url != null) emit(callerId, verb, url, "java.net.http", line, "java-http-client");
+        if (url != null) emit(callerId, verb, url, "java.net.http", line, "java-http-client", payload);
     }
 
     /** OkHttp: new Request.Builder().url("...").post(body).build() */
     private void detectOkHttp(ObjectCreationExpr creation, String callerId, int line) {
         String url = null;
         String verb = "GET";
+        Payload payload = new Payload();
         if (!(creation.getParentNode().orElse(null) instanceof MethodCallExpr first)) return;
         for (MethodCallExpr c : outwardChain(first)) {
             String n = c.getNameAsString();
+            collectHeaderCall(c, payload);
             if (n.equals("url") && !c.getArguments().isEmpty()) url = resolveUrl(c.getArgument(0), c, 0);
             else if (FLUENT_VERB_CALLS.contains(n)) verb = n.toUpperCase(Locale.ROOT);
             else if (n.equals("method") && !c.getArguments().isEmpty()) verb = literalOr(c.getArgument(0), verb);
         }
-        if (url != null) emit(callerId, verb, url, "OkHttp", line, "okhttp-builder");
+        if (url != null) emit(callerId, verb, url, "OkHttp", line, "okhttp-builder", payload);
     }
 
     private void detectFeignMethod(MethodDeclaration method, String methodId, int line,
@@ -226,7 +300,36 @@ final class JavaOutboundCallDetector {
         if (prefix != null) full = ExternalApiSupport.joinUrl(full, prefix);
         if (classMapping != null) full = ExternalApiSupport.joinUrl(full, classMapping);
         if (path != null) full = ExternalApiSupport.joinUrl(full, path);
-        support.addCall(graph, methodId, verb, full, "OpenFeign", line, confidence, "feign-annotation", language);
+        support.addCall(graph, methodId, verb, full, "OpenFeign", line, confidence, "feign-annotation", language,
+                declarativePayload(method, "RequestBody").toMap());
+    }
+
+    /** Feign/Retrofit: return type is the response; annotated parameters are the request body, params and headers. */
+    private Payload declarativePayload(MethodDeclaration method, String bodyAnnotation) {
+        Payload payload = new Payload();
+        payload.responseType = payloadType(method.getType());
+        for (Parameter p : method.getParameters()) {
+            if (findAnnotation(p.getAnnotations(), bodyAnnotation).isPresent()) {
+                payload.requestType = payloadType(p.getType());
+                continue;
+            }
+            for (String[] kind : new String[][]{{"RequestParam", "query"}, {"Query", "query"}, {"QueryMap", "query"},
+                    {"PathVariable", "path"}, {"Path", "path"}, {"Field", "form"}}) {
+                Optional<AnnotationExpr> ann = findAnnotation(p.getAnnotations(), kind[0]);
+                if (ann.isPresent()) {
+                    String name = annotationString(ann.get(), method, "value", "name");
+                    payload.params.add(kind[1] + ":" + (name == null || name.isBlank() ? p.getNameAsString() : name));
+                }
+            }
+            for (String header : new String[]{"RequestHeader", "Header"}) {
+                Optional<AnnotationExpr> ann = findAnnotation(p.getAnnotations(), header);
+                if (ann.isPresent()) {
+                    String name = annotationString(ann.get(), method, "value", "name");
+                    payload.headers.add(name == null || name.isBlank() ? p.getNameAsString() : name);
+                }
+            }
+        }
+        return payload;
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -464,21 +567,27 @@ final class JavaOutboundCallDetector {
         if (name == null) return null;
         if (Character.isUpperCase(name.charAt(0))) return name; // static access: WebClient.create(...)
 
+        Type found = lookupType(name, ctx);
+        return found == null ? null : typeName(found);
+    }
+
+    /** Declared type of a local, parameter or field by name, searched from the context outwards. */
+    private Type lookupType(String name, Node ctx) {
         Optional<CallableDeclaration> callable = ctx.findAncestor(CallableDeclaration.class);
         if (callable.isPresent()) {
             for (Object p : callable.get().getParameters()) {
                 Parameter param = (Parameter) p;
-                if (param.getNameAsString().equals(name)) return typeName(param.getType());
+                if (param.getNameAsString().equals(name)) return param.getType();
             }
             for (VariableDeclarator v : ((Node) callable.get()).findAll(VariableDeclarator.class)) {
-                if (v.getNameAsString().equals(name)) return typeName(v.getType());
+                if (v.getNameAsString().equals(name)) return v.getType();
             }
         }
         Optional<TypeDeclaration> type = ctx.findAncestor(TypeDeclaration.class);
         while (type.isPresent()) {
             for (FieldDeclaration f : ((TypeDeclaration<?>) type.get()).getFields()) {
                 for (VariableDeclarator v : f.getVariables()) {
-                    if (v.getNameAsString().equals(name)) return typeName(v.getType());
+                    if (v.getNameAsString().equals(name)) return v.getType();
                 }
             }
             type = type.get().findAncestor(TypeDeclaration.class);
@@ -486,12 +595,107 @@ final class JavaOutboundCallDetector {
         return null;
     }
 
-    private static String typeName(com.github.javaparser.ast.type.Type t) {
+    private static String typeName(Type t) {
         return t instanceof ClassOrInterfaceType c ? c.getNameWithScope() : t.asString();
     }
 
     private void emit(String callerId, String verb, String url, String client, int line, String reason) {
+        emit(callerId, verb, url, client, line, reason, null);
+    }
+
+    private void emit(String callerId, String verb, String url, String client, int line, String reason, Payload payload) {
         double confidence = url != null && (url.contains("{") ) ? 0.7 : 0.9;
-        support.addCall(graph, callerId, verb, url, client, line, confidence, reason, language);
+        support.addCall(graph, callerId, verb, url, client, line, confidence, reason, language,
+                payload == null ? Map.of() : payload.toMap());
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Payload (request / response) capture
+    // ---------------------------------------------------------------------------------------------
+
+    /** Strip transport wrappers (Mono, ResponseEntity, Call, ...); Flux becomes List. Null for void/unknown. */
+    private static String payloadType(Type t) {
+        if (t == null) return null;
+        if (t instanceof ClassOrInterfaceType c) {
+            String n = c.getNameAsString();
+            Optional<NodeList<Type>> args = c.getTypeArguments();
+            if (args.isPresent() && args.get().size() == 1) {
+                if (PAYLOAD_WRAPPERS.contains(n)) return payloadType(args.get().get(0));
+                if (n.equals("Flux") || n.equals("Observable")) {
+                    String inner = payloadType(args.get().get(0));
+                    return inner == null ? null : "List<" + inner + ">";
+                }
+            }
+            if (n.equals("Void") || n.equals("Object") && args.isEmpty()) return null;
+            return c.asString();
+        }
+        String text = t.asString();
+        if (text.equals("void") || text.equals("var") || text.startsWith("?")) return null;
+        return text;
+    }
+
+    /** Type described by an argument: Foo.class, new ParameterizedTypeReference<T>(){}, a typed variable, new Foo(). */
+    private String exprType(Expression e, Node ctx) {
+        if (e == null) return null;
+        if (e instanceof EnclosedExpr enc) return exprType(enc.getInner(), ctx);
+        if (e instanceof ClassExpr ce) return payloadType(ce.getType());
+        if (e instanceof ObjectCreationExpr oc) {
+            String n = oc.getType().getNameAsString();
+            if (n.equals("ParameterizedTypeReference")) {
+                var args = oc.getType().getTypeArguments();
+                return args.isPresent() && !args.get().isEmpty() ? payloadType(args.get().get(0)) : null;
+            }
+            if ((n.equals("HttpEntity") || n.equals("RequestEntity")) && !oc.getArguments().isEmpty()) {
+                return exprType(oc.getArgument(0), ctx);
+            }
+            return oc.getType().isUsingDiamondOperator() ? n : payloadType(oc.getType());
+        }
+        if (e instanceof MethodCallExpr m && !m.getArguments().isEmpty()) {
+            String n = m.getNameAsString();
+            if (n.equals("just") || n.equals("fromValue") || n.equals("ok") || n.equals("body")) {
+                return exprType(m.getArgument(0), ctx);
+            }
+            return null;
+        }
+        String name = e instanceof NameExpr ne ? ne.getNameAsString()
+                : e instanceof FieldAccessExpr f && f.getScope() instanceof ThisExpr ? f.getNameAsString() : null;
+        return name == null ? null : payloadType(lookupType(name, ctx));
+    }
+
+    /** Return type of the method enclosing the call, used when a diamond/lambda hides the response type. */
+    private static String enclosingReturnType(Node ctx) {
+        return ctx.findAncestor(MethodDeclaration.class).map(m -> payloadType(m.getType())).orElse(null);
+    }
+
+    private void addHeaderNames(Expression scopeArg, Payload payload) {
+        if (scopeArg instanceof StringLiteralExpr s) payload.headers.add(s.asString());
+    }
+
+    private void collectQueryParams(Expression uriArg, Payload payload) {
+        if (!(uriArg instanceof LambdaExpr lambda)) return;
+        for (MethodCallExpr c : lambda.findAll(MethodCallExpr.class)) {
+            if (c.getNameAsString().equals("queryParam") && !c.getArguments().isEmpty()
+                    && c.getArgument(0) instanceof StringLiteralExpr q) {
+                payload.params.add("query:" + q.asString());
+            }
+        }
+    }
+
+    private void collectHeaderCall(MethodCallExpr c, Payload payload) {
+        String n = c.getNameAsString();
+        if (OK_HEADER_CALLS.contains(n) && !c.getArguments().isEmpty()) addHeaderNames(c.getArgument(0), payload);
+        else if (n.equals("contentType") || n.equals("setContentType")) payload.headers.add("Content-Type");
+        else if (n.equals("accept") || n.equals("setAccept")) payload.headers.add("Accept");
+        else if (n.equals("setBearerAuth") || n.equals("setBasicAuth") || n.equals("basicAuthentication")) payload.headers.add("Authorization");
+        else if (n.equals("headers") && !c.getArguments().isEmpty() && c.getArgument(0) instanceof LambdaExpr lambda) {
+            for (MethodCallExpr inner : lambda.findAll(MethodCallExpr.class)) {
+                if ((inner.getNameAsString().equals("set") || inner.getNameAsString().equals("add"))
+                        && !inner.getArguments().isEmpty()) {
+                    addHeaderNames(inner.getArgument(0), payload);
+                } else {
+                    collectHeaderCall(inner, payload);
+                }
+            }
+        }
     }
 }

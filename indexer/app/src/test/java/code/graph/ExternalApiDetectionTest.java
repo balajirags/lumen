@@ -200,4 +200,91 @@ class ExternalApiDetectionTest {
         Set<String> apis = externalApis(graph);
         assertTrue(apis.contains("GET https://pay.example.com/v1/charges/{id}"), apis.toString());
     }
+
+    private Object edgeProp(CodeGraph graph, String apiName, String key) {
+        return graph.getRelationships().stream()
+                .filter(r -> r.type() == RelationshipType.CALLS_EXTERNAL && r.targetId().equals("extapi:" + apiName))
+                .map(r -> r.properties().get(key))
+                .filter(java.util.Objects::nonNull)
+                .findFirst().orElse(null);
+    }
+
+    @Test
+    void javaCapturesRequestAndResponseShapes() throws IOException {
+        Path pkg = tempDir.resolve("src/main/java/com/example");
+        Files.createDirectories(pkg);
+        Files.writeString(pkg.resolve("Clients.java"), """
+                package com.example;
+
+                import java.util.List;
+                import org.springframework.core.ParameterizedTypeReference;
+                import org.springframework.http.ResponseEntity;
+                import org.springframework.web.client.RestClient;
+                import org.springframework.web.client.RestTemplate;
+                import org.springframework.web.reactive.function.client.WebClient;
+
+                public class Clients {
+                    private final RestTemplate rt = new RestTemplate();
+                    private final WebClient web = WebClient.create("http://customers");
+
+                    public Owner create(OwnerRequest req) {
+                        return rt.postForObject("http://owners/api/owners", req, Owner.class);
+                    }
+
+                    public Owner owner(int id) {
+                        return web.get().uri("/owners/{id}", id).header("X-Trace", "1").retrieve().bodyToMono(Owner.class).block();
+                    }
+
+}
+                """);
+        Files.writeString(pkg.resolve("AiClient.java"), """
+                package com.example;
+
+                import java.util.List;
+                import org.springframework.core.ParameterizedTypeReference;
+                import org.springframework.web.client.RestClient;
+
+                public class AiClient {
+                    private final RestClient rest = RestClient.create("http://ai");
+
+                    public List<Vet> vets() {
+                        return rest.get().uri(b -> b.path("/vets").queryParam("active", true).build())
+                                .retrieve().body(new ParameterizedTypeReference<>() {});
+                    }
+
+                    public void save(PetRequest pet) {
+                        rest.post().uri("/pets").contentType(null).body(pet).retrieve().toBodilessEntity();
+                    }
+                }
+                """);
+        Files.writeString(pkg.resolve("TaxApi.java"), """
+                package com.example;
+
+                import org.springframework.cloud.openfeign.FeignClient;
+                import org.springframework.http.ResponseEntity;
+                import org.springframework.web.bind.annotation.*;
+
+                @FeignClient(name = "tax", url = "http://tax")
+                public interface TaxApi {
+                    @PostMapping("/rates/{country}")
+                    ResponseEntity<Rate> rate(@PathVariable("country") String c, @RequestParam("year") int y,
+                                              @RequestHeader("X-Key") String k, @RequestBody RateRequest body);
+                }
+                """);
+
+        CodeGraph graph = new JavaSourceParser(tempDir).parseDirectory(tempDir);
+
+        assertEquals("OwnerRequest", edgeProp(graph, "POST http://owners/api/owners", "requestType"));
+        assertEquals("Owner", edgeProp(graph, "POST http://owners/api/owners", "responseType"));
+        assertEquals("Owner", edgeProp(graph, "GET http://customers/owners/{id}", "responseType"));
+        assertEquals("X-Trace", edgeProp(graph, "GET http://customers/owners/{id}", "requestHeaders"));
+        assertEquals("List<Vet>", edgeProp(graph, "GET http://ai/vets", "responseType"));
+        assertEquals("query:active", edgeProp(graph, "GET http://ai/vets", "params"));
+        assertEquals("PetRequest", edgeProp(graph, "POST http://ai/pets", "requestType"));
+        assertNull(edgeProp(graph, "POST http://ai/pets", "responseType"));
+        assertEquals("Rate", edgeProp(graph, "POST http://tax/rates/{country}", "responseType"));
+        assertEquals("RateRequest", edgeProp(graph, "POST http://tax/rates/{country}", "requestType"));
+        assertEquals("path:country,query:year", edgeProp(graph, "POST http://tax/rates/{country}", "params"));
+        assertEquals("X-Key", edgeProp(graph, "POST http://tax/rates/{country}", "requestHeaders"));
+    }
 }
