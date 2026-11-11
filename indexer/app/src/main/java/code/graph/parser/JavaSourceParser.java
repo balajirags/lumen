@@ -10,6 +10,7 @@ import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.expr.NameExpr;
 import com.github.javaparser.ast.expr.NormalAnnotationExpr;
+import com.github.javaparser.ast.expr.ObjectCreationExpr;
 import com.github.javaparser.ast.expr.SingleMemberAnnotationExpr;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
@@ -41,6 +42,7 @@ public class JavaSourceParser implements SourceParser {
     private int resolvedCalls = 0;
     private int unresolvedCalls = 0;
     private FileHashCache hashCache;
+    private ExternalApiSupport externalApi = ExternalApiSupport.empty();
 
     public JavaSourceParser(Path sourceRoot) {
         this(sourceRoot, List.of());
@@ -93,6 +95,7 @@ public class JavaSourceParser implements SourceParser {
     public CodeGraph parseDirectory(Path root) throws IOException {
         CodeGraph graph = new CodeGraph();
         List<Path> javaFiles = collectJavaFiles(root);
+        externalApi = ExternalApiSupport.load(root);
 
         System.out.printf("Found %d Java files to parse%n", javaFiles.size());
 
@@ -184,10 +187,12 @@ public class JavaSourceParser implements SourceParser {
 
         private final CodeGraph graph;
         private final java.util.Set<String> internalTypes;
+        private final JavaOutboundCallDetector outbound;
 
         CodeGraphVisitor(CodeGraph graph, java.util.Set<String> internalTypes) {
             this.graph = graph;
             this.internalTypes = internalTypes;
+            this.outbound = new JavaOutboundCallDetector(graph, externalApi, "java");
         }
 
         @Override
@@ -323,6 +328,9 @@ public class JavaSourceParser implements SourceParser {
             // CONTAINS: Type -> Method
             graph.addRelationship(new CodeRelationship(typeId, methodId, RelationshipType.CONTAINS));
 
+            // Declarative HTTP clients (OpenFeign / Retrofit interfaces)
+            outbound.detectDeclarative(decl, methodId, decl.getBegin().map(p -> p.line).orElse(-1));
+
             // Return type
             String returnTypeName = decl.getTypeAsString();
             if (!"void".equals(returnTypeName)) {
@@ -434,6 +442,31 @@ public class JavaSourceParser implements SourceParser {
         }
 
         @Override
+        public void visit(ObjectCreationExpr creation, Void arg) {
+            String callerId = enclosingCallableId(creation);
+            if (callerId != null) {
+                outbound.detect(creation, callerId, creation.getBegin().map(p -> p.line).orElse(-1));
+            }
+            super.visit(creation, arg);
+        }
+
+        private String enclosingCallableId(com.github.javaparser.ast.Node node) {
+            var method = node.findAncestor(MethodDeclaration.class);
+            if (method.isPresent()) {
+                return "method:" + findContainingType(method.get()) + "." + buildMethodSignature(method.get());
+            }
+            var ctor = node.findAncestor(ConstructorDeclaration.class);
+            if (ctor.isPresent()) {
+                String ctorSig = ctor.get().getNameAsString() + "(" +
+                        ctor.get().getParameters().stream()
+                                .map(p -> p.getTypeAsString())
+                                .collect(Collectors.joining(",")) + ")";
+                return "ctor:" + findContainingType(ctor.get()) + "." + ctorSig;
+            }
+            return null;
+        }
+
+        @Override
         public void visit(MethodCallExpr call, Void arg) {
             // Find the enclosing method or constructor
             String callerId = null;
@@ -458,6 +491,9 @@ public class JavaSourceParser implements SourceParser {
             }
 
             int line = call.getBegin().map(p -> p.line).orElse(-1);
+
+            // Outbound HTTP calls (RestTemplate, WebClient, RestClient, java.net.http, OkHttp)
+            outbound.detect(call, callerId, line);
 
             // Try full symbol resolution first
             try {

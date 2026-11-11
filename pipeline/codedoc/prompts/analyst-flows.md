@@ -93,8 +93,16 @@ The orientation summary passed to you already contains:
 - **Pre-computed Workflows** — end-to-end HTTP traces with `httpMethod`, `httpPath`, `stepCount`, `type`. Use directly for `business-journeys.md`. **Do not call `get_workflows` again.**
 - **Pre-computed Workflow Step Traces** — ordered step chains for each workflow. Use these to build `sequenceDiagram` blocks. **Do not call `get_workflow_steps` again.**
 - **Pre-computed Domains** section — functional clusters for context.
+- **Pre-computed Outbound API Calls** (only present when the indexer detected them) — HTTP calls this code makes to remote services (RestTemplate, WebClient, Feign, OkHttp, axios, fetch, HttpService, ...), grouped by host with the calling code and `flow:` chains (inbound endpoint → call chain → remote host). **Do not call `get_outbound_api_calls` again.**
 
 If the **Orientation Summary** does NOT contain `## Pre-computed Workflows`, call `get_workflows` first.
+If it does NOT contain `## Pre-computed Outbound API Calls`, call `get_outbound_api_calls` once; "No outbound HTTP calls detected." means there are none — do not invent any.
+
+### Using outbound API calls
+- The pipeline already adds every outbound host to the C4 diagram and appends an "External Calls By Endpoint" sequence-diagram section to `business-journeys.md`; you do not need to duplicate those, but you may name hosts meaningfully (e.g. "Payment Gateway (pay.example.com)") and use the `flow:` chains for richer journeys.
+- In `architecture/c4-context.md`, add one `external_systems` entry (`kind: "system"`) per remote host (group very similar hosts) and a `relations` entry from the system with `technology` `HTTP/REST`. Never use a placeholder such as `${VAR}` as a system name; describe it as "Configured service (VAR)".
+- In `architecture/business-journeys.md`, when a journey's call chain reaches a caller listed under an outbound call (see the `flow:` lines), add the remote host as a sequence-diagram participant and the HTTP call as an arrow.
+- Do NOT write `current-state/external-integrations.md`; the pipeline generates it deterministically from the same data.
 If it contains Workflows but NOT `## Pre-computed Workflow Step Traces`, call `get_workflow_steps(name)` for each workflow you need to diagram.
 
 ## Supporting Tools (call only for gaps the pre-loaded data doesn't cover)

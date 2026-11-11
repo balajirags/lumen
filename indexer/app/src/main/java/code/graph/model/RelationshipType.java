@@ -34,5 +34,7 @@ public enum RelationshipType {
     SUSPENDS,           // Suspend function coroutine call
     // Post-processing abstractions
     WORKFLOW_STEP,      // (Method|Component|Function|AsyncFunction|ArrowFunction) -> Workflow, with step INT
-    IN_DOMAIN           // (Class|Interface|Component|Module|AsyncFunction|Function|ArrowFunction) -> Domain
+    IN_DOMAIN,          // (Class|Interface|Component|Module|AsyncFunction|Function|ArrowFunction) -> Domain
+    // Outbound integrations
+    CALLS_EXTERNAL      // (Method|Constructor|Function|AsyncFunction|...) -> ExternalApi, with lineNumber/client/confidence/reason
 }

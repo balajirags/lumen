@@ -39,6 +39,12 @@ from codedoc.artifact_planner import (
     classify_artifact_path,
     planned_artifacts_by_class,
 )
+from codedoc.external_integrations import (
+    ARTIFACT_PATH as EXTERNAL_INTEGRATIONS_PATH,
+    JOURNEYS_MARKER,
+    render_external_integrations,
+    render_outbound_journeys,
+)
 from codedoc.diagrams import WRITE_C4_ARTIFACT_ANTHROPIC, WRITE_C4_ARTIFACT_OPENAI, write_c4_artifact
 from codedoc.kg_tools import KuzuBackend, ReverseEngineerToolkit
 from codedoc.llm import LLMProvider, ToolCall, ToolDefinition, ToolParam, chat_with_retry, create_provider, uses_anthropic_format
@@ -200,6 +206,13 @@ def _build_assistant_message(response: Any, use_anthropic_format: bool) -> dict:
             for tc in response.tool_calls
         ]
     return {"role": "assistant", "content": response.content, "tool_calls": tc_list}
+
+
+def _outbound_apis(toolkit: Any) -> list[dict]:
+    try:
+        return toolkit.outbound_api_calls()
+    except Exception:
+        return []
 
 
 def _has_content(data: str | None, empty_sentinel: str) -> bool:
@@ -704,12 +717,12 @@ def _conditional_artifact_omissions(artifacts_dir: str, artifact_plan: dict[str,
         rel_path = str(item["path"])
         if (root / rel_path).exists():
             continue
-        omissions.append(
-            {
-                "file": rel_path,
-                "reason": "Conditional artifact omitted because evidence was weak, the repo shape did not support it, or recovery deprioritized it.",
-            }
+        reason = (
+            "No outbound HTTP calls were detected in the indexed graph."
+            if rel_path == EXTERNAL_INTEGRATIONS_PATH
+            else "Conditional artifact omitted because evidence was weak, the repo shape did not support it, or recovery deprioritized it."
         )
+        omissions.append({"file": rel_path, "reason": reason})
     return omissions
 
 
@@ -890,6 +903,7 @@ def _build_executive_summary_evidence(
         "architecture/route-map.md",
         "current-state/ui-to-api-interactions.md",
         "current-state/module-dependency-map.md",
+        "current-state/external-integrations.md",
         "current-state/api-spec.yaml",
         "domain/er-diagram.md",
         "tech/coupling-hotspots.md",
@@ -1075,7 +1089,11 @@ def _recover_missing_current_state_artifacts(
         max_context_tokens=max_context_tokens,
         max_source_reads=0,
         include_write_artifact=True,
-        extra_tools={"write_c4_artifact": lambda **kwargs: write_c4_artifact(artifacts_dir, **kwargs)},
+        extra_tools={
+            "write_c4_artifact": lambda **kwargs: write_c4_artifact(
+                artifacts_dir, outbound_apis=_outbound_apis(toolkit), **kwargs
+            )
+        },
         extra_tool_defs=[WRITE_C4_ARTIFACT_ANTHROPIC if use_anthropic_format else WRITE_C4_ARTIFACT_OPENAI],
         phase_label="analyst/recovery",
         allowed_artifact_paths=allowed_artifact_paths,
@@ -1128,7 +1146,32 @@ def _controlled_frontend_source_confirmation(
     return "\n\n".join(sections)
 
 
-def _backfill_required_artifacts(kuzu_path: str, repo_path: str, artifacts_dir: str, archetype: str) -> list[str]:
+def _append_outbound_journeys(toolkit: Any, artifacts_dir: str) -> str | None:
+    """Append the deterministic outbound-call sequence diagrams to the journeys artifact (idempotent)."""
+    rel = next(
+        (
+            path
+            for path in ("architecture/business-journeys.md", "architecture/user-journeys.md")
+            if (Path(artifacts_dir) / path).exists()
+        ),
+        None,
+    )
+    if rel is None:
+        return None
+    target = Path(artifacts_dir) / rel
+    existing = target.read_text(encoding="utf-8")
+    if JOURNEYS_MARKER in existing:
+        return None
+    section = render_outbound_journeys(_outbound_apis(toolkit))
+    if not section:
+        return None
+    _write_artifact(artifacts_dir, rel, existing.rstrip() + "\n\n" + section)
+    return str(target)
+
+
+def _backfill_required_artifacts(
+    kuzu_path: str, repo_path: str, artifacts_dir: str, archetype: str, repo_name: str = ""
+) -> list[str]:
     generated: list[str] = []
     root = Path(artifacts_dir)
     backend = KuzuBackend(kuzu_path)
@@ -1234,6 +1277,18 @@ def _backfill_required_artifacts(kuzu_path: str, repo_path: str, artifacts_dir: 
             )
         _write_artifact(artifacts_dir, "current-state/ui-to-api-interactions.md", content)
         generated.append(str(ui_api_target))
+
+    external_target = root / EXTERNAL_INTEGRATIONS_PATH
+    if not external_target.exists():
+        outbound_apis = _outbound_apis(toolkit)
+        content = render_external_integrations(repo_name or Path(repo_path).name or "repository", outbound_apis)
+        if content:
+            _write_artifact(artifacts_dir, EXTERNAL_INTEGRATIONS_PATH, content)
+            generated.append(str(external_target))
+
+    appended = _append_outbound_journeys(toolkit, artifacts_dir)
+    if appended:
+        generated.append(appended)
 
     return generated
 
@@ -1573,6 +1628,14 @@ def run_supervisor_agent(
         except Exception as e:
             log(f"[supervisor] WARNING: get_workflows pre-fetch failed ({e}) — analysts will call it themselves")
 
+        try:
+            outbound_data = p1_toolkit.call("get_outbound_api_calls")
+            if _has_content(outbound_data, "No outbound"):
+                orientation_summary += f"\n\n---\n## Pre-computed Outbound API Calls\n\n{outbound_data}"
+                log("[supervisor] Outbound API calls pre-fetched and embedded in orientation")
+        except Exception as e:
+            log(f"[supervisor] WARNING: get_outbound_api_calls pre-fetch failed ({e})")
+
         log(f"[supervisor] Orientation complete ({len(orientation_summary):,} chars)")
         log(f"[supervisor] Repo archetype selected: {selected_repo_archetype}")
     except Exception as e:
@@ -1646,7 +1709,11 @@ def run_supervisor_agent(
             max_context_tokens=max_context_tokens,
             max_source_reads=0,
             include_write_artifact=True,
-            extra_tools={"write_c4_artifact": lambda **kwargs: write_c4_artifact(artifacts_dir, **kwargs)},
+            extra_tools={
+            "write_c4_artifact": lambda **kwargs: write_c4_artifact(
+                artifacts_dir, outbound_apis=_outbound_apis(toolkit), **kwargs
+            )
+        },
             extra_tool_defs=[WRITE_C4_ARTIFACT_ANTHROPIC if use_anthropic_format else WRITE_C4_ARTIFACT_OPENAI],
             phase_label=name,
             pinned_user_messages=pinned,
@@ -1692,7 +1759,9 @@ def run_supervisor_agent(
     # Print per-researcher tool usage table so it's visible which tools each analyst called
     _log.print_tool_usage_table(analyst_tool_counts)
 
-    backfilled = _backfill_required_artifacts(kuzu_path, repo_path, artifacts_dir, selected_repo_archetype)
+    backfilled = _backfill_required_artifacts(
+        kuzu_path, repo_path, artifacts_dir, selected_repo_archetype, repo_name=repo_name
+    )
     if backfilled:
         all_artifacts.extend(backfilled)
         for path in backfilled:
@@ -1742,6 +1811,15 @@ def run_supervisor_agent(
             total_input_tokens += recovery_result["input_tokens"]
             total_output_tokens += recovery_result["output_tokens"]
             total_tool_uses += recovery_result["tool_uses"]
+    # Recovery may have written business-journeys.md after the backfill pass above.
+    try:
+        late_journeys = _append_outbound_journeys(
+            ReverseEngineerToolkit(KuzuBackend(kuzu_path), repo_path=repo_path), artifacts_dir
+        )
+    except Exception:
+        late_journeys = None
+    if late_journeys:
+        all_events.append("[supervisor] appended outbound-call sequence diagrams to business-journeys.md")
     _log.update_workflow_phase("synthesis", status="done", tool="evidence consolidated")
 
     # ------------------------------------------------------------------

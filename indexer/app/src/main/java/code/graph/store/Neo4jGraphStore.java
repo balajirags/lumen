@@ -187,6 +187,7 @@ public class Neo4jGraphStore implements GraphStore {
             case TYPE_ALIAS -> "TypeAlias";
             case WORKFLOW -> "Workflow";
             case DOMAIN -> "Domain";
+            case EXTERNAL_API -> "ExternalApi";
         };
     }
 }

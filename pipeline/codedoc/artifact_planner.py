@@ -109,6 +109,13 @@ ARTIFACT_DEFINITIONS: dict[str, ArtifactDefinition] = {
         purpose="Observed mapping between UI routes/components, client modules, and backend API endpoints.",
         backfillable=True,
     ),
+    "current-state/external-integrations.md": ArtifactDefinition(
+        path="current-state/external-integrations.md",
+        artifact_class="conditional",
+        summary_profile="standard",
+        purpose="Outbound HTTP calls to remote services, grouped by host, generated from the knowledge graph.",
+        backfillable=True,
+    ),
     "current-state/module-dependency-map.md": ArtifactDefinition(
         path="current-state/module-dependency-map.md",
         artifact_class="core",
@@ -232,6 +239,7 @@ PACKS: dict[str, ArtifactPackDefinition] = {
             "tech/coupling-hotspots.md",
             "domain/er-diagram.md",
             "current-state/api-spec.yaml",
+            "current-state/external-integrations.md",
         ),
     ),
     "frontend-core": ArtifactPackDefinition(
@@ -242,6 +250,7 @@ PACKS: dict[str, ArtifactPackDefinition] = {
             "current-state/state-management.md",
             "current-state/data-fetching-and-api-clients.md",
             "current-state/module-dependency-map.md",
+            "current-state/external-integrations.md",
             "tech/coupling-hotspots.md",
         ),
     ),
@@ -258,6 +267,7 @@ PACKS: dict[str, ArtifactPackDefinition] = {
             "tech/coupling-hotspots.md",
             "domain/er-diagram.md",
             "current-state/api-spec.yaml",
+            "current-state/external-integrations.md",
         ),
     ),
     "library-core": ArtifactPackDefinition(
@@ -268,6 +278,7 @@ PACKS: dict[str, ArtifactPackDefinition] = {
             "current-state/extension-points.md",
             "current-state/module-structure.md",
             "current-state/dependency-map.md",
+            "current-state/external-integrations.md",
             "tech/coupling-hotspots.md",
         ),
     ),

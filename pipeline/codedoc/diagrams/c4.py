@@ -117,8 +117,16 @@ def write_c4_artifact(
     title: str,
     summary: str,
     spec_json: str,
+    outbound_apis: list[dict] | None = None,
 ) -> str:
     spec = json.loads(spec_json)
+    if outbound_apis and "target-state/" not in filename:
+        from codedoc.external_integrations import merge_outbound_into_c4_spec
+
+        try:
+            spec = merge_outbound_into_c4_spec(spec, outbound_apis)
+        except Exception:
+            pass
     _validate_c4_spec(spec)
     diagram = render_c4_context_plantuml(title, spec)
     heading = "# C4 Context Diagram"

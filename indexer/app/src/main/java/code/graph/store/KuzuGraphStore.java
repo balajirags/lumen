@@ -48,9 +48,9 @@ public class KuzuGraphStore implements GraphStore {
     @Override
     public void initSchema() {
         // Create node tables for each type.
-        // WORKFLOW and DOMAIN have custom schemas and are created separately below.
+        // WORKFLOW, DOMAIN and EXTERNAL_API have custom schemas and are created separately below.
         for (NodeType type : NodeType.values()) {
-            if (type == NodeType.WORKFLOW || type == NodeType.DOMAIN) continue;
+            if (type == NodeType.WORKFLOW || type == NodeType.DOMAIN || type == NodeType.EXTERNAL_API) continue;
             String tableName = nodeTypeToTable(type);
             try {
                 connection.query(String.format(
@@ -100,7 +100,9 @@ public class KuzuGraphStore implements GraphStore {
                 "CREATE REL TABLE IF NOT EXISTS SUSPENDS (FROM SuspendFunction TO SuspendFunction, FROM SuspendFunction TO Method)",
                 // Post-processing relationship tables
                 "CREATE REL TABLE IF NOT EXISTS WORKFLOW_STEP (FROM Method TO Workflow, FROM Function TO Workflow, FROM AsyncFunction TO Workflow, FROM ArrowFunction TO Workflow, FROM Component TO Workflow, step INT64)",
-                "CREATE REL TABLE IF NOT EXISTS IN_DOMAIN (FROM Class TO Domain, FROM Interface TO Domain, FROM Method TO Domain, FROM Component TO Domain, FROM Module TO Domain, FROM AsyncFunction TO Domain, FROM Function TO Domain, FROM ArrowFunction TO Domain)"
+                "CREATE REL TABLE IF NOT EXISTS IN_DOMAIN (FROM Class TO Domain, FROM Interface TO Domain, FROM Method TO Domain, FROM Component TO Domain, FROM Module TO Domain, FROM AsyncFunction TO Domain, FROM Function TO Domain, FROM ArrowFunction TO Domain)",
+                // Outbound integrations
+                "CREATE REL TABLE IF NOT EXISTS CALLS_EXTERNAL (FROM Method TO ExternalApi, FROM Constructor TO ExternalApi, FROM Function TO ExternalApi, FROM AsyncFunction TO ExternalApi, FROM ArrowFunction TO ExternalApi, FROM ExtensionFunction TO ExternalApi, FROM SuspendFunction TO ExternalApi, FROM Lambda TO ExternalApi, FROM InitBlock TO ExternalApi, FROM Module TO ExternalApi, FROM Property TO ExternalApi, FROM Component TO ExternalApi, FROM Hook TO ExternalApi, FROM Generator TO ExternalApi, FROM Class TO ExternalApi, lineNumber INT64, client STRING, confidence DOUBLE, reason STRING)"
         };
 
         // Post-processing node tables must be created BEFORE the rel tables that reference them
@@ -108,7 +110,8 @@ public class KuzuGraphStore implements GraphStore {
         // qualifiedName is included because the generic save() always writes it.
         String[] abstractionNodeDefs = {
                 "CREATE NODE TABLE IF NOT EXISTS Workflow (id STRING, name STRING, qualifiedName STRING, entryPointId STRING, terminalId STRING, stepCount INT64, type STRING, httpMethod STRING, httpPath STRING, language STRING, kind STRING, normKind STRING, PRIMARY KEY(id))",
-                "CREATE NODE TABLE IF NOT EXISTS Domain (id STRING, name STRING, qualifiedName STRING, heuristicLabel STRING, cohesion DOUBLE, memberCount INT64, language STRING, kind STRING, normKind STRING, PRIMARY KEY(id))"
+                "CREATE NODE TABLE IF NOT EXISTS Domain (id STRING, name STRING, qualifiedName STRING, heuristicLabel STRING, cohesion DOUBLE, memberCount INT64, language STRING, kind STRING, normKind STRING, PRIMARY KEY(id))",
+                "CREATE NODE TABLE IF NOT EXISTS ExternalApi (id STRING, name STRING, qualifiedName STRING, httpMethod STRING, url STRING, host STRING, client STRING, language STRING, kind STRING, normKind STRING, PRIMARY KEY(id))"
         };
 
         for (String nodeDef : abstractionNodeDefs) {
@@ -137,7 +140,7 @@ public class KuzuGraphStore implements GraphStore {
                 "IMPORTS", "EXPORTS", "RENDERS", "USES_HOOK", "PROP_DEPENDENCY",
                 "DECORATES", "YIELDS",
                 "EXTENSION_OF", "DELEGATES_TO", "SEALED_SUBTYPE", "COMPANION_OF", "SUSPENDS",
-                "WORKFLOW_STEP", "IN_DOMAIN"}) {
+                "WORKFLOW_STEP", "IN_DOMAIN", "CALLS_EXTERNAL"}) {
             try {
                 connection.query("DROP TABLE " + relType);
             } catch (Exception ignored) {
@@ -176,7 +179,9 @@ public class KuzuGraphStore implements GraphStore {
                         key.equals("entryPointId") || key.equals("terminalId") || key.equals("stepCount") ||
                         key.equals("httpMethod") || key.equals("httpPath") ||
                         // Domain-specific properties
-                        key.equals("heuristicLabel") || key.equals("cohesion") || key.equals("memberCount")) {
+                        key.equals("heuristicLabel") || key.equals("cohesion") || key.equals("memberCount") ||
+                        // ExternalApi-specific properties
+                        key.equals("url") || key.equals("host") || key.equals("client")) {
                         props.append(", ").append(key).append(": ");
                         props.append(formatValue(entry.getValue()));
                     }
@@ -315,6 +320,7 @@ public class KuzuGraphStore implements GraphStore {
             // Post-processing abstractions
             case WORKFLOW -> "Workflow";
             case DOMAIN -> "Domain";
+            case EXTERNAL_API -> "ExternalApi";
         };
     }
 
@@ -354,6 +360,7 @@ public class KuzuGraphStore implements GraphStore {
             case STATEMENT -> "Statement";
             case WORKFLOW -> "Workflow";
             case DOMAIN -> "Domain";
+            case EXTERNAL_API -> "ExternalApi";
             default -> "CodeElement";
         };
     }
@@ -362,6 +369,7 @@ public class KuzuGraphStore implements GraphStore {
         return switch (type) {
             case CONTAINS, SOURCE_FILE -> "Contains";
             case CALLS -> "Calls";
+            case CALLS_EXTERNAL -> "ExternalCall";
             case IMPORTS, EXPORTS, PROP_DEPENDENCY, DELEGATES_TO -> "DependsOn";
             case EXTENDS, IMPLEMENTS, OVERRIDES, SEALED_SUBTYPE, COMPANION_OF, EXTENSION_OF -> "TypeRelation";
             case RENDERS, USES_HOOK -> "UsesUi";

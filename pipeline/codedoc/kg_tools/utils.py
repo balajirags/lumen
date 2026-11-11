@@ -57,6 +57,17 @@ def _cypher_escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace("'", "\\'")
 
 
+def short_node_name(node_id: str) -> str:
+    """'method:com.acme.OrderService.place(String)' -> 'OrderService.place'."""
+    name = node_id.split(":", 1)[-1]
+    name = re.sub(r"\(.*\)$", "", name)
+    return ".".join(name.split(".")[-2:])
+
+
+def format_chain(chain: list[str]) -> str:
+    return " → ".join(short_node_name(n) for n in chain)
+
+
 def _format_rows(rows: list[dict], limit: int = 150, max_chars: int = 8000) -> str:
     """Format query result rows as compact text. Caps output size for token efficiency."""
     if not rows:

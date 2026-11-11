@@ -41,5 +41,7 @@ public enum NodeType {
     TYPE_ALIAS,       // Kotlin typealias
     // Post-processing abstractions
     WORKFLOW,         // End-to-end execution trace (HTTP entry → repository/event terminal, or React root component → leaf API call)
-    DOMAIN            // Functional cluster of cohesive classes/modules (derived from call graph community detection)
+    DOMAIN,           // Functional cluster of cohesive classes/modules (derived from call graph community detection)
+    // Outbound integrations
+    EXTERNAL_API      // Outbound HTTP endpoint invoked by the analyzed code (RestTemplate, WebClient, Feign, requests, ...)
 }

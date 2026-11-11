@@ -276,6 +276,7 @@ architecture/route-map.md         ← UI route inventory [suppressed for JS-fron
 tech/coupling-hotspots.md         ← hotspot table + coupling pairs + dead code + seam candidates
 current-state/ui-to-api-interactions.md ← UI/component to API/client interaction view
 current-state/module-dependency-map.md  ← dependency and seam summary
+current-state/external-integrations.md  ← outbound HTTP calls grouped by remote host + Mermaid map [conditional; deterministic, written only when the graph has CALLS_EXTERNAL edges]
 current-state/api-spec.yaml       ← OpenAPI spec [required for backend/fullstack; conditional for large/xlarge]
 target-state/bounded-contexts.md  ← BC decomposition + service responsibility table (backend-service)
 target-state/strangler-fig.md     ← ordered extraction plan grounded in hotspot data (backend-service)
@@ -283,6 +284,14 @@ target-state/fullstack-boundaries.md ← frontend/backend seam plan (fullstack-a
 target-state/migration-plan.md    ← migration plan (frontend/fullstack/library)
 manifests/artifacts.json          ← machine-generated index of all artifacts written
 ```
+
+### Outbound API detection (Java + Node.js)
+
+Detection runs in the indexers; the pipeline only reads the graph.
+- Java: `JavaOutboundCallDetector` + `ExternalApiSupport` (resolves `application.yml`/`.properties` placeholders, also when the parser root is `src/main/java`) — RestTemplate, WebClient/RestClient, java.net.http, OkHttp, Apache HttpClient, Feign, Retrofit.
+- Node.js/TS: `indexer/parsers/javascript/outbound.js` — fetch, axios (incl. `axios.create`), got, ky, superagent, needle, request, node `http`/`https`, undici, NestJS `HttpService`, Angular `HttpClient`, XMLHttpRequest. URLs resolve through literals, templates, local/cross-file constants, `process.env`/`.env*` files. Test/spec/mock files and relative same-origin URLs are skipped. Kotlin and Python are not covered.
+- Pipeline: `ReverseEngineerToolkit.outbound_api_calls()` (rows, with best-effort reverse BFS over `CALLS` to HTTP entry points) backs the `get_outbound_api_calls` tool, the `## Pre-computed Outbound API Calls` orientation section for `analyst/flows`, the `get_external_dependencies` host summary, and `external_integrations.py`, which renders `current-state/external-integrations.md` deterministically in `_backfill_required_artifacts`. Outbound hosts are also made deterministic in the other diagrams: `write_c4_artifact(..., outbound_apis=...)` merges any host the model omitted into the current-state C4 as `System_Ext` + `Rel` (`merge_outbound_into_c4_spec`, not applied to `target-state/`), and `_append_outbound_journeys` idempotently appends an `## External Calls By Endpoint [Observed]` section (per-endpoint Mermaid sequence diagrams built from the `flows` call chains) to `architecture/business-journeys.md` (or `architecture/user-journeys.md` for frontend/fullstack plans). The C4 merge skips hosts the model already drew (matched by squashed name/id, so `customers-service` ≈ "Customers Service") and runtime-computed hosts like `{getUri()}`; the reverse BFS also follows CALLS edges whose callee signature is unresolved (`name(?)`). `get_workflow_steps` also appends the outbound hops for a workflow.
+- Tests: `./gradlew :app:test --tests 'code.graph.ExternalApiDetectionTest'`, `node --test test/outbound.test.js` (in `indexer/parsers/javascript`), `pipeline/tests/test_external_integrations.py`.
 
 ### Pluggable agent-stage pipelines
 
@@ -418,6 +427,8 @@ Release workflow:
 - Filter to reliable calls: `WHERE c.confidence >= 0.9` on CALLS edges
 - New node types: `Workflow` (id, name, httpMethod, httpPath, entryPointId, terminalId, stepCount, type, language), `Domain` (id, name, heuristicLabel, cohesion, memberCount, language)
 - New rel types: `WORKFLOW_STEP {step: INT}`, `IN_DOMAIN`
+- Outbound HTTP calls (Java + Node.js only): node `ExternalApi` (id `extapi:<VERB> <url>`, name, qualifiedName, httpMethod, url, host, client, language; deliberately no `external` column so `get_external_dependencies` is unaffected) and rel `CALLS_EXTERNAL {lineNumber, client, confidence, reason}` from any code node. The table definitions must stay identical in `KuzuGraphStore.java` and `indexer/parsers/javascript/store.js` — whichever indexer runs first creates them and Kuzu errors are swallowed.
+- Kuzu gotcha: `WHERE b.id IN [...]` / `list_contains` on an untyped node pattern returns wrong rows; use `b.id = 'x' OR b.id = 'y'`.
 
 ---
 

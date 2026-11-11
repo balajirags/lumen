@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const parser = require('@babel/parser');
 const traverse = require('@babel/traverse').default;
+const { OutboundDetector, loadEnvUrls } = require('./outbound');
 
 const DEFAULT_EXTENSIONS = ['.js', '.jsx', '.ts', '.tsx', '.mjs'];
 
@@ -451,7 +452,7 @@ function collectFiles(dir, extensions) {
     return files;
 }
 
-function parseFile(filePath, rootDir, graph, cpgEnhancer) {
+function parseFile(filePath, rootDir, graph, cpgEnhancer, outbound) {
     const code = fs.readFileSync(filePath, 'utf-8');
     const relativePath = path.relative(rootDir, filePath);
     const moduleName = relativePath.replace(/\.[^.]+$/, '').replace(/\//g, '.');
@@ -507,6 +508,10 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
         exports: new Set(),
         imports: new Map() // localName -> { source, importedName }
     };
+
+    const outboundCtx = outbound
+        ? outbound.beginFile(ast, state, (source) => resolveModulePath(source, state.filePath))
+        : null;
 
     traverse(ast, {
         // Track imports
@@ -832,6 +837,14 @@ function parseFile(filePath, rootDir, graph, cpgEnhancer) {
         CallExpression(nodePath) {
             const node = nodePath.node;
             const caller = state.currentFunction || state.currentClass || state.moduleId;
+
+            if (outboundCtx) {
+                try {
+                    outbound.detect(outboundCtx, node, caller);
+                } catch (e) {
+                    console.error(`Outbound detection failed in ${state.filePath}: ${e.message}`);
+                }
+            }
             
             let calleeName;
             let memberObject = '';
@@ -1040,13 +1053,17 @@ function main() {
 
     const graph = new CodeGraphBuilder();
     const cpgEnhancer = new CpgEnhancer(graph);
+    const outbound = new OutboundDetector(graph, loadEnvUrls(rootDir));
     const files = collectFiles(rootDir, extensions);
     
     console.error(`Found ${files.length} JavaScript/TypeScript files to parse`);
 
     for (const file of files) {
-        parseFile(file, rootDir, graph, cpgEnhancer);
+        parseFile(file, rootDir, graph, cpgEnhancer, outbound);
     }
+
+    outbound.flush();
+    console.error(`Outbound: ${outbound.callCount} external HTTP call site(s) detected`);
 
     console.error(`CPG: ${cpgEnhancer.stmtCount} statement nodes, ${cpgEnhancer.cfgEdgeCount} CFG edges, ${cpgEnhancer.dataFlowCount} data-flow edges`);
 
@@ -1054,6 +1071,9 @@ function main() {
     const filteredRelationships = graph.relationships.filter(rel => {
         if (rel.type === 'CALLS' || rel.type === 'RENDERS' || rel.type === 'PROP_DEPENDENCY') {
             return graph.nodes[rel.targetId] !== undefined;
+        }
+        if (rel.type === 'CALLS_EXTERNAL') {
+            return graph.nodes[rel.sourceId] !== undefined;
         }
         return true;
     });
