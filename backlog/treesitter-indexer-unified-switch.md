@@ -1,5 +1,15 @@
 # Unified old/new indexer switch + safe multi-language merge for treesitter-indexer
 
+**Status: DONE.** Implemented as approach B (in-memory merge) with a single `--experimental-treesitter`
+flag that *replaced* the five per-language flags. See `treesitter-indexer/parse_all.py`,
+`languages.py`, `Graph.merge()`, the `n.language` filter in `postprocess/workflow_builder.py`, and
+`pipeline/codedoc/stages/indexer.py` (`treesitter_languages`). Verified on
+`e2e-test/fixtures/mini-fullstack-service` (Java+Python+JS) and a combined Java+Kotlin tree.
+Not done from the original breakdown: a separate `compare_graphs_fullstack.py` script (the same
+checks live in `treesitter-indexer/tests/test_polyglot_postprocess.py`). Follow-ups:
+`backlog/treesitter-python-subdirectory-imports.md`, `backlog/old-engine-cmg-java-clears-db.md`.
+The original analysis below is kept for history.
+
 ## Background
 
 User request: a single flag should switch the whole pipeline between the old per-language

@@ -183,14 +183,14 @@ cd treesitter-indexer && ./install.sh    # one-time setup, requires uv
 
 cd pipeline && uv run lumen run /path/to/repo \
   --provider anthropic --model claude-sonnet-4-6 \
-  --experimental-treesitter-python   # or -java / -php / -js / -kotlin
+  --experimental-treesitter
 ```
 
-Each flag only takes effect for a single-language-category repo matching that language
-(e.g. `--experimental-treesitter-kotlin` requires a Kotlin-only repo with no `.java` files) —
-mixed-language repos always fall back to the stable engine. See `CLAUDE.md`'s
-"Sub-project: treesitter-indexer/" section and `backlog/treesitter-indexer-remaining-languages.md`
-for full implementation detail.
+One flag switches the whole run to the tree-sitter engine. Every detected language (Java,
+Kotlin, Python, PHP, JS/TS) is extracted, merged in memory, and written to one LadybugDB graph, so
+polyglot and fullstack repos are supported (including mixed Java+Kotlin). Without the flag the
+stable engine is used unchanged. See `CLAUDE.md`'s "Sub-project: treesitter-indexer/" section and
+`backlog/treesitter-indexer-remaining-languages.md` for full implementation detail.
 
 ## Getting Started
 
@@ -403,11 +403,7 @@ lumen run REPO_PATH [OPTIONS]
   --verbose           Stream logs as the pipeline runs
 
   # Experimental (opt-in, off by default — see "Experimental: tree-sitter indexer engine" below)
-  --experimental-treesitter-java      Use the tree-sitter Java indexer instead of cmg-java
-  --experimental-treesitter-python    Use the tree-sitter Python indexer instead of cmg-python
-  --experimental-treesitter-php       Use the tree-sitter PHP indexer instead of cmg-php
-  --experimental-treesitter-js        Use the tree-sitter JS/TS/React indexer instead of cmg-js
-  --experimental-treesitter-kotlin    Use the tree-sitter Kotlin indexer instead of cmg-java's Kotlin support
+  --experimental-treesitter           Index every detected language with the tree-sitter engine instead of the stable per-language cmg-* indexers
 ```
 
 ```

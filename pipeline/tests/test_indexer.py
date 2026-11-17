@@ -1,108 +1,99 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
+import pytest
+
 from codedoc.state import PipelineState
-from codedoc.stages.indexer import (
-    detect_languages,
-    should_use_treesitter_java,
-    should_use_treesitter_python,
-    should_use_treesitter_php,
-    should_use_treesitter_js,
-    should_use_treesitter_kotlin,
+from codedoc.stages import indexer
+from codedoc.stages.indexer import detect_languages, treesitter_languages, run_indexer
+
+
+@pytest.mark.parametrize(
+    "ordered, flavors, expected",
+    [
+        (["jvm"], ["java"], ["java"]),
+        (["jvm"], ["kotlin"], ["kotlin"]),
+        (["jvm"], ["java", "kotlin"], ["java", "kotlin"]),
+        (["jvm"], [], ["java"]),
+        (["python"], [], ["python"]),
+        (["php"], [], ["php"]),
+        (["js"], [], ["js"]),
+        (["js", "jvm", "python"], ["java"], ["js", "java", "python"]),
+    ],
 )
+def test_treesitter_languages(ordered, flavors, expected):
+    assert treesitter_languages(ordered, flavors) == expected
 
 
-def _state(**overrides) -> PipelineState:
-    return PipelineState(**overrides)
+def _repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    (repo / "backend").mkdir(parents=True)
+    (repo / "backend" / "App.java").write_text("class App {}")
+    (repo / "web").mkdir()
+    (repo / "web" / "widget.tsx").write_text("export const Widget = () => null;")
+    return repo
 
 
-def test_should_use_treesitter_java_when_flag_set_and_java_only():
-    state = _state(experimental_treesitter_java=True, language_flavors=["java"])
-    assert should_use_treesitter_java(state, ["jvm"]) is True
+def _fake_run(calls: list[list[str]]):
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        db_dir = Path(cmd[cmd.index("--db-path") + 1])
+        db_dir.mkdir(parents=True, exist_ok=True)
+        (db_dir / f"{cmd[cmd.index('--repo-name') + 1]}-db").write_bytes(b"x" * 2048)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+    return run
 
 
-def test_should_use_treesitter_java_false_when_flag_unset():
-    state = _state(experimental_treesitter_java=False, language_flavors=["java"])
-    assert should_use_treesitter_java(state, ["jvm"]) is False
+def test_run_indexer_with_flag_makes_one_cmg_ts_call_for_all_languages(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    ts_bin = tmp_path / "ts-bin"
+    ts_bin.mkdir()
+    (ts_bin / "cmg-ts").write_text("#!/bin/sh\n")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(indexer.subprocess, "run", _fake_run(calls))
+
+    state = PipelineState(
+        repo_path=str(repo), output_dir=str(tmp_path / "out"), repo_name="repo",
+        experimental_treesitter=True, treesitter_indexer_bin_dir=str(ts_bin),
+    )
+    run_indexer(state)
+
+    assert len(calls) == 1
+    assert Path(calls[0][0]).name == "cmg-ts"
+    langs = calls[0][calls[0].index("--languages") + 1].split(",")
+    assert sorted(langs) == ["java", "js"]
+    assert state.graph_backend == "ladybug"
 
 
-def test_should_use_treesitter_java_false_for_polyglot_repo():
-    state = _state(experimental_treesitter_java=True, language_flavors=["java"])
-    assert should_use_treesitter_java(state, ["jvm", "python"]) is False
+def test_run_indexer_without_flag_runs_one_legacy_binary_per_language(tmp_path, monkeypatch):
+    repo = _repo(tmp_path)
+    legacy_bin = tmp_path / "bin"
+    legacy_bin.mkdir()
+    for name in ("cmg-java", "cmg-js"):
+        (legacy_bin / name).write_text("#!/bin/sh\n")
+    calls: list[list[str]] = []
+    monkeypatch.setattr(indexer.subprocess, "run", _fake_run(calls))
+
+    state = PipelineState(
+        repo_path=str(repo), output_dir=str(tmp_path / "out"), repo_name="repo",
+        indexer_bin_dir=str(legacy_bin),
+    )
+    run_indexer(state)
+
+    assert sorted(Path(c[0]).name for c in calls) == ["cmg-java", "cmg-js"]
+    assert state.graph_backend != "ladybug"
 
 
-def test_should_use_treesitter_java_false_when_kotlin_present():
-    state = _state(experimental_treesitter_java=True, language_flavors=["java", "kotlin"])
-    assert should_use_treesitter_java(state, ["jvm"]) is False
-
-
-def test_should_use_treesitter_python_when_flag_set_and_python_only():
-    state = _state(experimental_treesitter_python=True)
-    assert should_use_treesitter_python(state, ["python"]) is True
-
-
-def test_should_use_treesitter_python_false_when_flag_unset():
-    state = _state(experimental_treesitter_python=False)
-    assert should_use_treesitter_python(state, ["python"]) is False
-
-
-def test_should_use_treesitter_python_false_for_polyglot_repo():
-    state = _state(experimental_treesitter_python=True)
-    assert should_use_treesitter_python(state, ["python", "jvm"]) is False
-
-
-def test_should_use_treesitter_php_when_flag_set_and_php_only():
-    state = _state(experimental_treesitter_php=True)
-    assert should_use_treesitter_php(state, ["php"]) is True
-
-
-def test_should_use_treesitter_php_false_when_flag_unset():
-    state = _state(experimental_treesitter_php=False)
-    assert should_use_treesitter_php(state, ["php"]) is False
-
-
-def test_should_use_treesitter_php_false_for_polyglot_repo():
-    state = _state(experimental_treesitter_php=True)
-    assert should_use_treesitter_php(state, ["php", "jvm"]) is False
-
-
-def test_should_use_treesitter_js_when_flag_set_and_js_only():
-    state = _state(experimental_treesitter_js=True)
-    assert should_use_treesitter_js(state, ["js"]) is True
-
-
-def test_should_use_treesitter_js_false_when_flag_unset():
-    state = _state(experimental_treesitter_js=False)
-    assert should_use_treesitter_js(state, ["js"]) is False
-
-
-def test_should_use_treesitter_js_false_for_polyglot_repo():
-    state = _state(experimental_treesitter_js=True)
-    assert should_use_treesitter_js(state, ["js", "python"]) is False
-
-
-def test_should_use_treesitter_kotlin_when_flag_set_and_kotlin_only_flavor():
-    state = _state(experimental_treesitter_kotlin=True, language_flavors=["kotlin"])
-    assert should_use_treesitter_kotlin(state, ["jvm"]) is True
-
-
-def test_should_use_treesitter_kotlin_false_when_flag_unset():
-    state = _state(experimental_treesitter_kotlin=False, language_flavors=["kotlin"])
-    assert should_use_treesitter_kotlin(state, ["jvm"]) is False
-
-
-def test_should_use_treesitter_kotlin_false_for_mixed_java_and_kotlin_flavors():
-    """A mixed Java+Kotlin jvm-category repo falls back to cmg-java --
-    kotlin/extractor.py only understands Kotlin syntax, mirroring exactly
-    why should_use_treesitter_java excludes kotlin-flavored repos."""
-    state = _state(experimental_treesitter_kotlin=True, language_flavors=["java", "kotlin"])
-    assert should_use_treesitter_kotlin(state, ["jvm"]) is False
-
-
-def test_should_use_treesitter_kotlin_false_for_polyglot_category_list():
-    state = _state(experimental_treesitter_kotlin=True, language_flavors=["kotlin"])
-    assert should_use_treesitter_kotlin(state, ["jvm", "python"]) is False
+def test_run_indexer_with_flag_errors_when_cmg_ts_missing(tmp_path):
+    repo = _repo(tmp_path)
+    state = PipelineState(
+        repo_path=str(repo), output_dir=str(tmp_path / "out"), repo_name="repo",
+        experimental_treesitter=True, treesitter_indexer_bin_dir=str(tmp_path / "missing"),
+    )
+    with pytest.raises(FileNotFoundError, match="treesitter-indexer/install.sh"):
+        run_indexer(state)
 
 
 def test_detect_languages_mixed_repo(tmp_path):

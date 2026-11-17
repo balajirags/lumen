@@ -28,6 +28,29 @@ def _rows(store, cypher: str) -> list[dict]:
     return out
 
 
+def _load_callables(store, tables: list[str], language: str) -> tuple[dict[str, dict], dict[str, str]]:
+    """Load this language's callables only. Method/Function/etc. are shared
+    node tables across languages (distinguished by the `language` property),
+    so an unscoped load would let one language's BFS walk another's nodes
+    once several languages are merged into one DB. The BFS skips any callee
+    missing from the returned node_info, which is what scopes it."""
+    node_info: dict[str, dict] = {}
+    node_table: dict[str, str] = {}
+    for table in tables:
+        for row in _rows(
+            store,
+            f"MATCH (n:{table}) WHERE n.language = '{language}' "
+            "RETURN n.id AS id, n.name AS name, n.qualifiedName AS qualifiedName",
+        ):
+            node_info[row["id"]] = row
+            node_table[row["id"]] = table
+    return node_info, node_table
+
+
+def _scope_entry_points(entry_points: dict, node_info: dict[str, dict]) -> dict:
+    return {nid: route for nid, route in entry_points.items() if nid in node_info}
+
+
 def _is_jvm_terminal(info: dict) -> bool:
     qn = info.get("qualifiedName") or ""
     name = (info.get("name") or "")
@@ -148,8 +171,13 @@ def build_jvm_workflows(store) -> int:
     if not entry_points:
         return 0
 
-    node_rows = _rows(store, "MATCH (n:Method) RETURN n.id AS id, n.name AS name, n.qualifiedName AS qualifiedName")
+    node_rows = _rows(
+        store,
+        "MATCH (n:Method) WHERE n.language = 'java' "
+        "RETURN n.id AS id, n.name AS name, n.qualifiedName AS qualifiedName",
+    )
     node_info = {row["id"]: row for row in node_rows}
+    entry_points = _scope_entry_points(entry_points, node_info)
 
     call_rows = _rows(
         store,
@@ -204,12 +232,8 @@ def build_python_workflows(store) -> int:
     if not entry_points:
         return 0
 
-    node_info: dict[str, dict] = {}
-    node_table: dict[str, str] = {}
-    for table in _PYTHON_CALLABLE_TABLES:
-        for row in _rows(store, f"MATCH (n:{table}) RETURN n.id AS id, n.name AS name, n.qualifiedName AS qualifiedName"):
-            node_info[row["id"]] = row
-            node_table[row["id"]] = table
+    node_info, node_table = _load_callables(store, _PYTHON_CALLABLE_TABLES, 'python')
+    entry_points = _scope_entry_points(entry_points, node_info)
 
     calls_by_source: dict[str, list[str]] = {}
     for from_table in _PYTHON_CALLABLE_TABLES:
@@ -279,12 +303,8 @@ def build_php_workflows(store) -> int:
     if not entry_points:
         return 0
 
-    node_info: dict[str, dict] = {}
-    node_table: dict[str, str] = {}
-    for table in _PHP_CALLABLE_TABLES:
-        for row in _rows(store, f"MATCH (n:{table}) RETURN n.id AS id, n.name AS name, n.qualifiedName AS qualifiedName"):
-            node_info[row["id"]] = row
-            node_table[row["id"]] = table
+    node_info, node_table = _load_callables(store, _PHP_CALLABLE_TABLES, 'php')
+    entry_points = _scope_entry_points(entry_points, node_info)
 
     calls_by_source: dict[str, list[str]] = {}
     for from_table in _PHP_CALLABLE_TABLES:
@@ -360,12 +380,8 @@ def build_js_workflows(store) -> int:
     if not entry_points:
         return 0
 
-    node_info: dict[str, dict] = {}
-    node_table: dict[str, str] = {}
-    for table in _JS_CALLABLE_TABLES:
-        for row in _rows(store, f"MATCH (n:{table}) RETURN n.id AS id, n.name AS name, n.qualifiedName AS qualifiedName"):
-            node_info[row["id"]] = row
-            node_table[row["id"]] = table
+    node_info, node_table = _load_callables(store, _JS_CALLABLE_TABLES, 'js')
+    entry_points = _scope_entry_points(entry_points, node_info)
 
     calls_by_source: dict[str, list[str]] = {}
     for from_table in _JS_CALLABLE_TABLES:
@@ -436,12 +452,8 @@ def build_kotlin_workflows(store) -> int:
     if not entry_points:
         return 0
 
-    node_info: dict[str, dict] = {}
-    node_table: dict[str, str] = {}
-    for table in _KOTLIN_CALLABLE_TABLES:
-        for row in _rows(store, f"MATCH (n:{table}) RETURN n.id AS id, n.name AS name, n.qualifiedName AS qualifiedName"):
-            node_info[row["id"]] = row
-            node_table[row["id"]] = table
+    node_info, node_table = _load_callables(store, _KOTLIN_CALLABLE_TABLES, 'kotlin')
+    entry_points = _scope_entry_points(entry_points, node_info)
 
     calls_by_source: dict[str, list[str]] = {}
     for from_table in _KOTLIN_CALLABLE_TABLES:

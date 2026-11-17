@@ -3,10 +3,9 @@
 CLI entrypoint for the tree-sitter Java indexer prototype (`cmg-java-ts`).
 
 Deliberately mirrors the calling convention of the existing cmg-* wrappers
-(`<repo-path> --db-path <dir> --repo-name <name> [--clear]`). Dispatched to
-from pipeline/codedoc/stages/indexer.py when --experimental-treesitter-java
-is set (single-language, Kotlin-free JVM repos only -- see
-should_use_treesitter_java); falls back to cmg-java otherwise.
+(`<repo-path> --db-path <dir> --repo-name <name> [--clear]`). A single-language
+debug entrypoint: `lumen run --experimental-treesitter` dispatches to the multi-language
+parse_all.py (`cmg-ts`) instead, which covers Java alongside every other language.
 
 Unlike App.java (which clears the whole DB by default unless --incremental is
 passed), this tool's destructive-clear default is the SAFE one: --clear is

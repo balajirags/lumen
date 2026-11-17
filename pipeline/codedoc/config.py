@@ -27,11 +27,7 @@ _DEFAULTS = {
     "repo_size_check": "warn",
     "allow_xlarge": False,
     "indexer_bin_dir": str(Path(__file__).resolve().parent.parent.parent / "indexer" / "bin"),
-    "experimental_treesitter_java": False,
-    "experimental_treesitter_python": False,
-    "experimental_treesitter_php": False,
-    "experimental_treesitter_js": False,
-    "experimental_treesitter_kotlin": False,
+    "experimental_treesitter": False,
     "treesitter_indexer_bin_dir": str(
         Path(__file__).resolve().parent.parent.parent / "treesitter-indexer" / "bin"
     ),
@@ -57,11 +53,7 @@ class Config:
     repo_size_check: str = _DEFAULTS["repo_size_check"]
     allow_xlarge: bool = _DEFAULTS["allow_xlarge"]
     indexer_bin_dir: str = _DEFAULTS["indexer_bin_dir"]
-    experimental_treesitter_java: bool = _DEFAULTS["experimental_treesitter_java"]
-    experimental_treesitter_python: bool = _DEFAULTS["experimental_treesitter_python"]
-    experimental_treesitter_php: bool = _DEFAULTS["experimental_treesitter_php"]
-    experimental_treesitter_js: bool = _DEFAULTS["experimental_treesitter_js"]
-    experimental_treesitter_kotlin: bool = _DEFAULTS["experimental_treesitter_kotlin"]
+    experimental_treesitter: bool = _DEFAULTS["experimental_treesitter"]
     treesitter_indexer_bin_dir: str = _DEFAULTS["treesitter_indexer_bin_dir"]
     agent_prompt: str = _DEFAULTS["agent_prompt"]
     build_script: str = _DEFAULTS["build_script"]

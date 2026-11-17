@@ -644,7 +644,7 @@ def _write_machine_manifest(
         "capabilities": plan.get("capabilities", []),
         "size_profile": plan.get("size_profile", "small"),
         # "kuzu" | "ladybug" -- which graph DB engine produced kuzu_path,
-        # e.g. "ladybug" if --experimental-treesitter-java was used.
+        # e.g. "ladybug" if --experimental-treesitter was used.
         "indexer_backend": indexer_backend,
         "repo_metrics": {
             "loc": int((repo_metrics or {}).get("total_loc", 0) or 0),

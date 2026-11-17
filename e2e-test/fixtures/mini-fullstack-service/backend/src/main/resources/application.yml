@@ -1,0 +1,22 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: mini-spring-app
+  datasource:
+    url: jdbc:postgresql://localhost/inventory
+    username: admin
+
+inventory:
+  default-page-size: 20
+  allowed-warehouses:
+    - WH1
+    - WH2
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+server:
+  port: 9090

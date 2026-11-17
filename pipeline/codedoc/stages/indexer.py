@@ -17,65 +17,27 @@ from codedoc.repo_classification import classify_repo
 from codedoc.state import PipelineState
 
 
-def should_use_treesitter_java(state: PipelineState, ordered_languages: list[str]) -> bool:
-    """Whether to dispatch to the experimental cmg-java-ts instead of cmg-java.
+def treesitter_languages(ordered_languages: list[str], language_flavors: list[str] | None) -> list[str]:
+    """Map the repo's detected language categories to the tree-sitter engine's
+    language keys (``treesitter-indexer/languages.py``), preserving order.
 
-    Only used for single-language, Kotlin-free JVM repos -- it doesn't
-    understand Kotlin syntax, and using it alongside another language's
-    cmg-* writer in the same DB would hit an unresolved CALLS-schema
-    conflict (kuzu's `resolved BOOLEAN` vs this engine's
-    `confidence DOUBLE, reason STRING`). Callers fall back to cmg-java
-    (silently, with a log line) when this returns False.
+    The pipeline's ``"jvm"`` category covers both Java and Kotlin; the two are
+    told apart by ``language_flavors``. A JVM slice with neither flavor
+    recorded is treated as Java. A mixed Java+Kotlin slice yields both keys:
+    the engine merges languages in memory, so they no longer need to be
+    exclusive.
     """
-    return (
-        state.experimental_treesitter_java
-        and ordered_languages == ["jvm"]
-        and "kotlin" not in (state.language_flavors or [])
-    )
-
-
-def should_use_treesitter_python(state: PipelineState, ordered_languages: list[str]) -> bool:
-    """Whether to dispatch to the experimental cmg-python-ts instead of
-    cmg-python. Only used for single-language Python repos -- polyglot repos
-    still use cmg-python, same rationale as should_use_treesitter_java (no
-    sibling-flavor conflict to guard against here, since Python has no
-    Kotlin-equivalent second flavor sharing its language category).
-    """
-    return state.experimental_treesitter_python and ordered_languages == ["python"]
-
-
-def should_use_treesitter_php(state: PipelineState, ordered_languages: list[str]) -> bool:
-    """Whether to dispatch to the experimental cmg-php-ts instead of
-    cmg-php. Only used for single-language PHP repos, same rationale as
-    should_use_treesitter_python.
-    """
-    return state.experimental_treesitter_php and ordered_languages == ["php"]
-
-
-def should_use_treesitter_js(state: PipelineState, ordered_languages: list[str]) -> bool:
-    """Whether to dispatch to the experimental cmg-js-ts instead of
-    cmg-js. Only used for single-language-category JS/TS/JSX/TSX repos,
-    same rationale as should_use_treesitter_php.
-    """
-    return state.experimental_treesitter_js and ordered_languages == ["js"]
-
-
-def should_use_treesitter_kotlin(state: PipelineState, ordered_languages: list[str]) -> bool:
-    """Whether to dispatch to the experimental cmg-kotlin-ts instead of
-    cmg-java (which handles Kotlin internally today). Mirror image of
-    should_use_treesitter_java: only Kotlin-ONLY jvm-category repos (no
-    .java files mixed in), because kotlin/extractor.py only understands
-    Kotlin syntax, exactly why the Java increment excludes Kotlin-
-    containing repos. A mixed Java+Kotlin repo falls back to cmg-java for
-    its entire jvm category either way -- this increment does not attempt
-    mixed-language JVM repos.
-    """
-    return (
-        state.experimental_treesitter_kotlin
-        and ordered_languages == ["jvm"]
-        and "kotlin" in (state.language_flavors or [])
-        and "java" not in (state.language_flavors or [])
-    )
+    flavors = language_flavors or []
+    keys: list[str] = []
+    for category in ordered_languages:
+        if category == "jvm":
+            if "java" in flavors or "kotlin" not in flavors:
+                keys.append("java")
+            if "kotlin" in flavors:
+                keys.append("kotlin")
+        else:
+            keys.append(category)  # "python", "php", "js" match the engine's keys
+    return keys
 
 
 def detect_languages(repo_path: str) -> dict[str, int]:
@@ -152,97 +114,44 @@ def run_indexer(state: PipelineState) -> PipelineState:
     kuzu_dir = Path(state.output_dir).resolve() / "index.kuzu"
     kuzu_dir.mkdir(parents=True, exist_ok=True)
 
-    use_treesitter_java = should_use_treesitter_java(state, ordered_languages)
-    if state.experimental_treesitter_java and not use_treesitter_java:
-        state.log(
-            stage,
-            "--experimental-treesitter-java requested but this repo is polyglot or has Kotlin "
-            "files; falling back to cmg-java for compatibility.",
-        )
-    if use_treesitter_java:
+    use_treesitter = state.experimental_treesitter
+    if use_treesitter:
         state.graph_backend = "ladybug"
-        state.log(stage, "Using experimental tree-sitter Java indexer (cmg-java-ts)")
+        state.log(stage, "Using experimental tree-sitter indexer (cmg-ts)")
 
-    use_treesitter_python = should_use_treesitter_python(state, ordered_languages)
-    if state.experimental_treesitter_python and not use_treesitter_python:
-        state.log(
-            stage,
-            "--experimental-treesitter-python requested but this repo is polyglot; "
-            "falling back to cmg-python for compatibility.",
-        )
-    if use_treesitter_python:
-        state.graph_backend = "ladybug"
-        state.log(stage, "Using experimental tree-sitter Python indexer (cmg-python-ts)")
-
-    use_treesitter_php = should_use_treesitter_php(state, ordered_languages)
-    if state.experimental_treesitter_php and not use_treesitter_php:
-        state.log(
-            stage,
-            "--experimental-treesitter-php requested but this repo is polyglot; "
-            "falling back to cmg-php for compatibility.",
-        )
-    if use_treesitter_php:
-        state.graph_backend = "ladybug"
-        state.log(stage, "Using experimental tree-sitter PHP indexer (cmg-php-ts)")
-
-    use_treesitter_js = should_use_treesitter_js(state, ordered_languages)
-    if state.experimental_treesitter_js and not use_treesitter_js:
-        state.log(
-            stage,
-            "--experimental-treesitter-js requested but this repo is polyglot; "
-            "falling back to cmg-js for compatibility.",
-        )
-    if use_treesitter_js:
-        state.graph_backend = "ladybug"
-        state.log(stage, "Using experimental tree-sitter JS indexer (cmg-js-ts)")
-
-    use_treesitter_kotlin = should_use_treesitter_kotlin(state, ordered_languages)
-    if state.experimental_treesitter_kotlin and not use_treesitter_kotlin:
-        state.log(
-            stage,
-            "--experimental-treesitter-kotlin requested but this repo is polyglot, has no "
-            "Kotlin files, or mixes Java and Kotlin; falling back to cmg-java for compatibility.",
-        )
-    if use_treesitter_kotlin:
-        state.graph_backend = "ladybug"
-        state.log(stage, "Using experimental tree-sitter Kotlin indexer (cmg-kotlin-ts)")
+    # One job per binary invocation: the tree-sitter engine indexes every
+    # detected language in a single cmg-ts run (it merges them in memory), the
+    # legacy engine runs one cmg-* binary per language category.
+    jobs: list[tuple[list[str], str, Path, list[str]]] = []  # (displays, binary_name, binary, extra_args)
+    if use_treesitter:
+        ts_languages = treesitter_languages(ordered_languages, state.language_flavors)
+        displays = [LANGUAGE_CATEGORY_BY_KEY[lang].display_name for lang in ordered_languages]
+        jobs.append((displays, "cmg-ts", Path(state.treesitter_indexer_bin_dir) / "cmg-ts",
+                     ["--languages", ",".join(ts_languages)]))
+    else:
+        for language in ordered_languages:
+            definition = LANGUAGE_CATEGORY_BY_KEY[language]
+            jobs.append(([definition.display_name], definition.binary_name,
+                         Path(state.indexer_bin_dir) / definition.binary_name,
+                         ["--language", definition.cli_language] if definition.cli_language else []))
 
     _log.start_indexer_progress([LANGUAGE_CATEGORY_BY_KEY[lang].display_name for lang in ordered_languages])
     try:
-        for language in ordered_languages:
-            definition = LANGUAGE_CATEGORY_BY_KEY[language]
-            use_treesitter_for_language = (
-                (use_treesitter_java and language == "jvm")
-                or (use_treesitter_python and language == "python")
-                or (use_treesitter_php and language == "php")
-                or (use_treesitter_js and language == "js")
-                or (use_treesitter_kotlin and language == "jvm")
-            )
-            if use_treesitter_for_language:
-                if language == "jvm":
-                    binary_name = "cmg-kotlin-ts" if use_treesitter_kotlin else "cmg-java-ts"
-                else:
-                    binary_name = {"python": "cmg-python-ts", "php": "cmg-php-ts", "js": "cmg-js-ts"}[language]
-                binary = Path(state.treesitter_indexer_bin_dir) / binary_name
-                cli_language = None
-            else:
-                binary_name = definition.binary_name
-                binary = Path(state.indexer_bin_dir) / binary_name
-                cli_language = definition.cli_language
+        for displays, binary_name, binary, extra_args in jobs:
+            display = ", ".join(displays)
             if not binary.exists():
                 hint = (
                     "Run treesitter-indexer/install.sh or check your treesitter_indexer_bin_dir setting."
-                    if use_treesitter_for_language
+                    if use_treesitter
                     else "Run the install script or check your indexer_bin_dir setting."
                 )
                 raise FileNotFoundError(f"Indexer binary not found: {binary}\n{hint}")
 
-            display = definition.display_name
-            _log.update_indexer_progress(display, "running")
+            for name in displays:
+                _log.update_indexer_progress(name, "running")
             state.log(stage, f"Running {binary_name} for {display} → {kuzu_dir}/{effective_repo_name}-db")
             cmd = [str(binary), str(repo), _DB_FLAG, str(kuzu_dir), "--repo-name", effective_repo_name]
-            if cli_language:
-                cmd.extend(["--language", cli_language])
+            cmd.extend(extra_args)
             try:
                 proc = subprocess.run(
                     cmd,
@@ -251,7 +160,8 @@ def run_indexer(state: PipelineState) -> PipelineState:
                     timeout=state.timeout,
                 )
             except subprocess.TimeoutExpired:
-                _log.update_indexer_progress(display, "failed")
+                for name in displays:
+                    _log.update_indexer_progress(name, "failed")
                 raise TimeoutError(
                     f"{binary_name} timed out after {state.timeout}s. "
                     "Try increasing --timeout or indexing a smaller repo."
@@ -264,7 +174,8 @@ def run_indexer(state: PipelineState) -> PipelineState:
                     state.log(stage, f"{binary_name} stderr:\n{proc.stderr}")
 
             if proc.returncode != 0:
-                _log.update_indexer_progress(display, "failed")
+                for name in displays:
+                    _log.update_indexer_progress(name, "failed")
                 hint = (
                     "\nProcess was killed (SIGKILL) — likely out of memory. "
                     "Increase Docker Desktop memory to at least 8 GB (Settings → Resources → Memory)."
@@ -274,7 +185,8 @@ def run_indexer(state: PipelineState) -> PipelineState:
                     f"{binary_name} exited with code {proc.returncode}.{hint}\n{_stderr_excerpt(proc.stderr)}"
                 )
 
-            _log.update_indexer_progress(display, "done")
+            for name in displays:
+                _log.update_indexer_progress(name, "done")
     finally:
         _log.stop_indexer_progress()
 

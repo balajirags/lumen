@@ -58,25 +58,10 @@ def common_pipeline_options(f):
 @main.command()
 @click.argument("repo_path", type=click.Path(exists=True, file_okay=False))
 @common_pipeline_options
-@click.option("--experimental-treesitter-java", is_flag=True, default=False,
-              help="Use the experimental tree-sitter Java indexer prototype (treesitter-indexer/) "
-                   "instead of cmg-java. Only applies to Java/Kotlin-only repos with no Kotlin "
-                   "files (falls back to cmg-java otherwise); off by default.")
-@click.option("--experimental-treesitter-python", is_flag=True, default=False,
-              help="Use the experimental tree-sitter Python indexer prototype (treesitter-indexer/) "
-                   "instead of cmg-python. Only applies to Python-only repos (falls back to "
-                   "cmg-python for polyglot repos); off by default.")
-@click.option("--experimental-treesitter-php", is_flag=True, default=False,
-              help="Use the experimental tree-sitter PHP indexer prototype (treesitter-indexer/) "
-                   "instead of the stable cmg-php. Single-language PHP repos only.")
-@click.option("--experimental-treesitter-js", is_flag=True, default=False,
-              help="Use the experimental tree-sitter JS/TS/React indexer prototype "
-                   "(treesitter-indexer/) instead of the stable cmg-js. "
-                   "Single-language-category JS/TS repos only.")
-@click.option("--experimental-treesitter-kotlin", is_flag=True, default=False,
-              help="Use the experimental tree-sitter Kotlin indexer prototype "
-                   "(treesitter-indexer/) instead of cmg-java's built-in Kotlin support. "
-                   "Kotlin-only jvm-category repos only (no .java files mixed in).")
+@click.option("--experimental-treesitter", is_flag=True, default=False,
+              help="Use the experimental tree-sitter indexer (treesitter-indexer/) for every "
+                   "detected language (Java, Kotlin, Python, PHP, JS/TS) in a single run instead "
+                   "of the stable per-language cmg-* indexers; off by default.")
 def run(
     repo_path: str,
     output_dir: str | None,
@@ -90,11 +75,7 @@ def run(
     allow_xlarge: bool,
     ollama_num_ctx: int | None,
     verbose: bool,
-    experimental_treesitter_java: bool,
-    experimental_treesitter_python: bool,
-    experimental_treesitter_php: bool,
-    experimental_treesitter_js: bool,
-    experimental_treesitter_kotlin: bool,
+    experimental_treesitter: bool,
 ) -> None:
     """Run the full pipeline: index → agent → build.
 
@@ -111,11 +92,7 @@ def run(
         "allow_xlarge": allow_xlarge or None,
         "ollama_num_ctx": ollama_num_ctx,
         "verbose": verbose or None,
-        "experimental_treesitter_java": experimental_treesitter_java or None,
-        "experimental_treesitter_python": experimental_treesitter_python or None,
-        "experimental_treesitter_php": experimental_treesitter_php or None,
-        "experimental_treesitter_js": experimental_treesitter_js or None,
-        "experimental_treesitter_kotlin": experimental_treesitter_kotlin or None,
+        "experimental_treesitter": experimental_treesitter or None,
     })
 
     state = run_pipeline(
@@ -135,11 +112,7 @@ def run(
         max_turns_explicit=cfg.max_turns_explicit,
         verbose=cfg.verbose,
         indexer_bin_dir=cfg.indexer_bin_dir,
-        experimental_treesitter_java=cfg.experimental_treesitter_java,
-        experimental_treesitter_python=cfg.experimental_treesitter_python,
-        experimental_treesitter_php=cfg.experimental_treesitter_php,
-        experimental_treesitter_js=cfg.experimental_treesitter_js,
-        experimental_treesitter_kotlin=cfg.experimental_treesitter_kotlin,
+        experimental_treesitter=cfg.experimental_treesitter,
         treesitter_indexer_bin_dir=cfg.treesitter_indexer_bin_dir,
         agent_prompt=cfg.agent_prompt,
         build_script=cfg.build_script,
