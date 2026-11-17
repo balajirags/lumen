@@ -176,7 +176,7 @@ incrementally building a replacement engine in `treesitter-indexer/`: a single P
 tree-sitter codebase covering the same five languages (Java, Python, PHP, JS/TS/React, Kotlin)
 and writing to LadybugDB, KuzuDB's actively maintained fork. All five language increments are
 now complete, but the new engine is still **opt-in and off by default** — `lumen run` uses the
-stable `indexer/` engine unless you explicitly ask for the new one, one language at a time:
+stable `indexer/` engine unless you explicitly ask for the new one:
 
 ```bash
 cd treesitter-indexer && ./install.sh    # one-time setup, requires uv
@@ -189,7 +189,19 @@ cd pipeline && uv run lumen run /path/to/repo \
 One flag switches the whole run to the tree-sitter engine. Every detected language (Java,
 Kotlin, Python, PHP, JS/TS) is extracted, merged in memory, and written to one LadybugDB graph, so
 polyglot and fullstack repos are supported (including mixed Java+Kotlin). Without the flag the
-stable engine is used unchanged. See `CLAUDE.md`'s "Sub-project: treesitter-indexer/" section and
+stable engine is used unchanged. The run writes `index.kuzu/<repo>-db` as before, but with the flag
+the file is a LadybugDB database; the rest of the pipeline detects which engine wrote it
+automatically.
+
+Known limitations:
+- Workflows are traced per language; there are no cross-language call edges yet (e.g. a React
+  component calling a Spring endpoint is not linked), so a fullstack repo gets a Workflow set per
+  language rather than end-to-end traces.
+- Python code in a subdirectory whose modules import each other as top-level modules loses CALLS
+  edges (`backlog/treesitter-python-subdirectory-imports.md`).
+
+To run the engine's tests: `cd treesitter-indexer && .venv/bin/python3 -m unittest discover -s tests`.
+See `CLAUDE.md`'s "Sub-project: treesitter-indexer/" section and
 `backlog/treesitter-indexer-remaining-languages.md` for full implementation detail.
 
 ## Getting Started

@@ -441,7 +441,17 @@ language increments (Java, Python, PHP, JS/TS/React, Kotlin) are complete** — 
 design docs, plans, and bug-by-bug history are in
 `backlog/treesitter-indexer-remaining-languages.md` and `docs/superpowers/specs/` /
 `docs/superpowers/plans/` (one `{design,plan}` pair per language); this section is a summary,
-not a replacement for that detail.
+not a replacement for that detail. The follow-on unified switch (one flag, in-memory multi-language
+merge) is recorded in `backlog/treesitter-indexer-unified-switch.md`.
+
+Known limitations of the multi-language run:
+- No cross-language CALLS edges exist (no extractor emits them), so Workflows are traced per
+  language; a frontend call into a backend endpoint is not linked.
+- Ids carry no language prefix. Placeholders (`class:external:*`, `package:*`,
+  `annotationtype:*`) dedupe on purpose; any other cross-language id collision keeps the first
+  writer and logs a warning from `parse_all.py` instead of failing.
+- The Python extractor loses CALLS edges for code in a subdirectory
+  (`backlog/treesitter-python-subdirectory-imports.md`).
 
 Key files:
 - `treesitter-indexer/graph_store.py` — the single cross-language LadybugDB schema (all node/rel
