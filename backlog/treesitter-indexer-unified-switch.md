@@ -5,8 +5,9 @@ flag that *replaced* the five per-language flags. See `treesitter-indexer/parse_
 `languages.py`, `Graph.merge()`, the `n.language` filter in `postprocess/workflow_builder.py`, and
 `pipeline/codedoc/stages/indexer.py` (`treesitter_languages`). Verified on
 `e2e-test/fixtures/mini-fullstack-service` (Java+Python+JS) and a combined Java+Kotlin tree.
-Not done from the original breakdown: a separate `compare_graphs_fullstack.py` script (the same
-checks live in `treesitter-indexer/tests/test_polyglot_postprocess.py`). Follow-ups:
+Deviation from the original breakdown: no separate `compare_graphs_fullstack.py` script (the same
+checks live in `treesitter-indexer/tests/test_polyglot_postprocess.py`). Design spec:
+`docs/superpowers/specs/2026-11-19-treesitter-unified-switch-design.md`. Follow-ups:
 `backlog/treesitter-python-subdirectory-imports.md`, `backlog/old-engine-cmg-java-clears-db.md`.
 The original analysis below is kept for history.
 
@@ -141,22 +142,21 @@ with the user before writing a design spec, not a locked-in answer.
   doesn't change that; confirm it stays an explicit, documented fallback-to-`cmg-java` case
   rather than a silent gap.
 
-## Rough task breakdown (approach-agnostic until A/B is decided)
+## Rough task breakdown
 
-- [ ] Get explicit user decision: approach A or B, and flag-replace-vs-alongside
-- [ ] `/plan` the chosen approach (this is architectural-path work per the repo's brainstorming
-      convention — needs a design spec in `docs/superpowers/specs/`, not a direct patch)
-- [ ] Fix `build_<language>_workflows()` language-scoping (needed by both approaches)
-- [ ] Fix `detect_domains()` to run exactly once per overall run, not once per language (needed
-      by both approaches)
-- [ ] Implement the chosen approach's orchestration (deferred-postprocess CLI flags for A, or a
-      merge-capable orchestrator + `GraphModel.merge()` for B)
-- [ ] Build a new polyglot fixture (e.g. `mini-fullstack-service/` combining at least two
-      languages) — the first one in this engine's history; none exists today
-- [ ] New `compare_graphs_fullstack.py`-equivalent or extend an existing one to assert
-      per-language Domain/Workflow counts are correct and non-duplicated post-merge
-- [ ] Wire the new flag(s) into `cli.py` and `should_use_treesitter_*` (or their replacement)
-- [ ] Update `CLAUDE.md`/`README.md` once shipped (standing rule — see memory)
+- [x] Get explicit user decision: approach B, flag replaces the five per-language flags
+- [x] `/plan` the chosen approach; design spec in
+      `docs/superpowers/specs/2026-11-19-treesitter-unified-switch-design.md`
+- [x] Fix `build_<language>_workflows()` language-scoping (`n.language` filter via `_load_callables`)
+- [x] Fix `detect_domains()` to run exactly once per overall run (`parse_all.py`)
+- [x] Implement the orchestration (`parse_all.py` + `languages.py` + `Graph.merge()`/`stamp_language()`)
+- [x] Build a polyglot fixture (`e2e-test/fixtures/mini-fullstack-service`: Java + Python + JS)
+- [x] Assert per-language Domain/Workflow counts post-merge — done as
+      `treesitter-indexer/tests/test_polyglot_postprocess.py` rather than a separate
+      `compare_graphs_fullstack.py` script
+- [x] Wire the flag into `cli.py` and the indexer dispatch (`treesitter_languages`; the five
+      `should_use_treesitter_*` gates were removed)
+- [x] Update `CLAUDE.md`/`README.md`
 
 ## Related old-engine finding (separate, not part of this item's scope)
 

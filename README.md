@@ -200,6 +200,9 @@ Known limitations:
 - Python code in a subdirectory whose modules import each other as top-level modules loses CALLS
   edges (`backlog/treesitter-python-subdirectory-imports.md`).
 
+The flag is available from source only (`make lumen-run` / `uv run lumen run`). The Docker image
+and the native bundle do not include `treesitter-indexer/`, so the flag will not work there yet.
+
 To run the engine's tests: `cd treesitter-indexer && .venv/bin/python3 -m unittest discover -s tests`.
 See `CLAUDE.md`'s "Sub-project: treesitter-indexer/" section and
 `backlog/treesitter-indexer-remaining-languages.md` for full implementation detail.
@@ -346,6 +349,54 @@ uv run lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
 uv run lumen run /path/to/repo --provider ollama --model qwen2.5:32b --base-url http://127.0.0.1:11434/v1
 uv run lumen run /path/to/repo --provider openai --model gpt-4o
 ```
+
+#### Regular mode vs. tree-sitter mode
+
+`lumen run` has two indexer engines. They differ only in how the repo is indexed; everything
+after indexing (agent, artifacts, doc-site) is identical.
+
+| | Regular mode (default) | Tree-sitter mode (experimental) |
+|---|---|---|
+| Flag | none | `--experimental-treesitter` |
+| Indexer | `indexer/` (Java fat JAR, Babel, Python AST, PHP parsers) | `treesitter-indexer/` (one Python + tree-sitter engine) |
+| Graph database | KuzuDB | LadybugDB |
+| Setup | `make lumen-install` | `make lumen-install`, then `cd treesitter-indexer && ./install.sh` |
+| Languages | Java, Kotlin, JS/TS, Python, PHP | Java, Kotlin, JS/TS, Python, PHP |
+| Polyglot repos | Each language indexed in turn | All languages merged into one graph in a single run |
+| Docker / native bundle | Supported | Not supported — run from source only |
+
+Regular mode:
+
+```bash
+make lumen-run REPO=/path/to/repo ARGS='--provider anthropic --model claude-sonnet-4-6'
+# or directly:
+cd pipeline && uv run lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6
+```
+
+Tree-sitter mode — run `make lumen-install` once (as for regular mode), install the tree-sitter
+engine once, then add the flag:
+
+```bash
+cd treesitter-indexer && ./install.sh      # requires uv; builds .venv and bin/cmg-ts
+cd .. && make lumen-run REPO=/path/to/repo \
+  ARGS='--provider anthropic --model claude-sonnet-4-6 --experimental-treesitter'
+# or directly:
+cd pipeline && uv run lumen run /path/to/repo --provider anthropic --model claude-sonnet-4-6 \
+  --experimental-treesitter
+```
+
+Notes:
+- The flag works from source only (`make lumen-run` / `uv run lumen run`). It does not work with
+  `make lumen-docker-run` or the native bundle, which do not include `treesitter-indexer/`.
+- Python code that lives in a subdirectory (e.g. `backend/`) may get a thinner call graph and
+  fewer Python workflows; see the known limitations in the experimental section below.
+
+If `treesitter-indexer/install.sh` has not been run, the flag fails fast with a message pointing
+at it. You can confirm which engine ran from `graph_backend` in `pipeline.json` in the output directory
+(`ladybug` for tree-sitter mode, `kuzu` for regular mode), or by the
+`[indexer] Using experimental tree-sitter indexer (cmg-ts)` line in the log. See
+[Experimental: tree-sitter indexer engine](#experimental-tree-sitter-indexer-engine) for
+limitations.
 
 #### Security-audit pipeline
 
